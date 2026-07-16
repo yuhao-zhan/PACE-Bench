@@ -1,0 +1,182 @@
+import math
+
+def build_truss(sandbox, start_x, end_x, top_y, bottom_y, num_panels, deck_density=50.0, truss_density=20.0, joint_type='rigid'):
+    gap_width = end_x - start_x
+    panel_width = gap_width / num_panels
+    deck_height = 0.4
+    deck_beams = []
+    for i in range(num_panels):
+        cx = start_x + (i + 0.5) * panel_width
+        b = sandbox.add_beam(x=cx, y=top_y, width=panel_width+0.01, height=deck_height, density=deck_density)
+        deck_beams.append(b)
+    bottom_beams = []
+    for i in range(num_panels):
+        cx = start_x + (i + 0.5) * panel_width
+        b = sandbox.add_beam(x=cx, y=bottom_y, width=panel_width+0.01, height=0.3, density=truss_density)
+        bottom_beams.append(b)
+    v_beams = []
+    for i in range(num_panels + 1):
+        x = start_x + i * panel_width
+        b = sandbox.add_beam(x=x, y=(top_y+bottom_y)/2, width=0.3, height=abs(top_y-bottom_y), density=truss_density)
+        v_beams.append(b)
+    diag_beams = []
+    for i in range(num_panels):
+        x1, y1 = start_x + i * panel_width, bottom_y
+        x2, y2 = start_x + (i+1) * panel_width, top_y
+        cx, cy = (x1+x2)/2, (y1+y2)/2
+        dist = math.sqrt((x2-x1)**2 + (y2-y1)**2)
+        angle = math.atan2(y2-y1, x2-x1)
+        b = sandbox.add_beam(x=cx, y=cy, width=dist+0.1, height=0.3, angle=angle, density=truss_density)
+        diag_beams.append(b)
+    for i in range(num_panels + 1):
+        nx = start_x + i * panel_width
+        node_pos = (nx, top_y)
+        master = v_beams[i]
+        if i > 0: sandbox.add_joint(master, deck_beams[i-1], node_pos, type='rigid')
+        if i < num_panels: sandbox.add_joint(master, deck_beams[i], node_pos, type='rigid')
+        if i > 0: sandbox.add_joint(master, diag_beams[i-1], node_pos, type=joint_type)
+    for i in range(num_panels + 1):
+        nx = start_x + i * panel_width
+        node_pos = (nx, bottom_y)
+        master = v_beams[i]
+        if i > 0: sandbox.add_joint(master, bottom_beams[i-1], node_pos, type=joint_type)
+        if i < num_panels: sandbox.add_joint(master, bottom_beams[i], node_pos, type=joint_type)
+        if i < num_panels: sandbox.add_joint(master, diag_beams[i], node_pos, type=joint_type)
+    return deck_beams, bottom_beams, v_beams
+
+def build_agent(sandbox):
+    L_X, R_X = 10.0, 25.0
+    deck, bottom, v_beams = build_truss(sandbox, L_X, R_X, 10.0, 8.0, 6, deck_density=35.0, truss_density=15.0, joint_type='rigid')
+    sandbox.add_joint(v_beams[0], None, (L_X, 10.0), type='rigid')
+    sandbox.add_joint(v_beams[-1], None, (R_X, 10.0), type='rigid')
+    ext = sandbox.add_beam(x=R_X+2.5, y=10.0, width=5.0, height=0.4, density=30.0)
+    sandbox.add_joint(v_beams[-1], ext, (R_X, 10.0), type='rigid')
+    return deck[0]
+
+def agent_action(sandbox, agent_body, step_count):
+    pass
+
+def build_agent_stage_1(sandbox):
+    L_X, R_X = 10.0, 25.0
+    num_panels = 6
+    top_y = 9.8
+    bottom_y = 7.5
+    gap_width = R_X - L_X
+    panel_width = gap_width / num_panels
+    deck_beams = []
+    bottom_beams = []
+    v_beams = []
+    diag_beams = []
+    for i in range(num_panels):
+        cx = L_X + (i + 0.5) * panel_width
+        b = sandbox.add_beam(x=cx, y=top_y, width=panel_width+0.01, height=0.4, density=30.0)
+        deck_beams.append(b)
+        b_bottom = sandbox.add_beam(x=cx, y=bottom_y, width=panel_width+0.01, height=0.3, density=15.0)
+        bottom_beams.append(b_bottom)
+    for i in range(num_panels + 1):
+        x = L_X + i * panel_width
+        b_v = sandbox.add_beam(x=x, y=(top_y+bottom_y)/2, width=0.3, height=abs(top_y-bottom_y), density=15.0)
+        v_beams.append(b_v)
+    for i in range(num_panels):
+        x1, y1 = L_X + i * panel_width, bottom_y
+        x2, y2 = L_X + (i+1) * panel_width, top_y
+        cx, cy = (x1+x2)/2, (y1+y2)/2
+        dist = math.sqrt((x2-x1)**2 + (y2-y1)**2)
+        angle = math.atan2(y2-y1, x2-x1)
+        b_diag = sandbox.add_beam(x=cx, y=cy, width=dist+0.1, height=0.3, angle=angle, density=15.0)
+        diag_beams.append(b_diag)
+    for i in range(num_panels + 1):
+        nx = L_X + i * panel_width
+        node_pos_top = (nx, top_y)
+        node_pos_bottom = (nx, bottom_y)
+        master_v = v_beams[i]
+        if i > 0: sandbox.add_joint(master_v, deck_beams[i-1], node_pos_top, type='pivot')
+        if i < num_panels: sandbox.add_joint(master_v, deck_beams[i], node_pos_top, type='pivot')
+        if i > 0: sandbox.add_joint(master_v, diag_beams[i-1], node_pos_top, type='pivot')
+        if i > 0: sandbox.add_joint(master_v, bottom_beams[i-1], node_pos_bottom, type='pivot')
+        if i < num_panels: sandbox.add_joint(master_v, bottom_beams[i], node_pos_bottom, type='pivot')
+        if i < num_panels: sandbox.add_joint(master_v, diag_beams[i], node_pos_bottom, type='pivot')
+    sandbox.add_joint(v_beams[0], None, (L_X, top_y), type='pivot')
+    sandbox.add_joint(v_beams[0], None, (L_X, bottom_y), type='pivot')
+    sandbox.add_joint(v_beams[-1], None, (R_X, top_y), type='pivot')
+    sandbox.add_joint(v_beams[-1], None, (R_X, bottom_y), type='pivot')
+    ext = sandbox.add_beam(x=R_X+2.5, y=top_y, width=5.0, height=0.4, density=30.0)
+    sandbox.add_joint(v_beams[-1], ext, (R_X, top_y), type='pivot')
+    dist2 = math.sqrt((5.0)**2 + (top_y-bottom_y)**2)
+    angle2 = math.atan2(top_y-bottom_y, 5.0)
+    ext_diag = sandbox.add_beam(x=R_X+2.5, y=(top_y+bottom_y)/2, width=dist2, height=0.3, angle=angle2, density=15.0)
+    sandbox.add_joint(ext, ext_diag, (R_X+5.0, top_y), type='pivot')
+    sandbox.add_joint(v_beams[-1], ext_diag, (R_X, bottom_y), type='pivot')
+    return deck_beams[0]
+
+def build_agent_stage_2(sandbox):
+    L_X, R_X = 10.0, 25.0
+    deck_y = 10.0
+    bottom_y = 7.0
+    deck, bottom, v_beams = build_truss(
+        sandbox, L_X, R_X, deck_y, bottom_y, 12,
+        deck_density=35.0, truss_density=15.0, joint_type='rigid',
+    )
+    sandbox.add_joint(v_beams[0], None, (L_X, deck_y), type='rigid')
+    sandbox.add_joint(v_beams[-1], None, (R_X, deck_y), type='rigid')
+    ext = sandbox.add_beam(x=R_X + 2.5, y=deck_y, width=5.0, height=0.4,
+                           density=30.0)
+    sandbox.add_joint(v_beams[-1], ext, (R_X, deck_y), type='rigid')
+    return deck[0]
+
+def build_agent_stage_3(sandbox):
+    L_X, R_X = 10.0, 32.0
+    num_panels = 16
+    top_y = 9.8
+    bottom_y = 5.2
+    deck, bottom, v_beams = build_truss(sandbox, L_X, R_X, top_y, bottom_y, num_panels, deck_density=28.0, truss_density=10.0, joint_type='rigid')
+    panel_width = (R_X - L_X) / num_panels
+    for i in range(num_panels):
+        x1, y1 = L_X + i * panel_width, top_y
+        x2, y2 = L_X + (i+1) * panel_width, bottom_y
+        cx, cy = (x1+x2)/2, (y1+y2)/2
+        dist = math.sqrt((x2-x1)**2 + (y2-y1)**2)
+        angle = math.atan2(y2-y1, x2-x1)
+        b_x = sandbox.add_beam(x=cx, y=cy, width=dist+0.05, height=0.22, angle=angle, density=6.0)
+        sandbox.add_joint(v_beams[i], b_x, (x1, y1), type='rigid')
+        sandbox.add_joint(v_beams[i+1], b_x, (x2, y2), type='rigid')
+    anchor_heights = [top_y, bottom_y]
+    step_h = (top_y - bottom_y) / 5
+    for j in range(1, 5):
+        anchor_heights.append(bottom_y + j * step_h)
+    for y in sorted(set(anchor_heights)):
+        sandbox.add_joint(v_beams[0], None, (L_X, y), type='pivot')
+        sandbox.add_joint(v_beams[-1], None, (R_X, y), type='pivot')
+    ext = sandbox.add_beam(x=R_X+2.5, y=top_y, width=5.0, height=0.4, density=26.0)
+    sandbox.add_joint(v_beams[-1], ext, (R_X, top_y), type='rigid')
+    ext_d_dist = math.sqrt(5.0**2 + (top_y-bottom_y)**2)
+    ext_d_angle = math.atan2(top_y-bottom_y, 5.0)
+    ext_diag = sandbox.add_beam(x=R_X+2.5, y=(top_y+bottom_y)/2, width=ext_d_dist+0.05, height=0.22, angle=ext_d_angle, density=6.0)
+    sandbox.add_joint(v_beams[-1], ext_diag, (R_X, bottom_y), type='rigid')
+    sandbox.add_joint(ext, ext_diag, (R_X+5.0, top_y), type='rigid')
+    return deck[0]
+
+def build_agent_stage_4(sandbox):
+    L_X, R_X = 10.0, 35.0
+    deck, bottom, v_beams = build_truss(sandbox, L_X, R_X, 10.0, 5.2, 16, deck_density=42.0, truss_density=17.0, joint_type='rigid')
+    for y in [10.0, 8.8, 7.6, 6.4, 5.2]:
+        sandbox.add_joint(v_beams[0], None, (L_X, y), type='rigid')
+        sandbox.add_joint(v_beams[-1], None, (R_X, y), type='rigid')
+    ext_width = 6.0
+    ext = sandbox.add_beam(x=R_X + ext_width/2, y=10.0, width=ext_width, height=0.4, density=35.0)
+    sandbox.add_joint(v_beams[-1], ext, (R_X, 10.0), type='rigid')
+    return deck[0]
+
+def agent_action_stage_1(sandbox, agent_body, step_count): pass
+
+def agent_action_stage_2(sandbox, agent_body, step_count): pass
+
+def agent_action_stage_3(sandbox, agent_body, step_count):
+    chassis = sandbox._terrain_bodies.get('vehicle_chassis')
+    if chassis and step_count > 100:
+        chassis.ApplyForceToCenter((8000.0, 0.0), True)
+
+def agent_action_stage_4(sandbox, agent_body, step_count):
+    chassis = sandbox._terrain_bodies.get('vehicle_chassis')
+    if chassis:
+        chassis.ApplyForceToCenter((15000.0, 0.0), True)

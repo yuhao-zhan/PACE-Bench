@@ -1,0 +1,127 @@
+from __future__ import annotations
+
+import re
+
+from typing import Any, Dict, List
+
+_DEFAULT_SLOT1_FLOOR, _DEFAULT_SLOT1_CEIL = 13.2, 14.7
+
+_DEFAULT_SLOT2_FLOOR, _DEFAULT_SLOT2_CEIL = 11.3, 13.3
+
+_DEFAULT_SLOT3_FLOOR, _DEFAULT_SLOT3_CEIL = 12.4, 14.2
+
+_DEFAULT_GRAVITY = (0, -14.0)
+
+def update_task_description_for_visible_changes(
+    base_description: str, target_terrain_config: Dict[str, Any], base_terrain_config: Dict[str, Any],
+    target_physics_config: Dict[str, Any] = None, base_physics_config: Dict[str, Any] = None,
+
+) -> str:
+    description = base_description
+    target = target_terrain_config or {}
+    base = base_terrain_config or {}
+    t_s1_f = target.get("slot1_floor", _DEFAULT_SLOT1_FLOOR)
+    t_s1_c = target.get("slot1_ceil", _DEFAULT_SLOT1_CEIL)
+    t_s2_f = target.get("slot2_floor", _DEFAULT_SLOT2_FLOOR)
+    t_s2_c = target.get("slot2_ceil", _DEFAULT_SLOT2_CEIL)
+    t_s3_f = target.get("slot3_floor", _DEFAULT_SLOT3_FLOOR)
+    t_s3_c = target.get("slot3_ceil", _DEFAULT_SLOT3_CEIL)
+    b_s1_f = base.get("slot1_floor", _DEFAULT_SLOT1_FLOOR)
+    b_s1_c = base.get("slot1_ceil", _DEFAULT_SLOT1_CEIL)
+    b_s2_f = base.get("slot2_floor", _DEFAULT_SLOT2_FLOOR)
+    b_s2_c = base.get("slot2_ceil", _DEFAULT_SLOT2_CEIL)
+    b_s3_f = base.get("slot3_floor", _DEFAULT_SLOT3_FLOOR)
+    b_s3_c = base.get("slot3_ceil", _DEFAULT_SLOT3_CEIL)
+    if (t_s1_f, t_s1_c) != (b_s1_f, b_s1_c) or (t_s2_f, t_s2_c) != (b_s2_f, b_s2_c) or (t_s3_f, t_s3_c) != (b_s3_f, b_s3_c):
+        slot1_pattern = r"(\*\*Slot 1\*\* \(x ≈ 17 m\): y in )\[(\d+\.?\d*), (\d+\.?\d*)\]([;.])"
+        if re.search(slot1_pattern, description):
+            description = re.sub(
+                slot1_pattern,
+                lambda m: f"{m.group(1)}[{t_s1_f:.1f}, {t_s1_c:.1f}] (originally [{b_s1_f:.1f}, {b_s1_c:.1f}] in the source environment){m.group(4)}",
+                description,
+            )
+        slot2_pattern = r"(\*\*Slot 2\*\* \(x ≈ 21 m\): y in )\[(\d+\.?\d*), (\d+\.?\d*)\]([;.])"
+        if re.search(slot2_pattern, description):
+            description = re.sub(
+                slot2_pattern,
+                lambda m: f"{m.group(1)}[{t_s2_f:.1f}, {t_s2_c:.1f}] (originally [{b_s2_f:.1f}, {b_s2_c:.1f}] in the source environment){m.group(4)}",
+                description,
+            )
+        slot3_pattern = r"(\*\*Slot 3\*\* \(x ≈ 19 m\): y in )\[(\d+\.?\d*), (\d+\.?\d*)\]([;.])"
+        if re.search(slot3_pattern, description):
+            description = re.sub(
+                slot3_pattern,
+                lambda m: f"{m.group(1)}[{t_s3_f:.1f}, {t_s3_c:.1f}] (originally [{b_s3_f:.1f}, {b_s3_c:.1f}] in the source environment){m.group(4)}",
+                description,
+            )
+    return description
+
+def update_success_criteria_for_visible_changes(
+    base_success_criteria: str, target_terrain_config: Dict[str, Any], base_terrain_config: Dict[str, Any]
+
+) -> str:
+    return base_success_criteria
+
+_D02_SUFFIX = """
+
+Sensors indicate that this region exhibits non-standard physical properties.
+While the following variables **MIGHT** have changed from the initial environment, **NOT ALL** of them will necessarily be mutated in any given task. You must use active interaction and environmental feedback to deduce which specific conditions apply:
+- **Gravity**: Gravitational properties may differ.
+- **Atmospheric Currents**: Wind properties may differ.
+- **Viscous Air Resistance**: Damping properties may differ.
+- **Structural Shifts**: Terrain geometry may differ.
+
+**Discovery via feedback**: You must identify the underlying physical rules of this specific environment through trial and reasoning.
+"""
+
+def get_d02_curriculum_stages() -> List[Dict[str, Any]]:
+    return [
+        {
+            "stage_id": "Stage-1",
+            "title": "Viscous Void",
+            "mutation_description": "The atmosphere has become significantly more viscous; the jumper will experience rapid velocity decay due to extreme air resistance.",
+            "task_description_suffix": _D02_SUFFIX,
+            "terrain_config": {},
+            "physics_config": {
+                "linear_damping": 2.0,
+            },
+        },
+        {
+            "stage_id": "Stage-2",
+            "title": "Abyssal Descent",
+            "mutation_description": "Seismic activity has drastically lowered the elevation of all barrier slots; a precisely controlled, low-altitude trajectory is now required.",
+            "task_description_suffix": _D02_SUFFIX,
+            "terrain_config": {
+                "slot1_floor": 8.0,
+                "slot1_ceil": 9.5,
+                "slot3_floor": 7.5,
+                "slot3_ceil": 9.0,
+                "slot2_floor": 7.0,
+                "slot2_ceil": 8.5,
+            },
+            "physics_config": {},
+        },
+        {
+            "stage_id": "Stage-3",
+            "title": "Gale-Force Gravity",
+            "mutation_description": "Extreme gravitational pull combined with a powerful headwind will rapidly deplete the jumper's momentum and force it toward the pit.",
+            "task_description_suffix": _D02_SUFFIX,
+            "terrain_config": {},
+            "physics_config": {
+                "gravity": (0, -35.0),
+                "wind": (-20.0, 0),
+            },
+        },
+        {
+            "stage_id": "Stage-4",
+            "title": "The Perfect Storm",
+            "mutation_description": "A combination of extreme gravity, fierce headwind, and significant air resistance creates a nearly impassable barrier.",
+            "task_description_suffix": _D02_SUFFIX,
+            "terrain_config": {},
+            "physics_config": {
+                "gravity": (0, -30.0),
+                "wind": (-15.0, 0),
+                "linear_damping": 1.0,
+            },
+        },
+    ]

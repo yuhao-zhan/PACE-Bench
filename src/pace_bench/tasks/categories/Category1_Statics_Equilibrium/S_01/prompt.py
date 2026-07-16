@@ -1,0 +1,57 @@
+import os
+
+import json
+
+import sys
+
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
+
+from pace_bench.tasks.primitives_api import API_INTRO
+
+with open(os.path.join(os.path.dirname(__file__), '..', '..', 'primitives_api.json'), 'r') as f:
+    _api_data = json.load(f)
+
+if 'S_01' in _api_data and 'API_INTRO' in _api_data['S_01']:
+    del _api_data['S_01']['API_INTRO']
+
+TASK_PROMPT = {
+    'task_description': """
+Design a static bridge to connect two cliffs. A vehicle will spawn on the left cliff and attempt to cross to the right.
+
+- **Cliffs**: Two static platforms separated by a wide gap.
+- **Left Cliff**: Ends at x=10.0m, y=10.0m.
+- **Right Cliff**: Starts at x=25.0m, y=10.0m.
+- **Vehicle**: A motorized vehicle (mass: 2000.0 kg) will spawn on the left cliff at x=5.0 m, y=10.5 m and move right at a constant velocity of 5.0 m/s. Vehicle footprint: wheelbase 3.0 m, chassis 2.0 m × 0.5 m, wheel radius 0.4 m.
+- **Fail Zone**: A water surface exists at y=0m. The task fails if the vehicle or any structural component reaches or goes below y=0.5 m. This is a hard constraint: no part of the structure or vehicle may descend to y ≤ 0.5 m at any time.
+- **Target**: The vehicle must fully cross the gap and reach at least x=30.0m on the right side.
+
+Design a stable bridge structure that can:
+1. Span the gap and connect the two cliffs.
+2. Support the dynamic load of the heavy vehicle as it crosses.
+3. Provide a continuous and smooth deck surface for the vehicle's wheels.
+4. Maintain structural integrity under load. Joints have strength limits; excessive force or torque will cause them to break.
+
+- **Mass Budget**: Total structure mass must be less than 2000 kg.
+- **Build Zone**: Structure must be built within x=[10, 30], y=[5, 15] (the upper x-bound is the target position so the deck can reach the goal).
+- **Beam Dimensions**: 0.1 <= width, height <= 10.0 meters.
+- **Joint Strength**: Maximum linear force for structural joints is 80.0; maximum torque is 300.0.
+- **Anchor Strength**: Maximum linear force for structural cliff anchors is 100.0; maximum torque is 500.0.
+- **Atmospheric Wind**: In some stages, constant lateral and/or vertical wind forces may act on all bodies — the uniform suffix warns of potential changes.
+- **Flip Condition**: The vehicle chassis must not tip beyond ±90° from vertical at any point. Exceeding this angle at any time results in immediate failure — the bridge design must keep the vehicle upright throughout the crossing.
+""",
+    'success_criteria': """
+
+1. **Passage**: Vehicle reaches x >= 30.0m.
+2. **Integrity**: No structural breaks (all joints must remain intact during the crossing).
+3. **Smoothness**: The vehicle's vertical acceleration must remain < 19.6 m/s² (2.0g).
+4. **Stability**: The vehicle's angular velocity must remain < 2.0 rad/s and net airborne rotation must not exceed 180 degrees. Stability is evaluated after simulation step 200; 5 consecutive steps with angular velocity ≥ 2.0 rad/s result in failure. The vehicle is considered **airborne** when its center is more than 0.5 m above the cliff top (y > 10.5 m); the 180° limit applies to rotation accumulated only while in that state.
+5. **No Flipping**: The vehicle must not tip beyond ± 90° from upright at any point during the simulation. Exceeding this angle at any time results in failure.
+
+- **Mass Budget**: < 2000 kg.
+- **Joint Strength**: Maximum linear force for structural joints is 80.0; maximum torque is 300.0.
+- **Anchor Strength**: Maximum linear force for structural cliff anchors is 100.0; maximum torque is 500.0.
+- **APIs**: Use only the primitives documented below.
+""",
+    'primitives_api': API_INTRO + '\n' + '\n\n'.join(_api_data['S_01'].values()),
+
+}
