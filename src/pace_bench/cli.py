@@ -8,6 +8,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from pace_bench import __version__
 from pace_bench.errors import ConfigurationError, PaceBenchError
 from pace_bench.evaluation.config import RunConfig
 from pace_bench.evaluation.results import aggregate, load_results
@@ -19,13 +20,15 @@ from pace_bench.types import EnvironmentId, RunMode
 
 
 def build_parser() -> argparse.ArgumentParser:
-    """Build the small public CLI: list, evaluate, validate, and report."""
+    """Build the public model, agent, validation, and reporting CLI."""
 
     parser = argparse.ArgumentParser(
         prog="pace-bench",
         description="Physics Adaptation via Code Evolution in Dynamic Environments",
     )
-    parser.add_argument("--version", action="version", version="%(prog)s 0.1.0")
+    parser.add_argument(
+        "--version", action="version", version=f"%(prog)s {__version__}"
+    )
     commands = parser.add_subparsers(dest="command", required=True)
 
     list_parser = commands.add_parser("list", help="List tasks and environments")
@@ -92,6 +95,56 @@ def build_parser() -> argparse.ArgumentParser:
     evaluate_parser.add_argument("--no-resume", action="store_true")
     evaluate_parser.add_argument("--dry-run", action="store_true")
     evaluate_parser.set_defaults(handler=_evaluate_command)
+
+    agent_parser = commands.add_parser(
+        "agent",
+        help="Evaluate Codex, Claude Code, or a custom agent in a black-box container",
+    )
+    agent_parser.add_argument("--task", required=True, help="One benchmark task ID")
+    agent_parser.add_argument(
+        "--env", required=True, help="Target environment, Stage-1 through Stage-4"
+    )
+    agent_parser.add_argument(
+        "--agent", choices=("codex", "claude", "custom"), required=True
+    )
+    agent_parser.add_argument(
+        "--model", default="unspecified", help="Agent model name for the run record"
+    )
+    agent_parser.add_argument("--attempts", type=int, default=20)
+    agent_parser.add_argument("--max-steps", type=int)
+    agent_parser.add_argument("--run-index", type=int, default=1)
+    agent_parser.add_argument("--overwrite", action="store_true")
+    agent_parser.add_argument("--seed", type=int, default=0)
+    agent_parser.add_argument("--output", type=Path, default=Path("outputs/agent"))
+    agent_parser.add_argument("--workspace", type=Path)
+    agent_parser.add_argument(
+        "--prompt-file", type=Path, help="Replace the default agent instruction"
+    )
+    agent_parser.add_argument(
+        "--image", help="Custom agent image; the built-in image is used by default"
+    )
+    agent_parser.add_argument(
+        "--agent-command",
+        help="Command inside a custom image; supports {prompt_file}, {task_file}, {workspace}",
+    )
+    agent_parser.add_argument("--timeout-seconds", type=float, default=3600)
+    agent_parser.add_argument("--memory", default="4g")
+    agent_parser.add_argument("--cpus", type=float, default=2.0)
+    agent_parser.add_argument("--max-turns", type=int, default=200)
+    agent_parser.add_argument("--save-gif", action="store_true")
+    agent_parser.add_argument("--display", action="store_true")
+    agent_parser.add_argument("--rebuild-image", action="store_true")
+    agent_parser.add_argument("--codex-version", default="0.144.4")
+    agent_parser.add_argument("--claude-version", default="2.1.211")
+    agent_parser.add_argument(
+        "--custom-base-url",
+        help="Optional HTTPS model gateway for a custom agent",
+    )
+    agent_parser.add_argument(
+        "--custom-api-key-env",
+        help="Trusted-host environment variable injected at the custom gateway",
+    )
+    agent_parser.set_defaults(handler=_agent_command)
 
     validate_parser = commands.add_parser(
         "validate", help="Validate task contracts/references"
@@ -218,6 +271,102 @@ def _config_from_args(args: argparse.Namespace, mode: RunMode) -> RunConfig:
         resume=not args.no_resume,
         provider_options=options,
     )
+
+
+def _agent_command(args: argparse.Namespace) -> int:
+    """Run one coding agent without exposing the installed benchmark package."""
+
+    from pace_bench.agent import AgentSession, AgentSessionConfig, AgentSessionServer
+    from pace_bench.agent_container import AgentContainerConfig, run_agent_container
+
+    if args.prompt_file and not args.prompt_file.is_file():
+        raise ConfigurationError(f"Prompt file does not exist: {args.prompt_file}")
+    session = AgentSession(
+        AgentSessionConfig(
+            task=args.task,
+            target=EnvironmentId(args.env),
+            attempts=args.attempts,
+            max_steps=args.max_steps,
+            output=args.output,
+            agent=args.agent,
+            model=args.model,
+            headless=not args.display,
+            save_gif=args.save_gif,
+            seed=args.seed,
+            run_index=args.run_index,
+            prompt_file=args.prompt_file,
+            overwrite=args.overwrite,
+        )
+    )
+    workspace = args.workspace or (
+        session.result_file.parent / f"workspace-{int(session.started_at)}"
+    )
+    if workspace.exists() and any(workspace.iterdir()):
+        session.close()
+        raise ConfigurationError(
+            f"Agent workspace is not empty: {workspace}; choose --workspace elsewhere"
+        )
+    session.create_workspace(workspace)
+    session.record_runtime_metadata(workspace=str(workspace))
+    print(
+        f"AGENT {session.task.name}:{session.environment_pair} "
+        f"attempt0={session.attempts[0].score:.3f} budget={args.attempts}"
+    )
+    if session.complete:
+        print(
+            f"DONE success=True stop={session.stop_reason} result={session.result_file}"
+        )
+        session.close()
+        return 0
+
+    server = AgentSessionServer(session)
+    server.start()
+    try:
+        container_result = run_agent_container(
+            session,
+            server,
+            workspace,
+            AgentContainerConfig(
+                agent=args.agent,
+                model=args.model,
+                image=args.image,
+                command=args.agent_command,
+                timeout_seconds=args.timeout_seconds,
+                memory=args.memory,
+                cpus=args.cpus,
+                max_turns=args.max_turns,
+                rebuild_image=args.rebuild_image,
+                codex_version=args.codex_version,
+                claude_version=args.claude_version,
+                custom_base_url=args.custom_base_url,
+                custom_api_key_env=args.custom_api_key_env,
+            ),
+        )
+        reason = "agent_timeout" if container_result.timed_out else None
+        session.record_runtime_metadata(
+            container_image=container_result.image,
+            agent_log=str(container_result.log_path),
+            timed_out=container_result.timed_out,
+        )
+        session.finalize(
+            agent_exit_code=container_result.exit_code,
+            reason=reason,
+        )
+    except Exception:
+        session.finalize(agent_exit_code=None, reason="orchestration_error")
+        raise
+    finally:
+        server.close()
+        session.close()
+
+    status = session.public_status()
+    print(
+        f"DONE success={status['success']} best_score={status['best_score']:.3f} "
+        f"submissions={status['submitted']} stop={status['stop_reason']}"
+    )
+    print(f"Result: {session.result_file}")
+    print(f"Workspace and agent log: {workspace}")
+    return 1 if status["stop_reason"] in {"agent_error", "agent_timeout"} else 0
 
 
 def _validate_command(args: argparse.Namespace) -> int:

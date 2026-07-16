@@ -31,3 +31,7 @@ class VerificationError(PaceBenchError):
 
 class ResultSchemaError(PaceBenchError):
     """Raised when a result cannot be decoded or migrated."""
+
+
+class AgentRuntimeError(PaceBenchError):
+    """Raised when an isolated coding-agent evaluation cannot be orchestrated."""

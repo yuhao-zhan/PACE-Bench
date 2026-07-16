@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import builtins
 import importlib.util
 import math
 import os
@@ -10,6 +11,44 @@ import re
 
 _COMPLETE_FENCE = re.compile(r"```(?:python)?\s*\n?(.*?)```", re.DOTALL | re.IGNORECASE)
 _INCOMPLETE_FENCE = re.compile(r"```(?:python)?\s*\n?(.*)", re.DOTALL | re.IGNORECASE)
+_ALLOWED_IMPORTS = {"Box2D", "math", "random"}
+_PROHIBITED_CALLS = {
+    "breakpoint",
+    "compile",
+    "eval",
+    "exec",
+    "globals",
+    "help",
+    "input",
+    "locals",
+    "open",
+    "vars",
+    "__import__",
+}
+_PROHIBITED_NAMES = {
+    "__builtins__",
+    "__file__",
+    "__loader__",
+    "__package__",
+    "__spec__",
+}
+_PROHIBITED_ATTRIBUTES = {
+    "__bases__",
+    "__class__",
+    "__closure__",
+    "__code__",
+    "__dict__",
+    "__func__",
+    "__getattribute__",
+    "__globals__",
+    "__loader__",
+    "__module__",
+    "__mro__",
+    "__reduce__",
+    "__reduce_ex__",
+    "__self__",
+    "__subclasses__",
+}
 
 
 class ProhibitedOperationError(Exception):
@@ -179,6 +218,8 @@ class CodeSafetyMixin:
             # Let _execute_code handle syntax errors with more context
             return
 
+        self._check_python_runtime_access(tree)
+
         prohibited_attrs = {
             "linearVelocity",
             "angularVelocity",
@@ -284,6 +325,57 @@ class CodeSafetyMixin:
                             f"Prohibited operation detected: Direct modification of '{target.attr}' via augmented assignment is ONLY allowed for tools."
                         )
 
+    @staticmethod
+    def _check_python_runtime_access(tree) -> None:
+        """Prevent candidate code from turning feedback into a host-inspection API."""
+
+        import ast
+
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                modules = {alias.name.split(".", 1)[0] for alias in node.names}
+                denied = modules - _ALLOWED_IMPORTS
+                if denied:
+                    raise ProhibitedOperationError(
+                        "Prohibited import(s): " + ", ".join(sorted(denied))
+                    )
+            elif isinstance(node, ast.ImportFrom):
+                root = (node.module or "").split(".", 1)[0]
+                if node.level or root not in _ALLOWED_IMPORTS:
+                    raise ProhibitedOperationError(
+                        f"Prohibited import: {node.module or '<relative>'}"
+                    )
+            elif isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+                if node.func.id in _PROHIBITED_CALLS:
+                    raise ProhibitedOperationError(
+                        f"Prohibited Python runtime call: {node.func.id}()"
+                    )
+                if node.func.id in {"getattr", "hasattr", "setattr", "delattr"}:
+                    if len(node.args) >= 2 and isinstance(node.args[1], ast.Constant):
+                        attribute = node.args[1].value
+                        if (
+                            isinstance(attribute, str)
+                            and attribute in _PROHIBITED_ATTRIBUTES
+                        ):
+                            raise ProhibitedOperationError(
+                                f"Prohibited introspection attribute: {attribute}"
+                            )
+            elif isinstance(node, ast.Name) and node.id in _PROHIBITED_NAMES:
+                raise ProhibitedOperationError(
+                    f"Prohibited Python runtime name: {node.id}"
+                )
+            elif (
+                isinstance(node, ast.Attribute) and node.attr in _PROHIBITED_ATTRIBUTES
+            ):
+                raise ProhibitedOperationError(
+                    f"Prohibited introspection attribute: {node.attr}"
+                )
+            elif isinstance(node, ast.Constant) and isinstance(node.value, str):
+                if "__" in node.value and node.value != "__name__":
+                    raise ProhibitedOperationError(
+                        "Prohibited dunder introspection string"
+                    )
+
     def _execute_code(self, code: str):
         """Execute code and return module object"""
         # First perform syntax check
@@ -308,6 +400,24 @@ class CodeSafetyMixin:
         # Create temporary module
         spec = importlib.util.spec_from_loader("solver_code", loader=None)
         code_module = importlib.util.module_from_spec(spec)
+        safe_builtins = dict(vars(builtins))
+        for name in _PROHIBITED_CALLS:
+            safe_builtins.pop(name, None)
+
+        def limited_import(
+            name: str,
+            globals_: dict | None = None,
+            locals_: dict | None = None,
+            fromlist: tuple | list = (),
+            level: int = 0,
+        ):
+            root = name.split(".", 1)[0]
+            if level or root not in _ALLOWED_IMPORTS:
+                raise ImportError(f"Import of {name!r} is not allowed")
+            return builtins.__import__(name, globals_, locals_, fromlist, level)
+
+        safe_builtins["__import__"] = limited_import
+        code_module.__dict__["__builtins__"] = safe_builtins
 
         # Execute code (in isolated namespace)
         try:

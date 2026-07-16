@@ -4,4 +4,4 @@ from pace_bench.types import EnvironmentId, EnvironmentPair, TaskId
 
 __all__ = ["EnvironmentId", "EnvironmentPair", "TaskId", "__version__"]
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
