@@ -41,15 +41,20 @@ The task suite spans statics, kinematics, dynamics, granular/fluid interaction, 
 
 ## Installation
 
-Python 3.10 is the reference version. `requirements.txt` is the only dependency file and includes the benchmark, Box2D runtime, OpenAI-compatible client, and local Transformers stack.
+Python 3.10 is the reference version. PACE-Bench is intentionally run from a
+cloned repository: no PyPI release or `pip install pace-bench` step is required
+by the model or Agent evaluation paths. `requirements.txt` is the only
+dependency manifest.
 
-The project is packaged so a published release can be installed directly with:
+Its final `-e .` line registers this checkout as an editable local package so
+the `pace-bench` command is available. It does **not** download PACE-Bench from
+PyPI. Task code, the verifier, and result storage continue to run from the
+trusted checkout on the evaluator host.
 
-```bash
-python -m pip install pace-bench
-```
-
-Until the first PyPI release is published, install the same package from the repository checkout using either Conda or uv below. A coding-agent evaluation additionally requires a running Docker Desktop or Docker Engine; Codex and Claude Code themselves are installed inside the isolated runtime image, not into the benchmark environment.
+A coding-agent evaluation additionally requires a running Docker Desktop or
+Docker Engine. The Agent container does not install or contain the PACE-Bench
+package: Codex, Claude Code, or a custom Agent sees only the isolated workspace
+and submits candidates to the host-side black-box evaluator.
 
 ### Option A: Conda
 

@@ -6,7 +6,9 @@ Task physics lives under `src/pace_bench/tasks/categories/`. Do not rewrite task
 
 ## Commands
 
-- `python -m pip install -r requirements.txt` installs the complete environment.
+- `python -m pip install -r requirements.txt` installs the complete environment
+  and registers this checkout's CLI through `-e .`; it never downloads
+  PACE-Bench from PyPI.
 - `pace-bench list` lists the 36 tasks and environments.
 - `pace-bench evaluate --task S_01 --env Stage-1 --provider mock --model mock` runs one pair.
 - `pace-bench evaluate --task all --env all --provider mock --model mock --dry-run` enumerates 144 pairs.
