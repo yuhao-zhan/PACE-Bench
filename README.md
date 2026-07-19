@@ -39,6 +39,47 @@ The task suite spans statics, kinematics, dynamics, granular/fluid interaction, 
 
 ![All 36 PACE-Bench tasks](assets/pace_bench_tasks.png)
 
+## Repository layout
+
+```text
+PACE-Bench/
+├── assets/                          # README images
+├── src/
+│   ├── custom_extension.py          # external model/method example
+│   └── pace_bench/
+│       ├── cli.py                   # list, evaluate, agent, validate, report
+│       ├── agents/                  # isolated coding-Agent evaluation
+│       │   ├── session.py           # submissions, budgets, feedback, results
+│       │   ├── container.py         # Codex/Claude/custom Docker adapters
+│       │   └── gateway.py           # credential and evaluator gateway
+│       ├── evaluation/
+│       │   ├── config.py            # provider/method protocols and run config
+│       │   ├── engine.py            # one model generation–verification loop
+│       │   ├── method.py            # vanilla Previous-One + Best
+│       │   ├── prompts.py           # combines task/env context with baseline format
+│       │   ├── prompt_data/         # shared vanilla examples/framing, not task prompts
+│       │   ├── providers.py         # mock, OpenAI-compatible, local Transformers
+│       │   ├── results.py           # versioned JSON and aggregation
+│       │   ├── runner.py            # work enumeration, resume, parallel execution
+│       │   └── verification/        # safety, Box2D execution, diagnostics
+│       ├── tasks/
+│       │   ├── registry.py          # task/env discovery and selectors
+│       │   ├── categories/          # 36 benchmark tasks and their local prompts
+│       │   └── demos/basic/         # only tutorial demo; not benchmark data
+│       ├── primitives.py            # shared task-facing physics helpers
+│       ├── simulator.py             # Box2D stepping and artifacts
+│       ├── renderer.py              # shared pygame renderer
+│       ├── paths.py                 # package and output paths
+│       └── types.py                 # task, attempt, and result records
+├── requirements.txt                 # sole dependency manifest
+└── pyproject.toml                   # local CLI and package-data metadata
+```
+
+Each benchmark task owns its actual prompt in
+`tasks/categories/CategoryN_*/X_NN/prompt.py`; its `stages.py` applies the
+target-environment visibility rules. Shared evaluation code never replaces
+that task- and environment-specific context.
+
 ## Installation
 
 Python 3.10 is the reference version. PACE-Bench is intentionally run from a
@@ -169,12 +210,12 @@ pace-bench evaluate --task D_01 --env Initial --from-scratch \
 
 ## Evaluate a coding agent as a black box
 
-`pace-bench evaluate` measures a model through the fixed vanilla prompt loop. `pace-bench agent` measures a complete coding agent that may use shell tools, edit files, keep notes, and manage its own context and attempt history. The coding agent is therefore **not** forced to use Previous-One + Best. Both modes use the same task description, Initial reference, Box2D verifier, diagnostics, valid-submission budget, and result schema.
+`pace-bench evaluate` measures a model through the fixed vanilla prompt loop. `pace-bench agent` measures a complete coding agent that may use shell tools, edit files, keep notes, and manage its own context and attempt history. Both modes receive the same initial adaptation request, including the selected task/environment context, shared few-shot demonstration, Initial reference, and attempt-0 feedback. After that first request, the model baseline uses Previous-One + Best while the coding Agent manages its own later prompts and history. Both modes use the same Box2D verifier, diagnostics, valid-submission budget, and result schema.
 
 The benchmark package and all task/environment modules remain on the trusted host. The Agent container receives only:
 
 ```text
-AGENT_PROMPT.md       default or evaluator-supplied instruction
+AGENT_PROMPT.md       vanilla initial request plus Agent execution instructions
 TASK.md               exposed task context and attempt-0 feedback
 initial_solution.py   solution that passed Initial
 solution.py           agent's editable candidate
@@ -296,7 +337,7 @@ Inside the container, the custom Agent uses `PACE_AGENT_API_BASE` and the placeh
 
 ### Submission protocol and prompts
 
-The default instruction tells the Agent to inspect `TASK.md`, revise `solution.py`, submit, read `last_feedback.md`, and continue autonomously. Supply a different initial instruction without changing benchmark feedback or scoring:
+By default, `AGENT_PROMPT.md` begins with the exact initial adaptation request constructed for the normal vanilla model baseline. PACE-Bench then appends only the Agent execution contract: edit `solution.py`, submit it, inspect `last_feedback.md`, and manage later iterations autonomously. Supply a different initial prompt without changing benchmark feedback or scoring:
 
 ```bash
 pace-bench agent --task C_01 --env Stage-1 --agent codex \
@@ -392,30 +433,7 @@ Schema version `1.0` records task/pair identity, configuration, seeds, every req
 
 For comparable reporting, keep the canonical task step limits and record the model revision, hardware, seed, attempt budget, number of runs, temperature, maximum tokens, and headless/display setting.
 
-## Repository layout
-
-```text
-PACE-Bench/
-├── .github/workflows/ci.yml      # install and benchmark smoke checks
-├── assets/                       # images used by this README
-├── src/
-│   ├── custom_extension.py       # external model/method example
-│   └── pace_bench/
-│       ├── cli.py                # public pace-bench commands
-│       ├── agents/               # black-box Agent sessions and containers
-│       ├── evaluation/           # model evaluation and result pipeline
-│       ├── tasks/
-│       │   ├── registry.py       # task/env discovery and selection
-│       │   ├── categories/       # 36 benchmark tasks
-│       │   └── demos/basic/      # only tutorial demo; not benchmark data
-│       ├── primitives.py         # shared task-facing physics helpers
-│       ├── simulator.py          # Box2D stepping and optional artifacts
-│       ├── renderer.py           # shared pygame renderer
-│       ├── paths.py              # package and output paths
-│       └── types.py              # typed task, attempt, and result records
-├── requirements.txt              # sole dependency manifest
-└── pyproject.toml                # editable CLI and package-data metadata
-```
+## Architecture details
 
 ### Runtime modules
 
@@ -443,11 +461,17 @@ and `verifier.py` coordinates those pieces. They are internal implementation
 modules; model providers and external methods interact with the typed protocols
 instead.
 
-### Why `evaluation/prompt_data/` exists
+### Task prompts versus `evaluation/prompt_data/`
 
-The four Markdown files in `prompt_data/` are fixed in-context examples used by
-the shipped vanilla baseline. They are loaded by `evaluation/prompts.py` and
-included as package data:
+The task/environment prompt is assembled dynamically. Each task's `prompt.py`
+provides its description, success criteria, and primitive API; `stages.py` then
+updates that context for the selected environment without exposing Invisible
+values. This is the authoritative prompt content for the 180 environments.
+
+The four Markdown files in `prompt_data/` serve a different purpose: they are
+task-independent baseline fragments—few-shot examples plus adaptation framing.
+`evaluation/prompts.py` places the relevant fragment after the dynamic task
+context:
 
 | File | Used for |
 | --- | --- |
@@ -456,11 +480,13 @@ included as package data:
 | `adaptation_setting.md` | The short source-environment to target-environment framing. |
 | `adaptation_demonstration.md` | A complete example of adapting a previously successful design after mutation. |
 
-These files are prompt protocol assets, not discoverable tasks, hidden
-environment definitions, or extra benchmark demos. Changing them changes the
-vanilla baseline prompt and therefore requires an intentional protocol change
-and new characterization results. The only runnable tutorial demo is
-`tasks/demos/basic/`.
+They are not per-task prompts, environment definitions, or runnable demos. The
+normal model baseline and the default Agent mode both receive the applicable
+fragment in their identical first adaptation request. After that, the model
+baseline continues with benchmark-built Previous-One + Best prompts, whereas
+the Agent manages its own subsequent prompts and history. A custom Agent prompt
+may replace the default. Removing or editing these fragments changes the
+initial protocol for both default evaluation modes.
 
 ### Task module contract
 

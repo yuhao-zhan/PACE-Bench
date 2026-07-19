@@ -20,7 +20,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
-from pace_bench.evaluation.config import RunConfig
+from pace_bench.evaluation.config import RunConfig, StrategyContext
+from pace_bench.evaluation.method import VanillaMethod
 from pace_bench.evaluation.prompts import PromptBuilder
 from pace_bench.evaluation.results import result_path, save_result
 from pace_bench.evaluation.verification.safety import validate_solver_output
@@ -316,9 +317,24 @@ Valid revision budget: **{self.config.attempts}**
 """
 
     def _default_agent_prompt(self) -> str:
-        return """You are being evaluated as a tool-using coding agent on one PACE-Bench adaptation task.
+        reference = self.attempts[0]
+        vanilla = VanillaMethod(PromptBuilder(self.registry))
+        vanilla.initialize(
+            StrategyContext(
+                config=self.run_config,
+                task_context=self.task_context,
+                reference_code=self.reference_code,
+                reference_feedback=reference.verification.feedback,
+            )
+        )
+        initial_request = vanilla.build_revision_request([reference])
+        return f"""{initial_request.prompt.rstrip()}
 
-Read `TASK.md` and `initial_solution.py`. The Initial solution succeeded in the source environment but its attempt-0 feedback shows why it fails in the mutated target. Infer the changed physics, edit `solution.py`, and submit candidates with:
+# Agent-Mode Execution
+
+You are being evaluated as a tool-using coding agent. The benchmark content above is the same initial request given to the vanilla model baseline. Unlike that baseline, you manage all later reasoning, context, history, and revisions yourself.
+
+The same task context is also available in `TASK.md`, and the Initial code is available in `initial_solution.py` and `solution.py`. Infer the changed physics, edit `solution.py`, and submit candidates with:
 
 ```bash
 ./pace-submit solution.py
@@ -326,7 +342,7 @@ Read `TASK.md` and `initial_solution.py`. The Initial solution succeeded in the 
 
 After every submission, read the command output plus `last_feedback.md`. Continue revising and submitting until the result reports success or the valid-submission budget is exhausted. `./pace-submit --status` shows the remaining budget without consuming it. Structurally unusable output is rejected without consuming a submission; valid Python that fails during construction or simulation is a normal consumed attempt.
 
-You may use your own tools, notes, context, and history-management strategy. You are not constrained to the vanilla Previous-One + Best prompt policy. Do not try to locate, download, reconstruct, or inspect PACE-Bench task/environment/reference source code. Treat the evaluator as a black box and use only the exposed task description, allowed primitives, and returned feedback.
+You may use your own tools, notes, context, and history-management strategy after this initial request. You are not constrained to the vanilla Previous-One + Best policy for later iterations. Do not try to locate, download, reconstruct, or inspect PACE-Bench task/environment/reference source code. Treat the evaluator as a black box and use only the exposed task description, allowed primitives, and returned feedback.
 """
 
     def _submission_client(self) -> str:
