@@ -15,10 +15,7 @@ def repository_root() -> Path | None:
     """Return the checkout root when running from a source tree."""
 
     for parent in PACKAGE_ROOT.parents:
-        if (parent / "src").is_dir() and (
-            (parent / "pyproject.toml").is_file()
-            or ((parent / "AGENTS.md").is_file() and (parent / "tasks").is_dir())
-        ):
+        if (parent / "src").is_dir() and (parent / "pyproject.toml").is_file():
             return parent
     return None
 
