@@ -239,6 +239,7 @@ While the following variables MIGHT have changed from the initial environment, N
  - **Meteor Mass (Density)**: Falling debris mass density may differ from nominal, affecting impact force and momentum transfer.
  - **Lateral Boundaries (Containment)**: The scene may be enclosed by lateral walls, amplifying ricochets and horizontal debris paths.
  - **Gravitational Constant**: Downward acceleration may differ from nominal; structural loads and impact energy may be affected.
+ - **Protected Core Position**: The protected object's location and associated keep-out zone may differ from nominal.
  - **Core Fragility**: The protected object's impact tolerance may differ from nominal.
 
 Discovery via feedback: Your objective is to identify the underlying physical rules of this specific environment through trial and reasoning. Initial standard solutions may fail; analyze the failure mode (e.g., where a joint breaks or how a body moves) to infer the hidden constraints and adapt your design.

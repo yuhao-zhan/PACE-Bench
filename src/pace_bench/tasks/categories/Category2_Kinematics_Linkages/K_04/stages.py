@@ -12,6 +12,9 @@ While the following variables **MIGHT** have changed from the initial environmen
 - **Object Mass**: The mass of the payload object, affecting the force required to push it.
 - **Ground Friction**: The ground surface friction coefficient, affecting traction and pushing dynamics.
 - **Object Friction**: The object surface friction coefficient, affecting push dynamics and contact forces.
+- **Object Center of Mass**: The payload's center-of-mass offset, affecting its tendency to tip while being pushed.
+- **Object Linear Damping**: The payload's resistance to translational motion.
+- **Structure Mass Budget**: The maximum permitted mass of the pusher structure.
 - **Target Distance**: The required push distance to the target position.
 
 **Discovery via feedback**: Your objective is to identify the underlying physical rules of this specific environment through trial and reasoning. Initial standard solutions may fail; analyze the failure mode (e.g., where the object tips, how the pusher slips, or how far the object moves) to infer the hidden constraints and adapt your design.

@@ -229,11 +229,8 @@ def update_task_description_for_visible_changes(
     description = base_description
     bt = base_terrain_config or {}
     tt = target_terrain_config or {}
-    bp_raw = base_physics_config or {}
-    tp_raw = target_physics_config or {}
     bp = _merge_physics(base_physics_config)
     tp = _merge_physics(target_physics_config)
-    mutated = _configs_differ_from_base(tt, tp_raw, bt, bp, bp_raw)
     ws_base_03 = _effective_walls_subset(bt, [0, 1, 2, 3])
     ws_tgt_03 = _effective_walls_subset(tt, [0, 1, 2, 3])
     if ws_tgt_03 != ws_base_03:
@@ -478,10 +475,7 @@ def update_task_description_for_visible_changes(
                 RuntimeWarning,
                 stacklevel=2,
             )
-    out = description.strip()
-    if mutated:
-        out = out + "\n\n" + _build_environmental_anomalies_suffix_curriculum_union()
-    return out
+    return description.strip()
 
 def update_success_criteria_for_visible_changes(
     base_success_criteria: str,
@@ -548,6 +542,7 @@ def get_c04_curriculum_stages() -> List[Dict[str, Any]]:
                 "magnetic_floor_y_max": 1.6,
                 "magnetic_floor_force": -60.0,
             },
+            "task_description_suffix": UNIFORM_SUFFIX,
         },
         {
             "stage_id": "Stage-2",
@@ -562,6 +557,7 @@ def get_c04_curriculum_stages() -> List[Dict[str, Any]]:
                 },
             },
             "physics_config": {},
+            "task_description_suffix": UNIFORM_SUFFIX,
         },
         {
             "stage_id": "Stage-3",
@@ -580,6 +576,7 @@ def get_c04_curriculum_stages() -> List[Dict[str, Any]]:
                 "turbulence_intensity": 80.0,
                 "structural_impulse_scale_k": 50.0,
             },
+            "task_description_suffix": UNIFORM_SUFFIX,
         },
         {
             "stage_id": "Stage-4",
@@ -595,5 +592,6 @@ def get_c04_curriculum_stages() -> List[Dict[str, Any]]:
                 "control_lag_steps": 0,
                 "structural_impulse_scale_k": 50.0,
             },
+            "task_description_suffix": UNIFORM_SUFFIX,
         },
     ]

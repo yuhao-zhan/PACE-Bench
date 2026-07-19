@@ -4,38 +4,32 @@
 
 ![Static physical design versus adaptation under changing physics](assets/pace_bench_motivation.png)
 
-## Why PACE-Bench?
+## Why and how?
 
-Most physics benchmarks ask models to reason about or design for a fixed world. Real designs must also survive changes in friction, gravity, geometry, load, delay, or force limits. PACE-Bench tests this missing capability: infer what changed from simulator feedback, then revise the structure or controller until it works again.
+Most physics benchmarks assume a fixed world, while real designs must survive changes in friction, gravity, geometry, load, delay, and force limits. PACE-Bench asks a solver to infer such changes from simulation feedback and revise a Python structure or controller until it succeeds.
 
-## How it works
-
-PACE-Bench contains 36 Box2D tasks across six physics domains. Each task has one `Initial` environment and four mutated stages. The provided Initial design passes `Initial` but fails each mutation, while a stage-specific reference confirms that every target remains solvable.
-
-For an adaptation pair such as `Initial_to_Stage-1`, the benchmark runs the Initial design in the target environment as attempt 0, returns structured diagnostics, and asks the model to revise its Python design. Verification and revision repeat until success or budget exhaustion.
+Each task has an `Initial` environment and four mutated stages. The Initial reference passes `Initial` but fails every mutation; a stage-specific reference proves each target remains solvable. For `Initial_to_Stage-1`, the benchmark evaluates the Initial design in Stage-1 as attempt 0, returns diagnostics, and repeats code revision and Box2D verification until success or budget exhaustion.
 
 ```mermaid
 flowchart LR
-    A[Run Initial design<br/>in mutated environment] --> B[Box2D score<br/>and diagnostics]
-    B --> C[Model revises<br/>the design code]
-    C --> D[Verify revision]
-    D -->|failed, budget remains| B
-    D -->|passed| E[Save result]
+    A[Initial design in mutated environment] --> B[Box2D score and feedback]
+    B --> C[Model or Agent revises code]
+    C --> D[Verify candidate]
+    D -->|fail, budget remains| B
+    D -->|pass| E[Save result]
 ```
 
-The repository ships one reproducible model baseline, **vanilla Previous-One + Best**. It also supports black-box evaluation of tool-using coding agents such as Codex and Claude Code. The sections below focus on installing the benchmark, reproducing its protocol, and evaluating your own model, method, or agent.
-
-## Benchmark at a glance
+PACE-Bench ships one model baseline: **vanilla Previous-One + Best**. Every revision receives the current task context, the immediately previous candidate and feedback, and the highest-scoring candidate and feedback without duplicating an attempt that is both previous and best. The benchmark also supports external models/methods and black-box coding agents such as Codex and Claude Code.
 
 | Property | Count |
 | --- | ---: |
 | Physics categories | 6 |
-| Base tasks | 36 |
+| Benchmark tasks | 36 |
 | Environments per task | 5 |
-| Total task environments | 180 |
+| Total environments | 180 |
 | Initial-to-mutated pairs | 144 |
 
-The task suite spans statics, kinematics, dynamics, granular/fluid interaction, control, and exotic physics.
+The categories are statics, kinematics, dynamics, granular/fluid interaction, control, and exotic physics.
 
 ![All 36 PACE-Bench tasks](assets/pace_bench_tasks.png)
 
@@ -43,106 +37,82 @@ The task suite spans statics, kinematics, dynamics, granular/fluid interaction, 
 
 ```text
 PACE-Bench/
-├── assets/                          # README images
+├── assets/                         # README figures
+├── dataset_validation/             # construction scripts and audit prompts
 ├── src/
-│   ├── custom_extension.py          # external model/method example
+│   ├── custom_extension.py         # external provider/method example
 │   └── pace_bench/
-│       ├── cli.py                   # list, evaluate, agent, validate, report
-│       ├── agents/                  # isolated coding-Agent evaluation
-│       │   ├── session.py           # submissions, budgets, feedback, results
-│       │   ├── container.py         # Codex/Claude/custom Docker adapters
-│       │   └── gateway.py           # credential and evaluator gateway
-│       ├── evaluation/
-│       │   ├── config.py            # provider/method protocols and run config
-│       │   ├── engine.py            # one model generation–verification loop
-│       │   ├── method.py            # vanilla Previous-One + Best
-│       │   ├── prompts.py           # combines task/env context with baseline format
-│       │   ├── prompt_data/         # shared vanilla examples/framing, not task prompts
-│       │   ├── providers.py         # mock, OpenAI-compatible, local Transformers
-│       │   ├── results.py           # versioned JSON and aggregation
-│       │   ├── runner.py            # work enumeration, resume, parallel execution
-│       │   └── verification/        # safety, Box2D execution, diagnostics
+│       ├── cli.py                  # list, evaluate, agent, validate, report
+│       ├── agents/                 # isolated coding-Agent runtime and gateway
+│       ├── evaluation/             # engine, vanilla method, prompts, providers, results
+│       │   ├── prompt_data/        # shared few-shot/framing fragments
+│       │   └── verification/       # safety checks and Box2D verification
 │       ├── tasks/
-│       │   ├── registry.py          # task/env discovery and selectors
-│       │   ├── categories/          # 36 benchmark tasks and their local prompts
-│       │   └── demos/basic/         # only tutorial demo; not benchmark data
-│       ├── primitives.py            # shared task-facing physics helpers
-│       ├── simulator.py             # Box2D stepping and artifacts
-│       ├── renderer.py              # shared pygame renderer
-│       ├── paths.py                 # package and output paths
-│       └── types.py                 # task, attempt, and result records
-├── requirements.txt                 # sole dependency manifest
-└── pyproject.toml                   # local CLI and package-data metadata
+│       │   ├── registry.py         # task discovery and selectors
+│       │   ├── categories/         # 36 tasks and their local prompts/physics
+│       │   └── demos/basic/        # tutorial demo; not benchmark data
+│       ├── primitives.py           # task-facing physics helpers
+│       ├── simulator.py            # shared Box2D stepping
+│       ├── renderer.py             # shared pygame rendering
+│       ├── paths.py                # package/output paths
+│       └── types.py                # typed task, attempt, and result records
+├── requirements.txt                # sole dependency manifest
+└── pyproject.toml                  # editable package and CLI metadata
 ```
 
-Each benchmark task owns its actual prompt in
-`tasks/categories/CategoryN_*/X_NN/prompt.py`; its `stages.py` applies the
-target-environment visibility rules. Shared evaluation code never replaces
-that task- and environment-specific context.
+Task-specific physics stays in `tasks/categories/CategoryN_*/X_NN/`; shared evaluation code does not replace task or environment prompts.
+
+### Dataset construction validation
+
+The three prompt/script pairs in `dataset_validation/` correspond to the three **Dataset Construction Details** subsections in the paper appendix:
+
+| Appendix subsection | Script | Reusable prompt | Purpose |
+| --- | --- | --- | --- |
+| Module Auditing | [`auto_audit.sh`](dataset_validation/auto_audit.sh) | [`module_auditing_prompt.md`](dataset_validation/module_auditing_prompt.md) | Cross-module, prompt-exposure, suffix, runtime, and reference audit. |
+| Difficulty Escalation | [`auto_difficulty_escalation.sh`](dataset_validation/auto_difficulty_escalation.sh) | [`difficulty_escalation_prompt.md`](dataset_validation/difficulty_escalation_prompt.md) | Monotonic mutation hardening that maximizes required solution adaptation while preserving reference solvability. |
+| Feedback Design | [`auto_feedback.sh`](dataset_validation/auto_feedback.sh) | [`feedback_design_prompt.md`](dataset_validation/feedback_design_prompt.md) | Failure forensics, measurement-backed diagnostics, and feedback debloating. |
+
+The Bash files preserve the original construction-time orchestration and are not public evaluation entry points. The Markdown prompts use the current layout and CLI: audit first, escalate only when completed baseline runs show insufficient difficulty, improve feedback from real failures, then re-audit.
 
 ## Installation
 
-Python 3.10 is the reference version. PACE-Bench is intentionally run from a
-cloned repository: no PyPI release or `pip install pace-bench` step is required
-by the model or Agent evaluation paths. `requirements.txt` is the only
-dependency manifest.
+PACE-Bench targets Python 3.10 and is run from a cloned checkout. `requirements.txt` ends with `-e .`, which installs this checkout and registers `pace-bench`; no PyPI release is required.
 
-Its final `-e .` line registers this checkout as an editable local package so
-the `pace-bench` command is available. It does **not** download PACE-Bench from
-PyPI. Task code, the verifier, and result storage continue to run from the
-trusted checkout on the evaluator host.
-
-A coding-agent evaluation additionally requires a running Docker Desktop or
-Docker Engine. The Agent container does not install or contain the PACE-Bench
-package: Codex, Claude Code, or a custom Agent sees only the isolated workspace
-and submits candidates to the host-side black-box evaluator.
-
-### Option A: Conda
+### Conda
 
 ```bash
 git clone https://github.com/yuhao-zhan/PACE-Bench.git
 cd PACE-Bench
-
 conda create -n pace-bench python=3.10 -y
 conda activate pace-bench
 python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
 ```
 
-### Option B: uv
+### uv
 
 Install [uv](https://docs.astral.sh/uv/), then run:
 
 ```bash
 git clone https://github.com/yuhao-zhan/PACE-Bench.git
 cd PACE-Bench
-
 uv venv .venv --python 3.10
 source .venv/bin/activate        # Windows: .venv\Scripts\activate
 uv pip install -r requirements.txt
 ```
 
-### Verify the installation
-
-These commands use only the public benchmark interface:
+### Verify
 
 ```bash
 pace-bench --help
 pace-bench list --task S_01
 pace-bench validate --task all --contracts-only
-
-pace-bench evaluate \
-  --task S_01 \
-  --env Stage-1 \
-  --method vanilla \
-  --provider mock \
-  --model mock \
-  --attempts 1 \
-  --output outputs/smoke \
-  --no-resume
+pace-bench evaluate --task S_01 --env Stage-1 \
+  --method vanilla --provider mock --model mock --attempts 1 \
+  --output outputs/smoke --no-resume
 ```
 
-On a headless Linux worker, set:
+For headless Linux:
 
 ```bash
 export SDL_VIDEODRIVER=dummy
@@ -152,368 +122,193 @@ export PYGAME_HIDE_SUPPORT_PROMPT=1
 
 ## Evaluate a model
 
-### OpenAI or an OpenAI-compatible endpoint
+| Provider | Use |
+| --- | --- |
+| `openai-compatible` | OpenAI API or any compatible HTTP endpoint |
+| `local-transformers` | Local Hugging Face/Transformers model |
+| `mock` | Deterministic tests and dry runs |
+| `package.module:Class` | External provider |
+
+### API-hosted model
 
 ```bash
 export OPENAI_API_KEY=<your-key>
-
-pace-bench evaluate \
-  --task S_01 \
-  --env Stage-1 \
-  --method vanilla \
-  --provider openai-compatible \
-  --model <model-name> \
-  --attempts 20 \
-  --output outputs/my-run
+pace-bench evaluate --task S_01 --env Stage-1 \
+  --method vanilla --provider openai-compatible --model <model-name> \
+  --attempts 20 --output outputs/my-run
 ```
 
-For a compatible server, add `--base-url http://host:port/v1` or set `OPENAI_BASE_URL`.
+For another compatible server, add `--base-url http://host:port/v1` or set `OPENAI_BASE_URL`.
 
-### Local Hugging Face / Transformers model
+### Local model
 
 ```bash
-pace-bench evaluate \
-  --task K_03 \
-  --env Stage-2 \
-  --method vanilla \
-  --provider local-transformers \
-  --model /path/to/model \
-  --device cuda:0 \
-  --attempts 20
+pace-bench evaluate --task K_03 --env Stage-2 \
+  --method vanilla --provider local-transformers --model /path/to/model \
+  --device cuda:0 --attempts 20
 ```
 
-Use `--device mps` on supported Apple Silicon, `--device cpu` for CPU execution, or `--devices cuda:0,cuda:1 --workers 2` for deterministic per-device queues.
+Use `--device mps`, `--device cpu`, or `--devices cuda:0,cuda:1 --workers 2` as appropriate.
 
-### Select tasks and environments
+### Select work
 
 ```bash
-# One category, all four target stages
+# One category, all target stages
 pace-bench evaluate --task category_3 --env all \
   --provider openai-compatible --model <model-name>
 
-# Explicit task and environment selections
+# Explicit tasks and stages
 pace-bench evaluate --task S_01 --task K_01 \
-  --env Stage-1 --env Stage-3 \
-  --provider openai-compatible --model <model-name>
+  --env Stage-1 --env Stage-3 --provider openai-compatible --model <model-name>
 
-# Enumerate all 144 adaptation pairs without model calls
-pace-bench evaluate --task all --env all \
-  --provider mock --model mock --dry-run
-```
+# Enumerate all 144 pairs without model calls
+pace-bench evaluate --task all --env all --provider mock --model mock --dry-run
 
-Adaptation always uses Initial as the source. To generate a solution without a source reference, use from-scratch mode:
-
-```bash
+# Solve Initial without a source reference
 pace-bench evaluate --task D_01 --env Initial --from-scratch \
   --provider openai-compatible --model <model-name>
 ```
 
 ## Evaluate a coding agent as a black box
 
-`pace-bench evaluate` measures a model through the fixed vanilla prompt loop. `pace-bench agent` measures a complete coding agent that may use shell tools, edit files, keep notes, and manage its own context and attempt history. Both modes receive the same initial adaptation request, including the selected task/environment context, shared few-shot demonstration, Initial reference, and attempt-0 feedback. After that first request, the model baseline uses Previous-One + Best while the coding Agent manages its own later prompts and history. Both modes use the same Box2D verifier, diagnostics, valid-submission budget, and result schema.
+`pace-bench evaluate` controls revision prompts for a model; `pace-bench agent` lets a tool-using agent manage its own files, context, memory, and later prompts. Both receive the same initial adaptation request, few-shot demonstration, Initial reference, and attempt-0 feedback, and both use the same verifier, diagnostics, valid-submission budget, and result schema.
 
-The benchmark package and all task/environment modules remain on the trusted host. The Agent container receives only:
-
-```text
-AGENT_PROMPT.md       vanilla initial request plus Agent execution instructions
-TASK.md               exposed task context and attempt-0 feedback
-initial_solution.py   solution that passed Initial
-solution.py           agent's editable candidate
-pace-submit           authenticated black-box submission client
-```
+The trusted host keeps all task/environment source. The isolated Agent container receives only `AGENT_PROMPT.md`, `TASK.md`, `initial_solution.py`, editable `solution.py`, and the authenticated `pace-submit` client.
 
 ```mermaid
 flowchart LR
-    A[Codex / Claude / custom Agent<br/>isolated container] -->|solution.py| G[Credential and evaluator gateway]
-    G -->|candidate only| V[Trusted PACE-Bench verifier]
-    V --> B[Box2D target environment]
-    B -->|score + standard feedback| G
-    G -->|compact response| A
-    G -->|provider request; real key injected here| P[OpenAI / Anthropic / custom API]
+    A[Isolated Codex / Claude / custom Agent] -->|solution.py| G[Credential and evaluator gateway]
+    G --> V[Trusted PACE-Bench verifier]
+    V --> B[Target Box2D environment]
+    B -->|score and standard feedback| G
+    G --> A
+    G -->|real credential stays here| P[Model API]
 ```
 
-The Agent container has a read-only root filesystem, a single writable workspace mount, no repository mount, no Docker socket, dropped Linux capabilities, resource limits, and an internal-only Docker network. Codex web search and Claude Code `WebSearch`/`WebFetch` are disabled. A separate gateway container is the only process with external access; it can reach the selected model API and the current evaluator session, but not arbitrary sites such as GitHub or PyPI. Real provider keys are mounted only into that gateway. The Agent sees a non-secret placeholder key.
+### Prerequisites and isolation
 
-### Prerequisites
-
-1. Complete the normal PACE-Bench installation and verify `pace-bench --help`.
-2. Install and start [Docker Desktop](https://docs.docker.com/desktop/) or Docker Engine.
-3. Run `docker info` successfully as the same user.
-4. Use a dedicated API key with a suitable spending limit. Account-login files such as `~/.codex/auth.json` or Claude subscription credentials are deliberately not mounted into the untrusted container.
-
-The first Agent run builds `pace-bench-agent-runtime:0.2.0`. It currently pins Codex CLI `0.144.4` and Claude Code `2.1.211`; later runs reuse the image. Use `--rebuild-image`, `--codex-version`, or `--claude-version` to make an intentional version change and record that version with your results.
+- Complete the normal installation, start Docker Desktop/Engine, and confirm `docker info` works.
+- Use a dedicated API key; account-login files such as `~/.codex/auth.json` are not mounted.
+- The Agent has a read-only root, one writable workspace, no repository/Docker-socket mount, dropped capabilities, resource limits, and an internal-only network.
+- A gateway reaches only the selected model API and evaluator session; real keys remain in the gateway while the Agent sees placeholders.
+- The built-in image pins Codex and Claude CLI versions; record overrides made with `--codex-version`, `--claude-version`, or `--rebuild-image`.
 
 ### Codex
 
-Codex is run non-interactively with `codex exec --ephemeral`. The outer Docker container is the security boundary, so the inner Codex sandbox is bypassed to avoid nested Linux namespace failures. User configuration, project rules, MCP servers, and web search are not loaded. See OpenAI's [Codex non-interactive mode](https://learn.chatgpt.com/docs/non-interactive-mode) for the underlying CLI behavior.
-
-Set the key only on the trusted evaluator host:
-
 ```bash
 export CODEX_API_KEY=<dedicated-openai-api-key>
-
-pace-bench agent \
-  --task S_01 \
-  --env Stage-1 \
-  --agent codex \
-  --model <codex-model> \
-  --attempts 20 \
-  --timeout-seconds 3600 \
+pace-bench agent --task S_01 --env Stage-1 --agent codex \
+  --model <codex-model> --attempts 20 --timeout-seconds 3600 \
   --output outputs/codex-s01
 ```
 
-`OPENAI_API_KEY` is accepted as a fallback, but `CODEX_API_KEY` makes the single-purpose credential explicit. PACE-Bench configures a non-WebSocket Responses provider that points at its credential gateway; the real key is never placed in the Agent process environment.
+`OPENAI_API_KEY` is accepted as a fallback. Codex runs non-interactively with `codex exec --ephemeral`; project rules, MCP servers, and web search are not loaded.
 
 ### Claude Code
 
-Claude Code is run in [non-interactive print mode](https://docs.anthropic.com/en/docs/claude-code/cli-usage) with a bounded number of agentic turns. Telemetry, error reporting, bug reporting, auto-updates, `WebSearch`, and `WebFetch` are disabled for the run.
-
 ```bash
 export ANTHROPIC_API_KEY=<dedicated-anthropic-api-key>
-
-pace-bench agent \
-  --task K_03 \
-  --env Stage-2 \
-  --agent claude \
-  --model <claude-model-or-alias> \
-  --attempts 20 \
-  --max-turns 200 \
-  --timeout-seconds 3600 \
-  --output outputs/claude-k03
+pace-bench agent --task K_03 --env Stage-2 --agent claude \
+  --model <claude-model-or-alias> --attempts 20 --max-turns 200 \
+  --timeout-seconds 3600 --output outputs/claude-k03
 ```
 
-PACE-Bench sets `ANTHROPIC_BASE_URL` to the internal credential gateway. This follows Claude Code's documented [gateway and proxy configuration](https://docs.anthropic.com/en/docs/claude-code/llm-gateway) while keeping the actual `ANTHROPIC_API_KEY` outside the Agent container.
+Claude runs in non-interactive print mode with telemetry, updates, `WebSearch`, and `WebFetch` disabled.
 
-### Your own Agent
+### Custom Agent
 
-A custom Agent may use the built-in runtime image or a user-built image. Its only runtime contract is:
-
-- run from `/workspace`;
-- read `$PACE_AGENT_PROMPT_FILE` and `$PACE_AGENT_TASK_FILE`;
-- write candidates to `solution.py`;
-- call `$PACE_AGENT_SUBMIT solution.py` after each revision;
-- stop when the response reports success or no remaining budget;
-- include Python 3 in a custom image because `pace-submit` is a Python client.
-
-For an Agent already installed in an image:
+A custom image must run from `/workspace`, read `$PACE_AGENT_PROMPT_FILE` and `$PACE_AGENT_TASK_FILE`, write `solution.py`, call `$PACE_AGENT_SUBMIT solution.py`, and stop on success or exhausted budget. It must contain Python 3 for `pace-submit`.
 
 ```bash
 docker build -t my-physics-agent:latest path/to/my-agent
-
-pace-bench agent \
-  --task D_01 \
-  --env Stage-3 \
-  --agent custom \
+pace-bench agent --task D_01 --env Stage-3 --agent custom \
   --image my-physics-agent:latest \
   --agent-command "my-agent --prompt {prompt_file}" \
-  --model my-agent-model \
-  --attempts 20 \
-  --output outputs/my-agent
+  --model my-agent-model --attempts 20 --output outputs/my-agent
 ```
 
-`--agent-command` is parsed as an argument vector rather than executed by a host shell. It supports `{prompt_file}`, `{task_file}`, and `{workspace}` placeholders. The container also receives:
+`--agent-command` is parsed as arguments and supports `{prompt_file}`, `{task_file}`, and `{workspace}`. A hosted custom Agent can use `--custom-base-url` and `--custom-api-key-env`; inside the container it reads `PACE_AGENT_API_BASE` and the placeholder `PACE_AGENT_API_KEY`.
 
-```text
-PACE_AGENT_PROMPT_FILE=/workspace/AGENT_PROMPT.md
-PACE_AGENT_TASK_FILE=/workspace/TASK.md
-PACE_AGENT_SUBMIT=/workspace/pace-submit
-```
+### Prompts, submissions, and results
 
-If the custom Agent uses a local model already inside its image, no further network option is needed. If it calls a hosted API, route that one endpoint through the credential gateway:
+The default `AGENT_PROMPT.md` starts with the vanilla model's exact initial request, then adds only the Agent execution contract. Replace it with `--prompt-file my_agent_prompt.md` without changing benchmark feedback or scoring.
 
 ```bash
-export MY_AGENT_API_KEY=<dedicated-key>
-
-pace-bench agent \
-  --task F_02 --env Stage-4 \
-  --agent custom \
-  --image my-physics-agent:latest \
-  --agent-command "my-agent --task {prompt_file}" \
-  --custom-base-url https://models.example.org/v1 \
-  --custom-api-key-env MY_AGENT_API_KEY
+./pace-submit --status        # no budget consumed
+./pace-submit solution.py     # verify one candidate
 ```
 
-Inside the container, the custom Agent uses `PACE_AGENT_API_BASE` and the placeholder `PACE_AGENT_API_KEY`. The gateway replaces that placeholder with the trusted-host value before forwarding the request. The configured upstream is fixed by the evaluator; the Agent cannot choose another network destination.
+Malformed or structurally unusable submissions are rejected without consuming the valid-submission budget; valid code that fails construction, runtime, constraints, or physics consumes one attempt normally. Accepted submissions store code, score, metrics, feedback, errors, timing, and artifacts server-side. Use `--run-index` for another run or `--overwrite` intentionally.
 
-### Submission protocol and prompts
-
-By default, `AGENT_PROMPT.md` begins with the exact initial adaptation request constructed for the normal vanilla model baseline. PACE-Bench then appends only the Agent execution contract: edit `solution.py`, submit it, inspect `last_feedback.md`, and manage later iterations autonomously. Supply a different initial prompt without changing benchmark feedback or scoring:
-
-```bash
-pace-bench agent --task C_01 --env Stage-1 --agent codex \
-  --prompt-file my_agent_prompt.md
-```
-
-Within a session:
-
-```bash
-./pace-submit --status        # does not consume the budget
-./pace-submit solution.py     # verifies one candidate
-```
-
-Missing `build_agent`, unusably short code, malformed JSON, or an oversized request is rejected without consuming the valid-submission budget. Syntax, construction, runtime, constraint, and physics failures from structurally valid code are normal consumed attempts. Every accepted submission stores the full candidate, score, metrics, feedback, error, timing, and artifacts server-side. Only compact score/feedback data is returned to the Agent, avoiding the very large raw-metrics payload in its context.
-
-Each session writes the normal schema-versioned result plus an auditable workspace and `agent.log` under the output tree. A clean Agent exit before success or exhaustion is recorded as `agent_exited`; timeout and process failures are recorded separately. Run one task/environment per Agent invocation so every container starts with an independent context. A shell loop can enumerate a larger evaluation:
-
-```bash
-for task in S_01 S_02 S_03 S_04 S_05 S_06; do
-  for env in Stage-1 Stage-2 Stage-3 Stage-4; do
-    pace-bench agent --task "$task" --env "$env" --agent codex \
-      --model <codex-model> --attempts 20 --output outputs/codex-statics
-  done
-done
-```
-
-Existing Agent results are not overwritten silently. Use `--run-index 2` for another independent run, or pass `--overwrite` when replacing a known test run intentionally.
-
-### Security boundary
-
-The container and gateway prevent ordinary Agent tools from reading the installed task package or downloading the public repository. Candidate Python additionally permits only the benchmark's documented primitives plus the `math`, `random`, and `Box2D` imports required by existing references; file/process/network access, dynamic execution, and Python dunder introspection are rejected before execution.
-
-This is a benchmark isolation boundary, not a general multi-tenant code-execution service. Run the trusted evaluator on a dedicated machine without unrelated secrets, keep Docker patched, use dedicated short-lived API keys, inspect `agent.log`, and do not expose the evaluator port publicly. The session HTTP service uses a random bearer token and is intended to be reachable only through the per-run internal gateway.
+The isolation path blocks ordinary Agent access to benchmark source, but it is not a general multi-tenant sandbox. Use a dedicated evaluator host without unrelated secrets, keep Docker patched, use short-lived keys, and never expose the evaluator port publicly.
 
 ## Bring your own model or method
 
-Research code can live outside this repository. Both extension points accept `package.module:Class` dotted imports. A minimal example is installed from [`src/custom_extension.py`](src/custom_extension.py):
+External extensions use `package.module:Class`; see [`src/custom_extension.py`](src/custom_extension.py).
 
 ```bash
-pace-bench evaluate \
-  --task S_01 --env Stage-1 \
-  --provider custom_extension:CustomModel \
-  --model my-model \
-  --method custom_extension:CustomMethod \
-  --attempts 2
+pace-bench evaluate --task S_01 --env Stage-1 \
+  --provider custom_extension:CustomModel --model my-model \
+  --method custom_extension:CustomMethod --attempts 2
 ```
 
-A model provider implements:
-
-```text
-generate(GenerationRequest) -> GenerationResult
-close()
-```
-
-A method implements:
-
-```text
-initialize(context)
-build_initial_request()
-build_revision_request(history)
-observe(attempt)
-finalize(result)
-```
-
-PACE-Bench retains ownership of task selection, attempt accounting, solver retries, Box2D verification, result serialization, and environment-pair identity.
+A provider implements `generate(GenerationRequest) -> GenerationResult` and `close()`. A method implements `initialize(context)`, initial/revision request builders, `observe(attempt)`, and `finalize(result)`. PACE-Bench retains task selection, budgets, solver retries, verification, serialization, and environment-pair identity.
 
 ## Validation and results
 
 ```bash
-# List tasks and their environments
-pace-bench list
-
-# Validate module contracts and imports
-pace-bench validate --task all --contracts-only
-
-# Validate all reference-solution expectations for one task
-pace-bench validate --task S_01
-
-# Full 36-task reference validation; this is intentionally slow
-pace-bench validate --task all
-
-# Aggregate completed evaluation JSON
-pace-bench report --input outputs/my-run
+pace-bench list                                      # tasks and environments
+pace-bench validate --task all --contracts-only     # imports/contracts
+pace-bench validate --task S_01                     # one reference matrix
+pace-bench validate --task all                      # full 36-task validation
+pace-bench report --input outputs/my-run             # aggregate JSON results
 ```
 
-Results are stored under:
+Results are stored as:
 
 ```text
 outputs/<run>/<category>/<task>/<model>/<method>/run-<N>/Initial_to_Stage-<K>.json
 ```
 
-Schema version `1.0` records task/pair identity, configuration, seeds, every request and candidate, task metrics, feedback, scores, errors, token usage, timing, and artifact paths. Completed results are resumed by default; pass `--no-resume` to rerun them.
+Schema `1.0` records task/pair identity, config, seeds, requests, candidates, metrics, feedback, scores, errors, token usage, timing, and artifact paths. Completed results resume by default; use `--no-resume` to rerun. For reproducibility, report the model revision, hardware, seed, attempt budget, runs, temperature, maximum tokens, and display/headless setting.
 
-For comparable reporting, keep the canonical task step limits and record the model revision, hardware, seed, attempt budget, number of runs, temperature, maximum tokens, and headless/display setting.
+## Architecture notes
 
-## Architecture details
+The evaluation engine owns attempt accounting and verification; providers only generate code, and methods only construct requests and observe attempts. `evaluation/verification/` separates candidate safety, task loading, simulation, diagnostics, and verifier coordination because those pieces have different security and lifecycle responsibilities.
 
-### Runtime modules
+### Task prompts and shared prompt data
 
-| Path | Responsibility |
+Each task's `prompt.py` defines its description, criteria, visible geometry, constraints, and primitive API. `stages.py` applies environment-specific updates without exposing Invisible values; this is the authoritative context for all 180 environments.
+
+`evaluation/prompt_data/` contains task-independent baseline fragments, not task/environment definitions:
+
+| File | Role |
 | --- | --- |
-| `cli.py` | Parses `list`, `evaluate`, `agent`, `validate`, and `report`; it contains no task physics. |
-| `agents/session.py` | Owns one trusted black-box session, attempt accounting, compact feedback, workspace files, and final result persistence. |
-| `agents/container.py` | Builds and runs isolated Codex, Claude Code, or custom-Agent containers. |
-| `agents/gateway.py` | Runs the small standalone credential/evaluator proxy mounted into the gateway container. |
-| `evaluation/config.py` | Defines provider/strategy protocols and validates run configuration. |
-| `evaluation/engine.py` | Executes the single vanilla generation–verification loop for one work item. |
-| `evaluation/method.py` | Implements Previous-One + Best and loads an external method by dotted import. |
-| `evaluation/providers.py` | Implements mock, OpenAI-compatible, and optional local-Transformers providers. |
-| `evaluation/prompts.py` | Builds initial, revision, and adaptation prompts while preserving variable-exposure rules. |
-| `evaluation/runner.py` | Enumerates work deterministically, handles parallel queues/resume, and validates references. |
-| `evaluation/results.py` | Serializes schema-versioned results and computes standard aggregates. |
-| `evaluation/verification/` | Contains candidate safety checks, task loading, Box2D execution, diagnostics, and the verifier facade. |
-| `tasks/registry.py` | Discovers exactly 36 benchmark tasks and the single `basic` demo, resolves selectors, environments, and canonical pairs. |
+| `initial_demonstration.md` | From-scratch few-shot analysis/code example |
+| `revision_demonstration.md` | Iterative diagnosis-and-fix example |
+| `adaptation_setting.md` | Initial-to-target framing |
+| `adaptation_demonstration.md` | Complete mutation-adaptation example |
 
-The modules under `evaluation/verification/` are kept separate because they
-have different security and lifecycle responsibilities: `safety.py` validates
-submitted Python, `task_runtime.py` loads task-local classes, `simulation.py`
-runs and cleans up Box2D/pygame, `diagnostics.py` formats standard feedback,
-and `verifier.py` coordinates those pieces. They are internal implementation
-modules; model providers and external methods interact with the typed protocols
-instead.
-
-### Task prompts versus `evaluation/prompt_data/`
-
-The task/environment prompt is assembled dynamically. Each task's `prompt.py`
-provides its description, success criteria, and primitive API; `stages.py` then
-updates that context for the selected environment without exposing Invisible
-values. This is the authoritative prompt content for the 180 environments.
-
-The four Markdown files in `prompt_data/` serve a different purpose: they are
-task-independent baseline fragments—few-shot examples plus adaptation framing.
-`evaluation/prompts.py` places the relevant fragment after the dynamic task
-context:
-
-| File | Used for |
-| --- | --- |
-| `initial_demonstration.md` | Few-shot physical analysis and code examples for a from-scratch initial request. |
-| `revision_demonstration.md` | A diagnosis-and-fix example for ordinary iterative revisions. |
-| `adaptation_setting.md` | The short source-environment to target-environment framing. |
-| `adaptation_demonstration.md` | A complete example of adapting a previously successful design after mutation. |
-
-They are not per-task prompts, environment definitions, or runnable demos. The
-normal model baseline and the default Agent mode both receive the applicable
-fragment in their identical first adaptation request. After that, the model
-baseline continues with benchmark-built Previous-One + Best prompts, whereas
-the Agent manages its own subsequent prompts and history. A custom Agent prompt
-may replace the default. Removing or editing these fragments changes the
-initial protocol for both default evaluation modes.
+The vanilla model and default Agent receive the applicable shared fragment in their identical initial request. Later, vanilla uses Previous-One + Best while the Agent manages its own history. Editing these files changes both default initial protocols.
 
 ### Task module contract
 
-Most repository files belong to the 36 task implementations. Each
-`tasks/categories/CategoryN_*/X_NN/` directory deliberately keeps its physics
-local:
-
-| File | Task-local responsibility |
+| File | Responsibility |
 | --- | --- |
-| `agent.py` | Initial and Stage-1 through Stage-4 reference solutions. |
-| `environment.py` | Box2D world, objects, primitives, and mutable environment constants. |
-| `evaluator.py` | Success/failure conditions, score, constraints, and raw metrics. |
-| `feedback.py` | Objective formatting of evaluator metrics for the solver. |
-| `prompt.py` | Task statement, exposed geometry, constraints, and success criteria. |
-| `renderer.py` | Visualization only; it must not affect physics or scoring. |
-| `stages.py` | Four mutations and visibility-aware prompt updates. |
+| `agent.py` | Initial and four stage reference solutions |
+| `environment.py` | Box2D world, primitives, mutable physics, tracking |
+| `evaluator.py` | Success/failure, score, constraints, raw metrics |
+| `feedback.py` | Objective formatting of measured metrics |
+| `prompt.py` | Task statement, exposed values, and criteria |
+| `renderer.py` | Evaluation-neutral visualization |
+| `stages.py` | Mutations and visibility-aware prompt updates |
 
-Keeping these seven files per task is intentional: task-specific physics stays
-auditable in one directory, while reusable evaluation and simulation behavior
-lives in the shared modules above.
+Keeping these modules local makes task physics auditable without forcing all tasks into one abstraction.
 
-## Scope and responsible use
+## Scope, security, and license
 
-PACE-Bench currently models 2D rigid-body systems in Box2D. It does not cover 3D dynamics, deformable bodies, full fluid simulation, perception, navigation, or multi-agent coordination. Task prompts and diagnostics are English-only.
+PACE-Bench models 2D rigid-body systems in Box2D; it does not cover 3D/deformable physics, full fluids, perception, navigation, or multi-agent coordination. Prompts and feedback are currently English-only.
 
-Generated Python is executed by the benchmark verifier under strict static and runtime namespace restrictions. For coding agents, the repository additionally provides the isolated container and credential-gateway path above. The evaluator should still run on a dedicated host without unrelated credentials; PACE-Bench is not designed as a public multi-tenant execution service.
-
-Contributions should preserve task physics, reference behavior, prompt exposure rules, deterministic seeds, simulation timing, attempt budgets, and canonical environment-pair identities. Experimental methods should remain in external packages rather than being added to the benchmark runtime.
+Generated code is statically checked and executed with a restricted namespace, but evaluators should still use a dedicated host without unrelated credentials. Contributions must preserve physics, reference behavior, exposure rules, seeds, timing, budgets, and canonical pair identities; experimental methods should remain external.
 
 PACE-Bench is released under the [MIT License](LICENSE).

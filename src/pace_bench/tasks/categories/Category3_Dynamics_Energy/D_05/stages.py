@@ -38,26 +38,7 @@ def update_task_description_for_visible_changes(
 def update_success_criteria_for_visible_changes(base_success_criteria: str, target_terrain_config: Dict[str, Any], base_terrain_config: Dict[str, Any]) -> str:
     return base_success_criteria
 
-_D05_SUFFIX_S1 = """
-
-The following physical properties may differ from the initial environment:
-- Shell Hardness
-"""
-
-_D05_SUFFIX_S2 = """
-
-The following physical properties may differ from the initial environment:
-- Slot Bar Oscillation
-"""
-
-_D05_SUFFIX_S3 = """
-
-The following physical properties may differ from the initial environment:
-- Shell Hardness
-- Angular Damping
-"""
-
-_D05_SUFFIX_S4 = """
+_D05_UNIFORM_SUFFIX = """
 
 The following physical properties may differ from the initial environment:
 - Shell Hardness
@@ -78,7 +59,7 @@ def get_d05_curriculum_stages() -> List[Dict[str, Any]]:
             "task_description": update_task_description_for_visible_changes(
                 base_description, {"shell_break_force": 16000.0}, {}, {}, {}
             ),
-            "task_description_suffix": _D05_SUFFIX_S1,
+            "task_description_suffix": _D05_UNIFORM_SUFFIX,
             "terrain_config": {"shell_break_force": 16000.0},
             "physics_config": {},
         },
@@ -89,7 +70,7 @@ def get_d05_curriculum_stages() -> List[Dict[str, Any]]:
             "task_description": update_task_description_for_visible_changes(
                 base_description, {"slot_bar_omega": 0.014}, {}, {}, {}
             ),
-            "task_description_suffix": _D05_SUFFIX_S2,
+            "task_description_suffix": _D05_UNIFORM_SUFFIX,
             "terrain_config": {"slot_bar_omega": 0.014},
             "physics_config": {},
         },
@@ -101,7 +82,7 @@ def get_d05_curriculum_stages() -> List[Dict[str, Any]]:
                 base_description, {"shell_break_force": 13000.0}, {},
                 {"angular_damping": 0.6}, {}
             ),
-            "task_description_suffix": _D05_SUFFIX_S3,
+            "task_description_suffix": _D05_UNIFORM_SUFFIX,
             "terrain_config": {"shell_break_force": 13000.0},
             "physics_config": {"angular_damping": 0.6},
         },
@@ -114,7 +95,7 @@ def get_d05_curriculum_stages() -> List[Dict[str, Any]]:
                 {"shell_break_force": 11000.0, "slot_bar_omega": 0.013}, {},
                 {"gravity": (0, -14.0), "angular_damping": 0.35}, {}
             ),
-            "task_description_suffix": _D05_SUFFIX_S4,
+            "task_description_suffix": _D05_UNIFORM_SUFFIX,
             "terrain_config": {"shell_break_force": 11000.0, "slot_bar_omega": 0.013},
             "physics_config": {"gravity": (0, -14.0), "angular_damping": 0.35},
         },
