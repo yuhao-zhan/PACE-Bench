@@ -484,7 +484,9 @@ def format_task_metrics(metrics: Dict[str, Any]) -> List[str]:
     parts.extend(_format_numerical(metrics))
     if len(parts) <= 1:
         try:
-            from pace_bench.evaluation.diagnostics import format_generic_execution_metrics
+            from pace_bench.evaluation.verification.diagnostics import (
+                format_generic_execution_metrics,
+            )
             return format_generic_execution_metrics(metrics)
         except Exception:
             pass

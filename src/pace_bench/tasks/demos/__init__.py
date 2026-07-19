@@ -1,1 +1,1 @@
-"""Small demonstration tasks that are excluded from benchmark metrics."""
+"""The basic example task, excluded from benchmark metrics."""

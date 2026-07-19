@@ -11,11 +11,11 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
-from pace_bench.evaluation.diagnostics import format_feedback
-from pace_bench.evaluation.safety import CodeSafetyMixin
-from pace_bench.evaluation.safety import ProhibitedOperationError
-from pace_bench.evaluation.simulation import SimulationMixin
-from pace_bench.evaluation.task_runtime import TaskRuntimeMixin
+from pace_bench.evaluation.verification.diagnostics import format_feedback
+from pace_bench.evaluation.verification.safety import CodeSafetyMixin
+from pace_bench.evaluation.verification.safety import ProhibitedOperationError
+from pace_bench.evaluation.verification.simulation import SimulationMixin
+from pace_bench.evaluation.verification.task_runtime import TaskRuntimeMixin
 from pace_bench.tasks.registry import TaskRegistry, get_registry
 from pace_bench.tasks.registry import EnvironmentSpec, TaskSpec
 from pace_bench.types import VerificationResult

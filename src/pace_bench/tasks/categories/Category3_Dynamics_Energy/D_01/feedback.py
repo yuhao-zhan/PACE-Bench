@@ -624,6 +624,8 @@ def _numerical_health_report(metrics: Dict[str, Any], parts: List[str]):
             parts.append("  - {}".format(issue))
 
 try:
-    from pace_bench.evaluation.diagnostics import format_generic_execution_metrics
+    from pace_bench.evaluation.verification.diagnostics import (
+        format_generic_execution_metrics,
+    )
 except ImportError:
     format_generic_execution_metrics = None

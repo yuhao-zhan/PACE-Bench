@@ -26,8 +26,11 @@ from pace_bench.evaluation.config import (
     StrategyContext,
 )
 from pace_bench.evaluation.providers import load_provider
-from pace_bench.evaluation.safety import extract_code, validate_solver_output
-from pace_bench.evaluation.verifier import PhysicsVerifier
+from pace_bench.evaluation.verification.safety import (
+    extract_code,
+    validate_solver_output,
+)
+from pace_bench.evaluation.verification.verifier import PhysicsVerifier
 from pace_bench.tasks.registry import get_reference_solution
 from pace_bench.tasks.registry import TaskRegistry, get_registry
 from pace_bench.tasks.registry import max_steps_for_task

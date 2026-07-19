@@ -106,7 +106,7 @@ def validate_solver_output(
 
 class CodeSafetyMixin:
     def _load_allowed_apis(self, task) -> set:
-        """Load allowed APIs from primitives_api.json for the current task"""
+        """Load the APIs exposed by a benchmark task or tutorial demo."""
         import json
         import re
 
@@ -136,6 +136,15 @@ class CodeSafetyMixin:
                         matches = re.findall(r"sandbox\.([a-zA-Z0-9_]+)", api_desc)
                         for m in matches:
                             allowed.add(m)
+
+                # Benchmark tasks use the centralized API manifest. The standalone
+                # demo is deliberately smaller and documents its primitives in its
+                # own prompt, so derive the same allow-list from that public text.
+                if not task.benchmark:
+                    prompt_module = self.registry.load_module(task, "prompt")
+                    prompt_data = getattr(prompt_module, "TASK_PROMPT", {})
+                    primitives = str(prompt_data.get("primitives_api", ""))
+                    allowed.update(re.findall(r"sandbox\.([a-zA-Z0-9_]+)", primitives))
 
                 # Also allow reading internal attributes that are documented as allowed in API_INTRO
                 allowed.add("_terrain_bodies")

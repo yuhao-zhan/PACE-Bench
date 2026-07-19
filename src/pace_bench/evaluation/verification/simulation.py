@@ -66,18 +66,6 @@ class SimulationMixin:
         # Get agent_action function
         agent_action_func = getattr(code_module, "agent_action", None)
 
-        # For ClassifyBalls task, use special loop
-        if "classify" in self.task_name.lower():
-            return self._run_classify_balls_simulation(
-                environment,
-                agent_components,
-                evaluator,
-                agent_action_func,
-                headless,
-                save_gif_path,
-                renderer,
-            )
-
         # Standard simulation loop
         STABILIZATION_STEPS = 60
         last_position = None
@@ -635,112 +623,6 @@ class SimulationMixin:
                         "max_steps": self.max_steps,
                     }
                 ]
-            # Retain constraint metadata for dense failure scores and auditing.
-            if evaluator is not None and hasattr(evaluator, "get_constraint_info"):
-                try:
-                    constraint_info = evaluator.get_constraint_info()
-                    if constraint_info and isinstance(constraint_info, dict):
-                        final_metrics["constraint_info"] = constraint_info
-                except Exception:
-                    pass  # Non-fatal; constraint_info is optional
-
-            return final_metrics.get("success", False), final_score, final_metrics
-
-        # Save GIF (even without evaluator)
-        if save_gif_path and self.simulator:
-            with suppress(Exception):
-                self.simulator.save_gif_animation(save_gif_path)
-
-        return False, 0.0, {}
-
-    def _run_classify_balls_simulation(
-        self,
-        environment,
-        agent_components,
-        evaluator,
-        agent_action_func,
-        headless,
-        save_gif_path=None,
-        renderer=None,
-    ):
-        """Run simulation loop for ClassifyBalls task"""
-        step_count = 0
-        running = True
-        camera_offset_x = 0
-        save_gif = save_gif_path is not None
-        can_display = (
-            self.simulator.can_display
-            if hasattr(self.simulator, "can_display")
-            else False
-        )
-
-        while running and step_count < self.max_steps:
-            # Handle events
-            if not self.simulator.handle_events():
-                running = False
-                break
-
-            # Spawn balls
-            if environment.balls_spawned < environment.balls_to_spawn:
-                environment.ball_spawn_timer += 1
-                spawn_interval = environment.ball_spawn_interval_base
-                if environment.ball_spawn_timer >= spawn_interval:
-                    color = environment.ball_spawn_order[environment.balls_spawned]
-                    environment.spawn_ball(color)
-                    environment.ball_spawn_timer = 0
-
-            # Agent executes action
-            if agent_action_func:
-                agent_action_func(environment, agent_components, step_count)
-
-            # Physics step
-            environment.step(TIME_STEP)
-            step_count += 1
-
-            # Render
-            if (save_gif or can_display) and renderer and hasattr(renderer, "render"):
-                # Camera fixed at conveyor center
-                target_x = (
-                    (environment.conveyor_start_x + environment.conveyor_end_x)
-                    / 2
-                    * self.simulator.ppm
-                )
-                camera_offset_x = target_x - self.simulator.screen_width / 2
-
-                with suppress(Exception):
-                    renderer.render(environment, agent_components, camera_offset_x)
-
-                # Refresh display
-                if can_display:
-                    self.simulator.flip()
-                    self.simulator.tick()
-
-            # Collect frames
-            if save_gif:
-                self.simulator.collect_frame(step_count)
-
-            # Evaluate
-            if step_count % 100 == 0 and evaluator:
-                should_stop, score, metrics = self._evaluate_with_penalty(
-                    evaluator, step_count, self.max_steps
-                )
-
-                if should_stop and metrics.get("success"):
-                    return True, score, metrics
-                elif should_stop:
-                    return False, score, metrics
-
-        # Final evaluation
-        if evaluator:
-            final_should_stop, final_score, final_metrics = self._evaluate_with_penalty(
-                evaluator, step_count, self.max_steps
-            )
-
-            # Save GIF
-            if save_gif_path and self.simulator:
-                with suppress(Exception):
-                    self.simulator.save_gif_animation(save_gif_path)
-
             # Retain constraint metadata for dense failure scores and auditing.
             if evaluator is not None and hasattr(evaluator, "get_constraint_info"):
                 try:

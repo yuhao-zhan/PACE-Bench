@@ -194,7 +194,17 @@ def _list_command(args: argparse.Namespace) -> int:
                     for environment in registry.environments(task)
                 )
                 print(f"  {task.name:<4}  {task.full_name}  [{environments}]")
-    print(f"{len(tasks)} benchmark task(s)")
+    demos = [task for task in tasks if not task.benchmark]
+    if demos:
+        print("Demo")
+        for task in demos:
+            environments = ", ".join(
+                str(environment.environment_id)
+                for environment in registry.environments(task)
+            )
+            print(f"  {task.name:<4}  {task.full_name}  [{environments}]")
+    benchmark_count = sum(task.benchmark for task in tasks)
+    print(f"{benchmark_count} benchmark task(s), {len(demos)} demo(s)")
     return 0
 
 
@@ -276,8 +286,12 @@ def _config_from_args(args: argparse.Namespace, mode: RunMode) -> RunConfig:
 def _agent_command(args: argparse.Namespace) -> int:
     """Run one coding agent without exposing the installed benchmark package."""
 
-    from pace_bench.agent import AgentSession, AgentSessionConfig, AgentSessionServer
-    from pace_bench.agent_container import AgentContainerConfig, run_agent_container
+    from pace_bench.agents.container import AgentContainerConfig, run_agent_container
+    from pace_bench.agents.session import (
+        AgentSession,
+        AgentSessionConfig,
+        AgentSessionServer,
+    )
 
     if args.prompt_file and not args.prompt_file.is_file():
         raise ConfigurationError(f"Prompt file does not exist: {args.prompt_file}")

@@ -13,7 +13,7 @@ from pace_bench.evaluation.results import (
     result_path,
     save_result,
 )
-from pace_bench.evaluation.verifier import PhysicsVerifier
+from pace_bench.evaluation.verification.verifier import PhysicsVerifier
 from pace_bench.tasks.registry import get_reference_solution
 from pace_bench.tasks.registry import TaskRegistry, get_registry
 from pace_bench.tasks.registry import max_steps_for_task

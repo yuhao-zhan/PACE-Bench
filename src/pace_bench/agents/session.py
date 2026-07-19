@@ -3,7 +3,7 @@
 The trusted host owns task discovery and Box2D verification.  An agent receives
 only a generated workspace and communicates with this module through a narrow,
 token-authenticated HTTP API.  Container isolation is implemented separately in
-``agent_container`` so benchmark semantics remain independent of Docker.
+``agents.container`` so benchmark semantics remain independent of Docker.
 """
 
 from __future__ import annotations
@@ -23,8 +23,8 @@ from typing import Any
 from pace_bench.evaluation.config import RunConfig
 from pace_bench.evaluation.prompts import PromptBuilder
 from pace_bench.evaluation.results import result_path, save_result
-from pace_bench.evaluation.safety import validate_solver_output
-from pace_bench.evaluation.verifier import PhysicsVerifier
+from pace_bench.evaluation.verification.safety import validate_solver_output
+from pace_bench.evaluation.verification.verifier import PhysicsVerifier
 from pace_bench.tasks.registry import (
     TaskRegistry,
     get_reference_solution,

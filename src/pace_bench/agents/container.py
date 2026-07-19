@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from pace_bench.agent import AgentSession, AgentSessionServer
+from pace_bench.agents.session import AgentSession, AgentSessionServer
 from pace_bench.errors import AgentRuntimeError
 
 DEFAULT_IMAGE = "pace-bench-agent-runtime:0.2.0"
@@ -120,7 +120,7 @@ def run_agent_container(
         secret_file = Path(temporary) / "secrets.json"
         secret_file.write_text(json.dumps(secrets), encoding="utf-8")
         secret_file.chmod(0o600)
-        gateway_source = Path(__file__).with_name("agent_gateway.py").resolve()
+        gateway_source = Path(__file__).with_name("gateway.py").resolve()
         _docker("network", "create", "--internal", network)
         try:
             gateway_command = [

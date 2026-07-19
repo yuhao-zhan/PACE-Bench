@@ -417,7 +417,9 @@ def format_task_metrics(metrics: Dict[str, Any]) -> List[str]:
         parts = []
     if not parts:
         try:
-            from pace_bench.evaluation.diagnostics import format_generic_execution_metrics
+            from pace_bench.evaluation.verification.diagnostics import (
+                format_generic_execution_metrics,
+            )
             parts = format_generic_execution_metrics(metrics)
         except Exception:
             parts = []

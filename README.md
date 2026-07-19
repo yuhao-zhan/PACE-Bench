@@ -396,27 +396,91 @@ For comparable reporting, keep the canonical task step limits and record the mod
 
 ```text
 PACE-Bench/
+├── .github/workflows/ci.yml      # install and benchmark smoke checks
+├── assets/                       # images used by this README
 ├── src/
 │   ├── custom_extension.py       # external model/method example
 │   └── pace_bench/
-│       ├── cli.py                # list, evaluate, validate, report
-│       ├── agent.py              # black-box session, submission API, workspace
-│       ├── agent_container.py    # Docker isolation and agent adapters
-│       ├── agent_gateway.py      # credential-injecting allowlist gateway
-│       ├── evaluation/           # vanilla loop, prompts, providers, verifier, results
+│       ├── cli.py                # public pace-bench commands
+│       ├── agents/               # black-box Agent sessions and containers
+│       ├── evaluation/           # model evaluation and result pipeline
 │       ├── tasks/
 │       │   ├── registry.py       # task/env discovery and selection
 │       │   ├── categories/       # 36 benchmark tasks
-│       │   └── demos/            # 3 non-benchmark demos
-│       ├── simulator.py
-│       ├── renderer.py
-│       └── primitives.py
-├── assets/
-├── requirements.txt
-└── pyproject.toml                # minimal package and CLI installation metadata
+│       │   └── demos/basic/      # only tutorial demo; not benchmark data
+│       ├── primitives.py         # shared task-facing physics helpers
+│       ├── simulator.py          # Box2D stepping and optional artifacts
+│       ├── renderer.py           # shared pygame renderer
+│       ├── paths.py              # package and output paths
+│       └── types.py              # typed task, attempt, and result records
+├── requirements.txt              # sole dependency manifest
+└── pyproject.toml                # editable CLI and package-data metadata
 ```
 
-Most source files belong to the benchmark tasks themselves. Each task intentionally keeps local modules for its design, environment, evaluator, diagnostics, prompt, renderer, and mutation stages; these encode task-specific physics rather than duplicated framework functionality.
+### Runtime modules
+
+| Path | Responsibility |
+| --- | --- |
+| `cli.py` | Parses `list`, `evaluate`, `agent`, `validate`, and `report`; it contains no task physics. |
+| `agents/session.py` | Owns one trusted black-box session, attempt accounting, compact feedback, workspace files, and final result persistence. |
+| `agents/container.py` | Builds and runs isolated Codex, Claude Code, or custom-Agent containers. |
+| `agents/gateway.py` | Runs the small standalone credential/evaluator proxy mounted into the gateway container. |
+| `evaluation/config.py` | Defines provider/strategy protocols and validates run configuration. |
+| `evaluation/engine.py` | Executes the single vanilla generation–verification loop for one work item. |
+| `evaluation/method.py` | Implements Previous-One + Best and loads an external method by dotted import. |
+| `evaluation/providers.py` | Implements mock, OpenAI-compatible, and optional local-Transformers providers. |
+| `evaluation/prompts.py` | Builds initial, revision, and adaptation prompts while preserving variable-exposure rules. |
+| `evaluation/runner.py` | Enumerates work deterministically, handles parallel queues/resume, and validates references. |
+| `evaluation/results.py` | Serializes schema-versioned results and computes standard aggregates. |
+| `evaluation/verification/` | Contains candidate safety checks, task loading, Box2D execution, diagnostics, and the verifier facade. |
+| `tasks/registry.py` | Discovers exactly 36 benchmark tasks and the single `basic` demo, resolves selectors, environments, and canonical pairs. |
+
+The modules under `evaluation/verification/` are kept separate because they
+have different security and lifecycle responsibilities: `safety.py` validates
+submitted Python, `task_runtime.py` loads task-local classes, `simulation.py`
+runs and cleans up Box2D/pygame, `diagnostics.py` formats standard feedback,
+and `verifier.py` coordinates those pieces. They are internal implementation
+modules; model providers and external methods interact with the typed protocols
+instead.
+
+### Why `evaluation/prompt_data/` exists
+
+The four Markdown files in `prompt_data/` are fixed in-context examples used by
+the shipped vanilla baseline. They are loaded by `evaluation/prompts.py` and
+included as package data:
+
+| File | Used for |
+| --- | --- |
+| `initial_demonstration.md` | Few-shot physical analysis and code examples for a from-scratch initial request. |
+| `revision_demonstration.md` | A diagnosis-and-fix example for ordinary iterative revisions. |
+| `adaptation_setting.md` | The short source-environment to target-environment framing. |
+| `adaptation_demonstration.md` | A complete example of adapting a previously successful design after mutation. |
+
+These files are prompt protocol assets, not discoverable tasks, hidden
+environment definitions, or extra benchmark demos. Changing them changes the
+vanilla baseline prompt and therefore requires an intentional protocol change
+and new characterization results. The only runnable tutorial demo is
+`tasks/demos/basic/`.
+
+### Task module contract
+
+Most repository files belong to the 36 task implementations. Each
+`tasks/categories/CategoryN_*/X_NN/` directory deliberately keeps its physics
+local:
+
+| File | Task-local responsibility |
+| --- | --- |
+| `agent.py` | Initial and Stage-1 through Stage-4 reference solutions. |
+| `environment.py` | Box2D world, objects, primitives, and mutable environment constants. |
+| `evaluator.py` | Success/failure conditions, score, constraints, and raw metrics. |
+| `feedback.py` | Objective formatting of evaluator metrics for the solver. |
+| `prompt.py` | Task statement, exposed geometry, constraints, and success criteria. |
+| `renderer.py` | Visualization only; it must not affect physics or scoring. |
+| `stages.py` | Four mutations and visibility-aware prompt updates. |
+
+Keeping these seven files per task is intentional: task-specific physics stays
+auditable in one directory, while reusable evaluation and simulation behavior
+lives in the shared modules above.
 
 ## Scope and responsible use
 

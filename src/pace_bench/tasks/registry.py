@@ -1,4 +1,4 @@
-"""Discovery, validation, and loading for the 36 tasks and three demos."""
+"""Discovery, validation, and loading for the 36 tasks and basic demo."""
 
 from __future__ import annotations
 
@@ -26,7 +26,7 @@ CATEGORIES: dict[int, tuple[str, str, str]] = {
     5: ("Category5_Cybernetics_Control", "C", "Cybernetics / Control"),
     6: ("Category6_ExoticPhysics", "E", "Exotic Physics"),
 }
-DEMO_NAMES = ("basic", "classify_balls", "control_aware")
+DEMO_NAMES = ("basic",)
 
 BENCHMARK_REQUIRED_FILES = frozenset(
     {
