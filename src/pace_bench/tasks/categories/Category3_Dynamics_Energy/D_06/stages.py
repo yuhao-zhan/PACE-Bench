@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pace_bench.tasks.stage_prompt import uniform_suffix_for_task
+
 from typing import Any, Dict, List
 
 import re
@@ -127,8 +129,18 @@ def update_task_description_for_visible_changes(
             f"- **Build Zone**: x=[{tx0}, {tx1}] m, y=[{ty0}, {ty1}] m "
             f"(originally x=[{bx0}, {bx1}] m, y=[{by0}, {by1}] m in the source environment)."
         )
-        if re.search(bz_pat, description):
-            description = re.sub(bz_pat, bz_repl, description)
+        description, count = re.subn(bz_pat, bz_repl, description, count=1)
+        if count != 1:
+            raise ValueError(f"D_06 expected one Build Zone prompt target; found {count}")
+        target_pat = r"target zone \(x=\[7, 11\], y=\[0\.5, 5\.5\]\)"
+        target_repl = (
+            f"target zone (x=[{tx0:g}, {tx1:g}], y=[{ty0:g}, {ty1:g}]) "
+            f"(originally x=[{bx0:g}, {bx1:g}], y=[{by0:g}, {by1:g}] "
+            "in the source environment)"
+        )
+        description, count = re.subn(target_pat, target_repl, description, count=1)
+        if count != 1:
+            raise ValueError(f"D_06 expected one target-zone prompt target; found {count}")
         if tx0 != bx0:
             wall_x = tx0 - 0.05
             base_wall_x = bx0 - 0.05
@@ -137,55 +149,58 @@ def update_task_description_for_visible_changes(
                 rf"\1{wall_x:.2f}\3{tx0}\5 "
                 rf"(originally approximately x={base_wall_x:.2f} m when the build zone starts at x={bx0:.1f} m)"
             )
-            if _safe_re_search(obj_pat, description):
-                description = _safe_re_sub(obj_pat, obj_new, description)
+            description, count = re.subn(obj_pat, obj_new, description, count=1)
+            if count != 1:
+                raise ValueError(f"D_06 expected one left-boundary prompt target; found {count}")
     sched_new = _launch_schedule_sentence(tgt_m)
     sched_old = _launch_schedule_sentence(base_m)
     if sched_new != sched_old:
         sched_pat = r"(ball 2 at t=[\d.]+ s, ball 3 at t=[\d.]+ s, ball 4 at t=[\d.]+ s, ball 5 at t=[\d.]+ s, ball 6 at t=[\d.]+ s, ball 7 at t=[\d.]+ s\.)"
-        if _safe_re_search(sched_pat, description):
-            description = _safe_re_sub(
+        description, count = re.subn(
                 sched_pat,
                 rf"{sched_new} (originally {sched_old} in the source environment).",
                 description,
+                count=1,
             )
+        if count != 1:
+            raise ValueError(f"D_06 expected one launch-schedule prompt target; found {count}")
     spd_new = _speed_list_sentence(tgt_m)
     spd_old = _speed_list_sentence(base_m)
     if spd_new != spd_old:
         spd_pat = r"(ball1=-?[\d.]+, ball2=-?[\d.]+, ball3=-?[\d.]+, ball4=-?[\d.]+, ball5=-?[\d.]+, ball6=-?[\d.]+, ball7=-?[\d.]+\.)"
-        if _safe_re_search(spd_pat, description):
-            description = _safe_re_sub(
+        description, count = re.subn(
                 spd_pat,
                 rf"{spd_new} (originally {spd_old} in the source environment).",
                 description,
+                count=1,
             )
-    base_d = float(base_tc.get("ball_density", _DEFAULT_DENSITY))
-    target_d = float(target_tc.get("ball_density", base_d))
-    if target_d != base_d:
-        dens_pat = r"(\*\*Projectile inertia\*\*: Nominal ball density is )(\d+\.?\d*)"
-        if re.search(dens_pat, description):
-            repl = r"\g<1>" + f"{target_d}" + r" (originally " + f"{base_d}" + r" in the source environment)"
-            description = re.sub(dens_pat, repl, description)
+        if count != 1:
+            raise ValueError(f"D_06 expected one launch-speed prompt target; found {count}")
+    # Projectile density is latent inertia, not visible geometry or a constraint.
     fz_new = _forbidden_zones_sentence(tgt_m, _FORBIDDEN_ZONE_DEFAULTS)
     fz_old = _forbidden_zones_sentence(base_m, _FORBIDDEN_ZONE_DEFAULTS)
     if fz_new != fz_old:
         fz_pat = r"(\(x in )(\[[\d., ]+\](?:, \[[\d., ]+\])*)(\)\.)"
-        if _safe_re_search(fz_pat, description):
-            description = _safe_re_sub(
+        description, count = re.subn(
                 fz_pat,
                 rf"\1{fz_new} (originally {fz_old} in the source environment)\3",
                 description,
+                count=1,
             )
+        if count != 1:
+            raise ValueError(f"D_06 expected one Forbidden Zones prompt target; found {count}")
     sb_new = _sweeper_bands_sentence(tgt_m, _SWEEPER_BAND_DEFAULTS)
     sb_old = _sweeper_bands_sentence(base_m, _SWEEPER_BAND_DEFAULTS)
     if sb_new != sb_old:
         sb_pat = r"(\(y in )(\[[\d., ]+\](?:, \[[\d., ]+\])*)(\)\.)"
-        if _safe_re_search(sb_pat, description):
-            description = _safe_re_sub(
+        description, count = re.subn(
                 sb_pat,
                 rf"\1{sb_new} (originally {sb_old} in the source environment)\3",
                 description,
+                count=1,
             )
+        if count != 1:
+            raise ValueError(f"D_06 expected one Sweeper Bands prompt target; found {count}")
     return description
 
 def update_success_criteria_for_visible_changes(
@@ -198,74 +213,64 @@ def update_success_criteria_for_visible_changes(
     base_mass = base_terrain_config.get("max_structure_mass", default_mass)
     if target_mass != base_mass:
         pattern = r"(Total structure mass must be strictly less than )(\d+\.?\d*)( kg\.)"
-        if re.search(pattern, criteria):
-            criteria = re.sub(
+        criteria, count = re.subn(
                 pattern,
                 f"\\g<1>{target_mass:.1f}\\g<3> (originally {base_mass:.1f} kg in the source environment).",
                 criteria,
+                count=1,
             )
+        if count != 1:
+            raise ValueError(f"D_06 expected one mass-budget criteria target; found {count}")
     default_beams = 9
     target_beams = target_terrain_config.get("max_beam_count", default_beams)
     base_beams = base_terrain_config.get("max_beam_count", default_beams)
     if target_beams != base_beams:
         pattern = r"(- \*\*Beam Limit\*\*: Maximum )(\d+)( beams\.)"
-        if re.search(pattern, criteria):
-            criteria = re.sub(
+        criteria, count = re.subn(
                 pattern,
                 f"\\g<1>{target_beams} beams (originally {base_beams} beams in the source environment).",
                 criteria,
+                count=1,
             )
+        if count != 1:
+            raise ValueError(f"D_06 expected one beam-limit criteria target; found {count}")
     default_joint_force = 880.0
     target_joint = target_terrain_config.get("max_joint_force", default_joint_force)
     base_joint = base_terrain_config.get("max_joint_force", default_joint_force)
     if target_joint != base_joint:
         pattern = r"(reaches or exceeds )(\d+ N)( \(peak failure\)\.)"
-        if re.search(pattern, criteria):
-            criteria = re.sub(
+        criteria, count = re.subn(
                 pattern,
                 f"\\g<1>{target_joint:.0f} N (originally {base_joint:.0f} N in the source environment)\\g<3>",
                 criteria,
+                count=1,
             )
+        if count != 1:
+            raise ValueError(f"D_06 expected one peak-force criteria target; found {count}")
     default_fatigue = 760.0
     target_fatigue = target_terrain_config.get("joint_fatigue_threshold", default_fatigue)
     base_fatigue = base_terrain_config.get("joint_fatigue_threshold", default_fatigue)
     if target_fatigue != base_fatigue:
         pattern = r"(is strictly greater than )(\d+ N)( for two consecutive simulation steps, the joint fails \(fatigue\)\.)"
-        if re.search(pattern, criteria):
-            criteria = re.sub(
+        criteria, count = re.subn(
                 pattern,
                 f"\\g<1>{target_fatigue:.0f} N (originally {base_fatigue:.0f} N in the source environment)\\g<3>",
                 criteria,
+                count=1,
             )
+        if count != 1:
+            raise ValueError(f"D_06 expected one fatigue-force criteria target; found {count}")
     return criteria
 
-UNIFORM_SUFFIX = """
-
-Sensors indicate that this region exhibits non-standard physical properties.
-While the following variables **MIGHT** have changed from the initial environment, **NOT ALL** of them will necessarily be mutated in any given task. You must use active interaction and environmental feedback to deduce which specific conditions apply:
- - **Legal build footprint**: The axis-aligned region where beam centers may be placed may differ.
- - **Structural stress limits**: Peak joint reaction and sustained-load (fatigue) breakage thresholds may differ.
- - **Projectile inertia**: Ball density may differ.
- - **Inbound speeds and launch program**: Per-ball horizontal speeds at release and the staggered launch schedule may differ.
- - **Projectile damping and bounce**: Projectile linear damping, angular damping, and restitution may differ.
- - **Gravity and vertical modulation**: Effective gravity and vertical modulation properties may differ.
- - **Lateral forces and structural coupling**: Oscillating lateral force properties and structural wind coupling may differ.
-
-**Discovery via feedback**: Your objective is to identify the underlying physical rules of this specific environment through trial and reasoning. Initial standard solutions may fail; analyze the failure mode (e.g., where a joint breaks or how a body moves) to infer the hidden constraints and adapt your design.
-"""
+UNIFORM_SUFFIX = uniform_suffix_for_task("D_06")
 
 def get_d06_curriculum_stages() -> List[Dict[str, Any]]:
-    from pace_bench.tasks.categories.Category3_Dynamics_Energy.D_06.prompt import TASK_PROMPT
-    base_description = TASK_PROMPT["task_description"]
     return [
         {
             "stage_id": "Stage-1",
             "title": "Absolute joint annihilation — 1.0 N peak limit",
             "mutation_description": "Curriculum variant: peak joint reaction limit pushed to 1.0 N — barely above zero; any rigidly-anchored lattice shatters on its own weight or first ballistic contact (evaluation metadata only).",
-            "task_description": update_task_description_for_visible_changes(
-                base_description, {"max_joint_force": 1.0}, {}
-            ),
-            "task_description_suffix": UNIFORM_SUFFIX,
+            "task_description_suffix": uniform_suffix_for_task("D_06"),
             "terrain_config": {
                 "max_joint_force": 1.0,
             },
@@ -273,14 +278,14 @@ def get_d06_curriculum_stages() -> List[Dict[str, Any]]:
         },
         {
             "stage_id": "Stage-2",
-            "title": "Cropped build corridor",
-            "mutation_description": "Curriculum variant: tighter legal build footprint along x (evaluation metadata only).",
-            "task_description": update_task_description_for_visible_changes(
-                base_description, {"build_zone_x_max": 10.38}, {}
-            ),
-            "task_description_suffix": UNIFORM_SUFFIX,
+            "title": "Shifted legal corridor and low-drag projectiles",
+            "mutation_description": "The legal target corridor extends farther right, one forbidden strip shifts, and projectile damping changes; the initial structure is illegal while a passive absorber can catch all seven balls.",
+            "task_description_suffix": uniform_suffix_for_task("D_06"),
             "terrain_config": {
-                "build_zone_x_max": 10.38,
+                "build_zone_x_max": 13.0,
+                "forbidden_zone_4_x_min": 10.5,
+                "forbidden_zone_4_x_max": 11.0,
+                "ball_linear_damping": 0.3,
             },
             "physics_config": {},
         },
@@ -288,31 +293,7 @@ def get_d06_curriculum_stages() -> List[Dict[str, Any]]:
             "stage_id": "Stage-3",
             "title": "Extreme density storm — fragile joints, violent gravity, ultra-compressed launch",
             "mutation_description": "Curriculum variant: extreme projectile inertia combined with near-zero structural tolerance, ultra-compressed sequential launch, and violent gravity oscillation creating conflicting demands — heavy fast balls require strong absorption but joints shatter on contact, while compressed timing leaves no recovery window (evaluation metadata only).",
-            "task_description": update_task_description_for_visible_changes(
-                base_description,
-                {
-                    "ball_density": 520.0,
-                    "max_joint_force": 55.0,
-                    "joint_fatigue_threshold": 30.0,
-                    "ball_velocity_x": -52.0,
-                    "ball2_velocity_x": -54.0,
-                    "ball3_velocity_x": -52.0,
-                    "ball4_velocity_x": -58.0,
-                    "ball5_velocity_x": -53.0,
-                    "ball6_velocity_x": -54.0,
-                    "ball7_velocity_x": -53.0,
-                    "second_ball_launch_time": 0.14,
-                    "third_ball_launch_time": 0.34,
-                    "fourth_ball_launch_time": 0.54,
-                    "fifth_ball_launch_time": 0.74,
-                    "sixth_ball_launch_time": 0.94,
-                    "seventh_ball_launch_time": 1.14,
-                    "gravity_pulse_amplitude": 10.0,
-                    "gravity_pulse_period": 0.4,
-                },
-                {},
-            ),
-            "task_description_suffix": UNIFORM_SUFFIX,
+            "task_description_suffix": uniform_suffix_for_task("D_06"),
             "terrain_config": {
                 "ball_density": 520.0,
                 "max_joint_force": 55.0,
@@ -339,36 +320,7 @@ def get_d06_curriculum_stages() -> List[Dict[str, Any]]:
             "stage_id": "Stage-4",
             "title": "Stage-3 storm + bouncy balls, lighter self-damping, stronger structural gusts",
             "mutation_description": "Curriculum variant: Stage-3-class hazards plus additional projectile and coupling stressors (evaluation metadata only).",
-            "task_description": update_task_description_for_visible_changes(
-                base_description,
-                {
-                    "ball_density": 232.0,
-                    "max_joint_force": 300.0,
-                    "joint_fatigue_threshold": 225.0,
-                    "ball_velocity_x": -36.0,
-                    "ball2_velocity_x": -38.0,
-                    "ball3_velocity_x": -36.0,
-                    "ball4_velocity_x": -40.0,
-                    "ball5_velocity_x": -37.0,
-                    "ball6_velocity_x": -38.0,
-                    "ball7_velocity_x": -37.0,
-                    "second_ball_launch_time": 0.26,
-                    "third_ball_launch_time": 0.58,
-                    "fourth_ball_launch_time": 0.88,
-                    "fifth_ball_launch_time": 1.18,
-                    "sixth_ball_launch_time": 1.48,
-                    "seventh_ball_launch_time": 1.78,
-                    "gravity_pulse_amplitude": 3.5,
-                    "gravity_pulse_period": 1.0,
-                    "wind_on_structure": True,
-                    "structure_wind_scale": 0.178,
-                    "wind_amplitude": 9.0,
-                    "ball_restitution": 0.24,
-                    "ball_linear_damping": 0.52,
-                },
-                {},
-            ),
-            "task_description_suffix": UNIFORM_SUFFIX,
+            "task_description_suffix": uniform_suffix_for_task("D_06"),
             "terrain_config": {
                 "ball_density": 232.0,
                 "max_joint_force": 300.0,

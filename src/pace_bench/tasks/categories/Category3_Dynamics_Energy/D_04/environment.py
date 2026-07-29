@@ -65,6 +65,8 @@ class Sandbox:
         self._phase_antialigned_count = 0
         self._wind_force_history = []
         self._last_wind_fx = 0.0
+        self._rng = random.Random(0)
+        self._impulse_clamped_count = 0
     def _create_terrain(self, terrain_config: dict):
         ground_len = 30.0
         ground_h = 0.5
@@ -179,8 +181,8 @@ class Sandbox:
                 wind_fx = self._wind_strength
             else:
                 wind_fx = self._wind_strength * math.sin(2.0 * math.pi * self._sim_time / self._wind_period)
-            if random.random() < self._gust_prob:
-                wind_fx += self._gust_force * (1 if random.random() > 0.5 else -1)
+            if self._rng.random() < self._gust_prob:
+                wind_fx += self._gust_force * (1 if self._rng.random() > 0.5 else -1)
             self._last_wind_fx = wind_fx
             if len(self._wind_force_history) < 500:
                 self._wind_force_history.append((self._sim_time, wind_fx))
@@ -298,7 +300,7 @@ class Sandbox:
             ix_clamped = max(-max_i, min(max_i, float(ix_req)))
             iy_clamped = max(-max_i, min(max_i, float(iy_req)))
             if abs(ix_clamped) < abs(ix_req) - 1e-9 or abs(iy_clamped) < abs(iy_req) - 1e-9:
-                self._force_clamped_count += 1
+                self._impulse_clamped_count += 1
             ix_before_fault = ix_clamped
             fault = self._terrain_config.get("actuator_fault")
             if fault == "right_only" and ix_clamped < 0: ix_clamped = 0.0
@@ -353,6 +355,7 @@ class Sandbox:
             "force_suppressed_deadzone": self._force_suppressed_deadzone,
             "force_suppressed_fault": self._force_suppressed_fault,
             "force_clamped_count": self._force_clamped_count,
+            "impulse_clamped_count": self._impulse_clamped_count,
             "total_fx_requested": self._total_fx_requested,
             "total_fy_requested": self._total_fy_requested,
             "total_fx_delivered": self._total_fx_delivered,

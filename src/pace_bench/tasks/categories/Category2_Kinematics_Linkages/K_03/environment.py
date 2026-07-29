@@ -23,6 +23,9 @@ class Sandbox:
         self._slider_joint_anchor_y = None
         self._slider_body_initial_y = None
         self._objects_to_grasp = []
+        self._last_time_step = None
+        self._observation_error_count = 0
+        self._last_observation_error = None
         self.world = self._world
         self.bodies = self._bodies
         self.joints = self._joints
@@ -246,7 +249,11 @@ class Sandbox:
         if body:
             body.fixedRotation = bool(fixed)
     def step(self, time_step):
+        self._last_time_step = float(time_step)
         self._world.Step(time_step, 10, 10)
+    def _record_observation_error(self, source, exc):
+        self._observation_error_count += 1
+        self._last_observation_error = f"{source}: {type(exc).__name__}: {exc}"
     def get_terrain_bounds(self):
         return {
             "ground": {"y": self._ground_y},
@@ -273,8 +280,9 @@ class Sandbox:
         joint = self._slider_joint
         try:
             joint_trans = joint.translation
-        except Exception:
-            joint_trans = 0.0
+        except Exception as exc:
+            self._record_observation_error("get_slider_position.translation", exc)
+            joint_trans = None
         max_force = None
         if hasattr(self, '_joint_metadata') and id(joint) in self._joint_metadata:
             max_force = self._joint_metadata[id(joint)].get('max_motor_force')
@@ -327,8 +335,8 @@ class Sandbox:
                     elif b == obj and a in gripper_set:
                         bodies_touching.add(a)
                         num_points += 1
-        except Exception:
-            pass
+        except Exception as exc:
+            self._record_observation_error("get_object_contact_count", exc)
         return num_points, len(bodies_touching)
     def get_object_velocity(self):
         obj = self._terrain_bodies.get("object")
@@ -375,16 +383,16 @@ class Sandbox:
         return None
     def get_finger_joint_states(self):
         states = []
-        inv_dt = 60.0
+        inv_dt = 1.0 / self._last_time_step if self._last_time_step else 60.0
         for joint in self._joints:
             if type(joint).__name__ == 'b2RevoluteJoint':
                 try:
                     angle_rad = float(joint.angle)
-                    motor_torque = 0.0
+                    motor_torque = None
                     try:
                         motor_torque = float(joint.GetMotorTorque(inv_dt))
-                    except Exception:
-                        pass
+                    except Exception as exc:
+                        self._record_observation_error("get_finger_joint_states.motor_torque", exc)
                     max_torque = None
                     if hasattr(self, '_joint_metadata') and id(joint) in self._joint_metadata:
                         max_torque = self._joint_metadata[id(joint)].get('max_motor_torque')
@@ -404,19 +412,21 @@ class Sandbox:
                             st['has_limits'] = True
                         else:
                             st['has_limits'] = False
-                    except Exception:
+                    except Exception as exc:
+                        self._record_observation_error("get_finger_joint_states.limits", exc)
                         st['has_limits'] = False
                     states.append(st)
-                except Exception:
-                    pass
+                except Exception as exc:
+                    self._record_observation_error("get_finger_joint_states", exc)
         return states
     def get_slider_motor_force(self):
         if self._slider_joint:
             try:
-                return float(self._slider_joint.GetMotorForce(60.0))
-            except Exception:
-                pass
-        return 0.0
+                inv_dt = 1.0 / self._last_time_step if self._last_time_step else 60.0
+                return float(self._slider_joint.GetMotorForce(inv_dt))
+            except Exception as exc:
+                self._record_observation_error("get_slider_motor_force", exc)
+        return None
     def get_slider_computed_translation(self):
         if self._slider_joint is None:
             return None
@@ -424,8 +434,8 @@ class Sandbox:
         try:
             if self._slider_body_initial_y is not None:
                 return float(self._slider_body_initial_y - joint.bodyB.position.y)
-        except Exception:
-            pass
+        except Exception as exc:
+            self._record_observation_error("get_slider_computed_translation", exc)
         return None
     def get_object_contact_details(self):
         obj = self._terrain_bodies.get("object")
@@ -494,8 +504,8 @@ class Sandbox:
                                 num_points += 1
                         else:
                             num_points += 1
-        except Exception:
-            pass
+        except Exception as exc:
+            self._record_observation_error("get_object_contact_details", exc)
         return {
             "contact_points": num_points,
             "bodies_touching": len(bodies_touching),

@@ -1,139 +1,113 @@
-import sys
+"""Evaluator for E-05 magnetic-field navigation."""
 
-import os
+from __future__ import annotations
 
-from typing import Dict, Any
+import math
+from typing import Any, Dict
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../.."))
-
-from pace_bench.simulator import TIME_STEP
 
 class Evaluator:
+    UPPER_DIAGNOSTIC_BAND_Y = 9.7
+
     def __init__(self, terrain_bounds, environment=None):
-        self.terrain_bounds = terrain_bounds
-        self.environment = environment
-        tz = terrain_bounds.get("target_zone", {})
-        self.target_x_min = float(tz.get("x_min", 28.0))
-        self.target_x_max = float(tz.get("x_max", 32.0))
-        self.target_y_min = float(tz.get("y_min", 6.0))
-        self.target_y_max = float(tz.get("y_max", 9.0))
-        pz = terrain_bounds.get("pit_zone", {})
-        self.pit_x_min = float(pz.get("x_min", 16.0))
-        self.pit_x_max = float(pz.get("x_max", 24.0))
-        self.pit_y_max = float(pz.get("y_max", 5.5))
-        self.ground_y = float(terrain_bounds.get("ground_y", 1.0))
-        self.body_start_x = float(terrain_bounds.get("body_start", {}).get("x", 8.0))
-        self.body_start_y = float(terrain_bounds.get("body_start", {}).get("y", 5.0))
-        self.reached_target = False
         if environment is None:
             raise ValueError("Evaluator requires environment instance")
+        self.terrain_bounds = terrain_bounds
+        self.environment = environment
+        target = terrain_bounds.get("target_zone", {})
+        self.target_x_min = float(target.get("x_min", 28.0))
+        self.target_x_max = float(target.get("x_max", 32.0))
+        self.target_y_min = float(target.get("y_min", 6.0))
+        self.target_y_max = float(target.get("y_max", 9.0))
+        pit = terrain_bounds.get("pit_zone", {})
+        self.pit_x_min = float(pit.get("x_min", 16.0))
+        self.pit_x_max = float(pit.get("x_max", 24.0))
+        self.pit_y_max = float(pit.get("y_max", 5.5))
+        self.ground_y = float(terrain_bounds.get("ground_y", 1.0))
+        start = terrain_bounds.get("body_start", {})
+        self.body_start_x = float(start.get("x", 8.0))
+        self.body_start_y = float(start.get("y", 5.0))
+        self.reached_target = False
+        self.first_target_entry_step = None
+
+    @staticmethod
+    def _interval_margin(value: float, lower: float, upper: float) -> float:
+        return min(value - lower, upper - value)
+
+    def _pit_margin(self, x: float, y: float) -> float:
+        if self.pit_x_min <= x <= self.pit_x_max:
+            return y - self.pit_y_max
+        return min(abs(x - self.pit_x_min), abs(x - self.pit_x_max))
+
     def evaluate(self, agent_body, step_count, max_steps):
-        if not self.environment:
-            return True, 0.0, {"error": "Environment not available"}
-        pos = self.environment.get_body_position()
-        if pos is None:
+        del agent_body
+        position = self.environment.get_body_position()
+        if position is None:
             return True, 0.0, {
                 "success": False,
                 "failed": True,
-                "failure_reason": "Body not found",
-                "step_count": step_count,
+                "failure_reason": "Controlled body is unavailable",
+                "step_count": int(step_count),
+                "max_steps": min(int(max_steps), int(self.environment.MAX_STEPS)),
             }
-        x, y = pos
-        if (self.target_x_min <= x <= self.target_x_max and
-                self.target_y_min <= y <= self.target_y_max):
+
+        x, y = map(float, position)
+        in_target_x = self.target_x_min <= x <= self.target_x_max
+        in_target_y = self.target_y_min <= y <= self.target_y_max
+        if in_target_x and in_target_y:
             self.reached_target = True
+            if self.first_target_entry_step is None:
+                self.first_target_entry_step = int(step_count)
+
+        in_pit = (
+            self.pit_x_min <= x <= self.pit_x_max and y < self.pit_y_max
+        )
+        step_limit = min(int(max_steps), int(self.environment.MAX_STEPS))
         success = self.reached_target
-        in_pit = (self.pit_x_min <= x <= self.pit_x_max) and y < self.pit_y_max
         if in_pit and not success:
             failed = True
-            failure_reason = "Fell into pit zone; body entered forbidden region"
+            failure_reason = "Body center entered the forbidden pit region"
         else:
-            failed = step_count >= max_steps - 1 and not success
-            failure_reason = ("Stuck in local minimum: did not reach target zone before time ran out" if failed else None)
+            failed = step_count >= step_limit and not success
+            failure_reason = (
+                "Target zone was not reached before the simulation-step limit"
+                if failed
+                else None
+            )
+
+        maximum_distance = self.target_x_min - self.body_start_x
+        progress_x = (
+            max(0.0, min(1.0, (x - self.body_start_x) / maximum_distance))
+            if maximum_distance > 0.0
+            else 0.0
+        )
         if success:
             score = 100.0
         elif failed:
             score = 0.0
         else:
-            start_x = self.body_start_x
-            max_dist = self.target_x_min - start_x
-            dist_traveled = x - start_x
-            progress = min(max(dist_traveled / max_dist, 0.0), 1.0) if max_dist > 0 else 0.0
-            score = progress * 80.0
-        vel = self.environment.get_body_velocity() or (0.0, 0.0)
-        vx, vy = vel[0], vel[1]
-        speed = (vx * vx + vy * vy) ** 0.5
-        start_x = self.body_start_x
-        start_y = self.body_start_y
-        closest_x = max(self.target_x_min, min(x, self.target_x_max))
-        closest_y = max(self.target_y_min, min(y, self.target_y_max))
-        dist_to_target = ((x - closest_x) ** 2 + (y - closest_y) ** 2) ** 0.5
-        total_dist_x = self.target_x_min - start_x
-        progress_x = (x - start_x) / total_dist_x if total_dist_x > 0 else 0.0
-        progress_x = max(0.0, min(1.0, progress_x))
-        in_target_x = self.target_x_min <= x <= self.target_x_max
-        in_target_y = self.target_y_min <= y <= self.target_y_max
-        forensic: Dict = {}
-        env = self.environment
-        if env is not None:
-            fs = env.get_forensic_summary()
-            forensic = {
-                "max_body_x": fs.get("max_body_x"),
-                "min_body_x": fs.get("min_body_x"),
-                "max_body_y": fs.get("max_body_y"),
-                "min_body_y": fs.get("min_body_y"),
-                "max_speed": fs.get("max_speed"),
-                "max_x_reached": fs.get("max_x_reached"),
-                "total_dx": fs.get("total_dx"),
-                "total_dy": fs.get("total_dy"),
-                "steps_near_ceiling": fs.get("steps_near_ceiling", 0),
-                "steps_in_pit_zone": fs.get("steps_in_pit_zone", 0),
-                "steps_in_ground_zone": fs.get("steps_in_ground_zone", 0),
-                "steps_stationary": fs.get("steps_stationary", 0),
-                "first_ceiling_entry_step": fs.get("first_ceiling_entry_step"),
-                "first_pit_entry_step": fs.get("first_pit_entry_step"),
-                "first_ground_entry_step": fs.get("first_ground_entry_step"),
-                "vertical_zone_samples": fs.get("vertical_zone_samples", {}),
-                "temporal_events": env.get_temporal_events() if hasattr(env, 'get_temporal_events') else [],
-                "velocity_reversal_events": env.get_velocity_reversals() if hasattr(env, 'get_velocity_reversals') else [],
-                "peak_vertical_accel": env.get_peak_vertical_acceleration() if hasattr(env, 'get_peak_vertical_acceleration') else 0.0,
-            }
-            pp = env.get_physics_params()
-            forensic["gravity_y"] = pp.get("gravity_y")
-            forensic["linear_damping"] = pp.get("linear_damping")
-            forensic["max_thrust"] = pp.get("max_thrust")
-            forensic["magnet_count"] = pp.get("magnet_count")
-            if hasattr(env, 'get_magnetic_force_summary'):
-                forensic.update(env.get_magnetic_force_summary())
-            if hasattr(env, 'get_energy_summary'):
-                forensic.update(env.get_energy_summary())
-            if hasattr(env, 'get_force_decomposition'):
-                forensic.update(env.get_force_decomposition())
-            if hasattr(env, 'get_progress_plateau_info'):
-                forensic.update(env.get_progress_plateau_info())
-        CEILING_Y = 9.7
-        ceiling_clearance = CEILING_Y - y if y < CEILING_Y else 0.0
-        ground_clearance = y - self.ground_y if y > self.ground_y else 0.0
-        hx_remaining = max(self.target_x_min - x, 0.0)
-        in_pit_evaluator = (self.pit_x_min <= x <= self.pit_x_max) and (y < self.pit_y_max)
-        in_ceiling_zone = y > CEILING_Y
-        magnetic_wall_clearance = None
-        if env is not None and hasattr(env, '_magnets'):
-            min_dist = float('inf')
-            for m in env._magnets:
-                mx, my = m[0], m[1]
-                d = ((mx - x) ** 2 + (my - y) ** 2) ** 0.5
-                if d < min_dist:
-                    min_dist = d
-            magnetic_wall_clearance = min_dist if min_dist < float('inf') else None
-        net_mag_fx = forensic.get("net_magnetic_force_x", 0.0) if isinstance(forensic, dict) else 0.0
-        thrust_fx = forensic.get("thrust_applied_x", 0.0) if isinstance(forensic, dict) else 0.0
-        net_force_x = forensic.get("net_force_x", 0.0) if isinstance(forensic, dict) else 0.0
-        metrics: Dict = {
-            "step_count": step_count,
-            "max_steps": max_steps,
-            "success": success,
-            "failed": failed,
+            score = progress_x * 80.0
+
+        vx, vy = map(float, self.environment.get_body_velocity() or (0.0, 0.0))
+        speed = math.hypot(vx, vy)
+        closest_x = min(max(x, self.target_x_min), self.target_x_max)
+        closest_y = min(max(y, self.target_y_min), self.target_y_max)
+        distance_to_target = math.hypot(x - closest_x, y - closest_y)
+
+        summary = self.environment._get_forensic_summary()
+        physics = self.environment.get_physics_params()
+        magnetic = self.environment._get_magnetic_force_summary()
+        energy = self.environment._get_energy_summary()
+        forces = self.environment._get_force_decomposition()
+        plateau = self.environment._get_progress_plateau_info()
+        temporal_events = self.environment._get_temporal_events()
+        reversals = self.environment._get_velocity_reversals()
+
+        metrics: Dict[str, Any] = {
+            "step_count": int(step_count),
+            "max_steps": step_limit,
+            "success": bool(success),
+            "failed": bool(failed),
             "failure_reason": failure_reason,
             "body_x": x,
             "body_y": y,
@@ -141,41 +115,120 @@ class Evaluator:
             "target_x_max": self.target_x_max,
             "target_y_min": self.target_y_min,
             "target_y_max": self.target_y_max,
+            "target_x_margin": self._interval_margin(
+                x, self.target_x_min, self.target_x_max
+            ),
+            "target_y_margin": self._interval_margin(
+                y, self.target_y_min, self.target_y_max
+            ),
             "reached_target": self.reached_target,
+            "first_target_entry_step": self.first_target_entry_step,
             "velocity_x": vx,
             "velocity_y": vy,
             "speed": speed,
             "progress_x": progress_x,
-            "dist_to_target": dist_to_target,
+            "dist_to_target": distance_to_target,
             "in_target_x": in_target_x,
             "in_target_y": in_target_y,
-            "start_x": start_x,
-            "start_y": start_y,
-            "ceiling_clearance": ceiling_clearance,
-            "ground_clearance": ground_clearance,
-            "hx_remaining_to_target": hx_remaining,
-            "in_pit_zone": in_pit_evaluator,
+            "start_x": self.body_start_x,
+            "start_y": self.body_start_y,
+            "ceiling_clearance": self.UPPER_DIAGNOSTIC_BAND_Y - y,
+            "ground_clearance": y - self.ground_y,
+            "hx_remaining_to_target": max(self.target_x_min - x, 0.0),
+            "in_pit_zone": in_pit,
+            "pit_zone_margin": self._pit_margin(x, y),
             "pit_x_min": self.pit_x_min,
             "pit_x_max": self.pit_x_max,
             "pit_y_max": self.pit_y_max,
-            "ceiling_y": CEILING_Y,
+            # Kept as compatibility aliases; this is a diagnostic field band,
+            # not an evaluator-enforced ceiling.
+            "ceiling_y": self.UPPER_DIAGNOSTIC_BAND_Y,
+            "upper_diagnostic_band_y": self.UPPER_DIAGNOSTIC_BAND_Y,
             "ground_y": self.ground_y,
-            "in_ceiling_zone": in_ceiling_zone,
-            "magnetic_wall_clearance": magnetic_wall_clearance,
-            "net_magnetic_force_x_terminal": net_mag_fx,
-            "thrust_applied_x_terminal": thrust_fx,
-            "net_force_x_terminal": net_force_x,
-            **forensic,
+            "in_ceiling_zone": y > self.UPPER_DIAGNOSTIC_BAND_Y,
+            "max_body_x": max(
+                value
+                for value in (summary.get("max_body_x"), x)
+                if value is not None
+            ),
+            "min_body_x": min(
+                value
+                for value in (summary.get("min_body_x"), x)
+                if value is not None
+            ),
+            "max_body_y": max(
+                value
+                for value in (summary.get("max_body_y"), y)
+                if value is not None
+            ),
+            "min_body_y": min(
+                value
+                for value in (summary.get("min_body_y"), y)
+                if value is not None
+            ),
+            "max_speed": summary.get("max_speed"),
+            "max_x_reached": max(
+                value
+                for value in (summary.get("max_x_reached"), x)
+                if value is not None
+            ),
+            "total_dx": summary.get("total_dx"),
+            "total_dy": summary.get("total_dy"),
+            "steps_near_ceiling": summary.get("steps_near_ceiling", 0),
+            "steps_in_pit_zone": summary.get("steps_in_pit_zone", 0),
+            "steps_in_ground_zone": summary.get("steps_in_ground_zone", 0),
+            "steps_stationary": summary.get("steps_stationary", 0),
+            "first_ceiling_entry_step": summary.get("first_ceiling_entry_step"),
+            "first_pit_entry_step": summary.get("first_pit_entry_step"),
+            "first_ground_entry_step": summary.get("first_ground_entry_step"),
+            "vertical_zone_samples": summary.get("vertical_zone_samples", {}),
+            "temporal_events": temporal_events,
+            "velocity_reversal_events": reversals,
+            "velocity_reversal_count_x": sum(
+                event.get("axis") == "x"
+                for event in reversals
+                if isinstance(event, dict)
+            ),
+            "velocity_reversal_count_y": sum(
+                event.get("axis") == "y"
+                for event in reversals
+                if isinstance(event, dict)
+            ),
+            "peak_vertical_accel": self.environment._get_peak_vertical_acceleration(),
+            "gravity_y": physics.get("gravity_y"),
+            "linear_damping": physics.get("linear_damping"),
+            "max_thrust": physics.get("max_thrust"),
+            "magnet_count": physics.get("magnet_count"),
+            **magnetic,
+            **energy,
+            **forces,
+            **plateau,
         }
-        done = success or failed or (step_count >= max_steps - 1)
-        return done, score, metrics
+        metrics["net_magnetic_force_x_terminal"] = metrics.get(
+            "net_magnetic_force_x"
+        )
+        metrics["thrust_applied_x_terminal"] = metrics.get("thrust_applied_x")
+        return success or failed, score, metrics
+
     def get_task_description(self):
         return {
-            "task": "E-05: The Magnet",
-            "description": "Navigate body to target zone despite invisible repulsive/attractive force fields (avoid local minimum)",
+            "task": "E-05: Magnetic Navigation",
+            "description": (
+                "Guide the controlled body into the target zone without entering "
+                "the forbidden pit region."
+            ),
             "terrain": self.terrain_bounds,
             "success_criteria": {
-                "primary": f"Body center enters target zone (x in [{self.target_x_min:.1f}, {self.target_x_max:.1f}], y in [{self.target_y_min:.1f}, {self.target_y_max:.1f}])",
+                "primary": (
+                    f"Body center enters x=[{self.target_x_min}, "
+                    f"{self.target_x_max}], y=[{self.target_y_min}, "
+                    f"{self.target_y_max}]"
+                ),
+                "failure": (
+                    f"Before success, body center must not enter "
+                    f"x=[{self.pit_x_min}, {self.pit_x_max}] with "
+                    f"y<{self.pit_y_max}"
+                ),
             },
             "evaluation": {
                 "score_range": "0-100",

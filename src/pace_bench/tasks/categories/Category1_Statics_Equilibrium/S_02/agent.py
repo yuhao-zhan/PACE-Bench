@@ -3,7 +3,7 @@ import math
 def build_advanced_tower(sandbox, levels=25, base_w=4.0, beam_h=1.5, base_density=200.0, top_density=5.0,
                          taper_rate=0.8, density_taper=0.95, tmd_params=None):
     foundation_y = 1.0
-    foundation = sandbox._terrain_bodies.get("foundation")
+    foundation = sandbox.get_foundation()
     base = sandbox.add_beam(x=0, y=foundation_y + beam_h/2, width=base_w, height=beam_h, density=base_density)
     if foundation:
         num_joints = max(4, int(base_w * 0.8))
@@ -63,11 +63,73 @@ def build_agent_stage_3(sandbox):
     )
 
 def build_agent_stage_4(sandbox):
-    return build_advanced_tower(
-        sandbox, levels=13, base_w=8.5, beam_h=2.6,
-        base_density=0.18, top_density=0.01,
-        taper_rate=0.55, density_taper=0.28,
-    )
+    foundation = sandbox.get_foundation()
+    mast_x = (-1.55, 1.55)
+    mast_width = 0.65
+    tier_height = 10.0
+    tiers = []
+
+    for x in mast_x:
+        column = []
+        for level in range(3):
+            center_y = 6.0 + level * tier_height
+            beam = sandbox.add_beam(
+                x=x,
+                y=center_y,
+                width=mast_width,
+                height=tier_height,
+                density=0.55 + 0.15 * (2 - level),
+            )
+            column.append(beam)
+            if level > 0:
+                lower = column[level - 1]
+                sandbox.add_joint(
+                    lower,
+                    beam,
+                    (x, 1.0 + level * tier_height),
+                    type="rigid",
+                )
+        tiers.append(column)
+
+    left, right = tiers
+    for level in range(3):
+        lower_y = 1.0 + level * tier_height
+        upper_y = lower_y + tier_height
+        sandbox.add_spring(
+            left[level],
+            right[level],
+            (mast_x[0], upper_y),
+            (mast_x[1], lower_y),
+            stiffness=2.4,
+            damping=0.95,
+        )
+        sandbox.add_spring(
+            right[level],
+            left[level],
+            (mast_x[1], upper_y),
+            (mast_x[0], lower_y),
+            stiffness=2.4,
+            damping=0.95,
+        )
+        for column_x, column in zip(mast_x, tiers):
+            sandbox.add_spring(
+                foundation,
+                column[level],
+                (-1.9, 1.0),
+                (column_x, upper_y),
+                stiffness=5.0,
+                damping=1.0,
+            )
+            sandbox.add_spring(
+                foundation,
+                column[level],
+                (1.9, 1.0),
+                (column_x, upper_y),
+                stiffness=5.0,
+                damping=1.0,
+            )
+
+    return left[0]
 
 def agent_action_stage_1(sandbox, agent_body, step_count): pass
 

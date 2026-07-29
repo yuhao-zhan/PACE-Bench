@@ -1,11 +1,5 @@
 import math
 
-import sys
-
-import os
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../..'))
-
 from pace_bench.simulator import TIME_STEP
 
 from pace_bench.primitives import compute_constraint_penalty
@@ -51,6 +45,8 @@ class Evaluator:
         self._max_lifter_y_at_step = None
         self._vel_y_at_max_height = None
         self._vel_y_on_first_cross = None
+        self._diagnostic_error_count = 0
+        self._last_diagnostic_error = None
         if not environment:
             raise ValueError("Evaluator requires environment instance")
         try:
@@ -156,17 +152,17 @@ class Evaluator:
         joint_failure_events_ = []
         try:
             joint_peak_forces = self.environment.get_joint_peak_forces()
-        except Exception:
-            pass
+        except Exception as exc:
+            self._record_diagnostic_error("joint_peak_forces", exc)
         try:
             joint_failure_events_ = self.environment.get_joint_failure_events()
-        except Exception:
-            pass
+        except Exception as exc:
+            self._record_diagnostic_error("joint_failure_events", exc)
         max_body_width = None
         try:
             max_body_width = self.environment.get_max_body_width()
-        except Exception:
-            pass
+        except Exception as exc:
+            self._record_diagnostic_error("max_body_width", exc)
         obj_platform_h_offset = None
         obj_platform_v_offset = None
         lifter_top_y_at_measure = None
@@ -175,8 +171,8 @@ class Evaluator:
             obj_platform_h_offset = h_off
             obj_platform_v_offset = v_off
             lifter_top_y_at_measure = top_y
-        except Exception:
-            pass
+        except Exception as exc:
+            self._record_diagnostic_error("platform_object_offset", exc)
         body_count = len(self.environment._bodies)
         initial_joint_count_val = self.initial_joint_count
         joint_force_summary = []
@@ -204,6 +200,8 @@ class Evaluator:
             'failed': failed,
             'failure_reason': failure_reason,
             'step_count': step_count,
+            'max_steps': max_steps,
+            'time_step': TIME_STEP,
             'structure_mass': self.environment.get_structure_mass(),
             'max_structure_mass': self.MAX_STRUCTURE_MASS,
             'structure_broken': self.structure_broken,
@@ -239,8 +237,14 @@ class Evaluator:
             'lifter_top_y_at_measure': lifter_top_y_at_measure,
             'joint_force_summary': joint_force_summary,
             'joint_failure_events': joint_failure_events_,
+            'initial_object_y': self.initial_object_y,
+            'diagnostic_error_count': self._diagnostic_error_count,
+            'last_diagnostic_error': self._last_diagnostic_error,
         }
         return success or failed, score, metrics
+    def _record_diagnostic_error(self, source, exc):
+        self._diagnostic_error_count += 1
+        self._last_diagnostic_error = f"{source}: {type(exc).__name__}: {exc}"
     def _check_design_constraints(self):
         violations = []
         if not self.environment:

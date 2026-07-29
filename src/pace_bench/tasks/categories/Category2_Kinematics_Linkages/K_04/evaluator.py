@@ -1,11 +1,5 @@
 import math
 
-import sys
-
-import os
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../..'))
-
 from pace_bench.simulator import TIME_STEP
 
 from pace_bench.primitives import compute_constraint_penalty
@@ -63,7 +57,8 @@ class Evaluator:
         self._contact_heights = []
         self._temporal_events = []
         self._event_tags_seen = set()
-        self._force_budget_data = {}
+        self._diagnostic_error_count = 0
+        self._last_diagnostic_error = None
         self._prev_object_vx = 0.0
         self._peak_body_velocity = 0.0
         self._prev_step_count = -1
@@ -77,7 +72,7 @@ class Evaluator:
         world = env._world
         object_body = getattr(env, '_object_to_push', None)
         ground_y = self.ground_y
-        dt = 1.0 / 60.0
+        dt = TIME_STEP
         motor_data = []
         for j_idx, joint in enumerate(env._joints):
             try:
@@ -106,8 +101,8 @@ class Evaluator:
                 })
                 motor_power = abs(torque_used * actual_speed)
                 self._cumulative_motor_energy_est += motor_power * dt * 100.0
-            except Exception:
-                pass
+            except Exception as exc:
+                self._record_diagnostic_error("motor", exc)
         from Box2D.b2 import circleShape
         wheel_data = []
         if not self._wheel_geo_collected:
@@ -136,8 +131,8 @@ class Evaluator:
                                 'contact': gap <= 0.01,
                             })
                             break
-                except Exception:
-                    pass
+                except Exception as exc:
+                    self._record_diagnostic_error("wheel_geometry", exc)
         if object_body and agent_body:
             try:
                 chassis_vx = float(agent_body.linearVelocity.x)
@@ -155,8 +150,8 @@ class Evaluator:
                     v = body.linearVelocity.length
                     if math.isfinite(v):
                         self._peak_body_velocity = max(self._peak_body_velocity, float(v))
-            except Exception:
-                pass
+            except Exception as exc:
+                self._record_diagnostic_error("energy_velocity", exc)
         if object_body:
             try:
                 for contact in world.contacts:
@@ -176,10 +171,8 @@ class Evaluator:
                             self._contact_peak_normal_force, total_impulse)
                         contact_y = float(manifold.points[0].y) if manifold.points else 0.0
                         self._contact_heights.append(contact_y)
-            except Exception:
-                pass
-        if not self._force_budget_data and step_count > 100:
-            self._force_budget_data = self._compute_force_budget()
+            except Exception as exc:
+                self._record_diagnostic_error("contact", exc)
         self._track_temporal_events(agent_body, step_count, object_body)
         if step_count == 0:
             self._motor_snapshot_summary = motor_data
@@ -188,6 +181,9 @@ class Evaluator:
             self._motor_snapshot_summary = motor_data
             self._wheel_snapshot_summary = wheel_data
             self._last_snapshot_step = step_count
+    def _record_diagnostic_error(self, source, exc):
+        self._diagnostic_error_count += 1
+        self._last_diagnostic_error = f"{source}: {type(exc).__name__}: {exc}"
     def _compute_force_budget(self):
         budget = {}
         try:
@@ -241,8 +237,8 @@ class Evaluator:
             budget['effective_ground_friction'] = ground_friction
             budget['object_friction'] = obj_friction
             budget['structure_normal_force'] = normal_force
-        except Exception:
-            pass
+        except Exception as exc:
+            self._record_diagnostic_error("temporal_events", exc)
         return budget
     def _track_temporal_events(self, agent_body, step_count, object_body):
         try:
@@ -409,18 +405,8 @@ class Evaluator:
                 'margin': f'{stuck_margin:+d} steps',
                 'phase': 'runtime',
             })
-            ws = base_metrics.get('wheel_state')
-            wc_pass = ws not in ('wheels suspended', 'wheel spinning') or ws is None
-            profile.append({
-                'constraint': 'Wheel-ground contact',
-                'status': 'PASS' if wc_pass else 'FAIL',
-                'current': str(ws) if ws else 'no wheels / ok',
-                'limit': 'wheels in contact with ground',
-                'margin': f'suspension depth: {self._max_wheel_suspension_depth:.3f}m' if ws == 'wheels suspended' else '—',
-                'phase': 'runtime',
-            })
-        except Exception:
-            pass
+        except Exception as exc:
+            self._record_diagnostic_error("constraint_profile", exc)
         return profile
     def evaluate(self, agent_body, step_count, max_steps):
         if not self.environment:
@@ -609,7 +595,6 @@ class Evaluator:
                 'peak_normal_impulse': self._contact_peak_normal_force,
                 'contact_heights': self._contact_heights,
             },
-            'force_budget': self._force_budget_data,
             'temporal_events': self._temporal_events,
             'constraint_profile': self._build_constraint_profile({
                 'object_x': current_object_x,
@@ -621,6 +606,8 @@ class Evaluator:
                 'wheel_state': self._overall_wheel_state,
             }),
             'peak_body_velocity': self._peak_body_velocity,
+            'diagnostic_error_count': self._diagnostic_error_count,
+            'last_diagnostic_error': self._last_diagnostic_error,
         }
         return done, score, metrics
     def _check_design_constraints(self):

@@ -2,16 +2,6 @@ from typing import Dict, Any, List, Optional
 
 import math
 
-import sys
-
-_FB_STATE_KEY = "__task_fb_K_03_state"
-
-if _FB_STATE_KEY not in sys.modules:
-    sys.modules[_FB_STATE_KEY] = type(sys)("task_fb_K_03_state")
-    sys.modules[_FB_STATE_KEY]._prev_metrics = None
-
-_fb_state = sys.modules[_FB_STATE_KEY]
-
 def _f(val: Any) -> Optional[float]:
     if val is None:
         return None
@@ -43,6 +33,11 @@ def _fmt_val(val: Any, unit: str = "") -> str:
     if v is None:
         return "n/a"
     return f"{v:.3f}{unit}"
+
+
+def _int_or_default(val: Any, default: int = 0) -> int:
+    value = _f(val)
+    return int(value) if value is not None else default
 
 def _changed(val: Any, prev_val: Any, tol: float = 1e-6) -> bool:
     v = _f(val)
@@ -108,6 +103,10 @@ def _format_numerical_health(metrics: Dict[str, Any]) -> Optional[str]:
     min_obj_y = _f(metrics.get("min_object_y_seen"))
     if min_obj_y is not None and min_obj_y < -10.0:
         issues.append(f"Min object y={min_obj_y:.1f}m — catastrophic fall")
+    observation_errors = metrics.get("observation_error_count", 0)
+    if isinstance(observation_errors, (int, float)) and observation_errors > 0:
+        detail = metrics.get("last_observation_error") or "details unavailable"
+        issues.append(f"Observation API errors: {_int_or_default(observation_errors)}; last={detail}")
     if issues:
         return "## Numerical Health\n" + "\n".join(f"- ⚠️ {iss}" for iss in issues)
     return None
@@ -115,17 +114,11 @@ def _format_numerical_health(metrics: Dict[str, Any]) -> Optional[str]:
 def _format_environment_context(metrics: Dict[str, Any]) -> List[str]:
     parts = ["## Environment Context"]
     obj_shape = metrics.get("object_shape")
-    obj_fric = _f(metrics.get("object_friction"))
-    obj_mass = _f(metrics.get("object_mass"))
     obj_w = _f(metrics.get("object_width"))
     obj_h = _f(metrics.get("object_height"))
     obj_r = _f(metrics.get("object_radius"))
     if obj_shape:
         line = f"- **Target object**: {obj_shape}"
-        if obj_mass is not None:
-            line += f", mass={obj_mass:.2f}kg"
-        if obj_fric is not None:
-            line += f", μ={obj_fric:.2f}"
         if obj_w is not None and obj_h is not None:
             line += f", {obj_w:.2f}×{obj_h:.2f}m"
         elif obj_r is not None:
@@ -139,10 +132,13 @@ def _format_environment_context(metrics: Dict[str, Any]) -> List[str]:
             pct_v = mass / max_mass * 100.0
             line += f" / {max_mass:.2f}kg ({pct_v:.1f}%)"
         parts.append(line)
-    step_cnt = metrics.get("step_count")
-    if step_cnt is not None:
-        sim_time = float(step_cnt) / 60.0
-        parts.append(f"- **Simulation**: {int(step_cnt)} steps ({sim_time:.2f}s @ 60Hz)")
+    step_cnt = _f(metrics.get("step_count"))
+    time_step = _f(metrics.get("time_step"))
+    if step_cnt is not None and time_step is not None and time_step > 0:
+        sim_time = float(step_cnt) * time_step
+        parts.append(f"- **Simulation**: {_int_or_default(step_cnt)} steps ({sim_time:.2f}s)")
+    elif step_cnt is not None:
+        parts.append(f"- **Simulation**: {_int_or_default(step_cnt)} steps")
     return parts
 
 def _format_event_timeline(metrics: Dict[str, Any], prev_metrics: Optional[Dict[str, Any]] = None) -> Optional[List[str]]:
@@ -156,13 +152,13 @@ def _format_event_timeline(metrics: Dict[str, Any], prev_metrics: Optional[Dict[
         obj_fell = metrics.get("object_fell", False)
         contact_pts = metrics.get("object_contact_points", 0)
         lines = ["## Event Chronology", "- No events recorded; terminal snapshot only:"]
-        lines.append(f"  Step {int(step_cnt)}")
+        lines.append(f"  Step {_int_or_default(step_cnt)}")
         if obj_grasped:
             lines.append("  Object grasped at some point")
         if obj_fell:
             min_y = metrics.get("min_object_y_seen", "?")
             lines.append(f"  Object fell (min y={_fmt_val(min_y, 'm')})")
-        if contact_pts and int(contact_pts) == 0 and not obj_grasped:
+        if contact_pts and _int_or_default(contact_pts) == 0 and not obj_grasped:
             lines.append("  Zero contact points at terminal snapshot")
         return lines
     parts = []
@@ -176,8 +172,9 @@ def _format_event_timeline(metrics: Dict[str, Any], prev_metrics: Optional[Dict[
             parts.append(f"## Event Chronology (updated)")
             parts.append(
                 f"- No new events since last moment. "
-                f"Contact: {int(total_contact)} steps ({int(lost_count)} losses), "
-                f"{int(persist)} consecutive at end."
+                f"Contact: {_int_or_default(total_contact)} steps "
+                f"({_int_or_default(lost_count)} losses), "
+                f"{_int_or_default(persist)} consecutive at end."
             )
             return parts
         return None
@@ -187,7 +184,7 @@ def _format_event_timeline(metrics: Dict[str, Any], prev_metrics: Optional[Dict[
         parts.append("## Event Chronology")
     parts.append(f"- **{len(timeline)} total events** ({len(new_events)} new this moment):")
     for ev in new_events:
-        step = int(ev.get("step", 0))
+        step = _int_or_default(ev.get("step", 0))
         event_type = ev.get("event", "unknown")
         obj_y = ev.get("object_y")
         obj_x = ev.get("object_x")
@@ -220,9 +217,9 @@ def _format_event_timeline(metrics: Dict[str, Any], prev_metrics: Optional[Dict[
     persist = metrics.get("contact_persistence_steps", 0)
     if total_contact is not None and total_contact > 0:
         parts.append(
-            f"- Contact: {int(total_contact)} steps with contact, "
-            f"{int(lost_count)} losses, "
-            f"{int(persist)} consecutive at end"
+            f"- Contact: {_int_or_default(total_contact)} steps with contact, "
+            f"{_int_or_default(lost_count)} losses, "
+            f"{_int_or_default(persist)} consecutive at end"
         )
     return parts
 
@@ -369,12 +366,10 @@ def _format_load_distribution(metrics: Dict[str, Any], prev_metrics: Optional[Di
     slider_force = _f(metrics.get("slider_motor_force"))
     slider_motor_spd = _f(metrics.get("slider_motor_speed"))
     slider_max_force = _f(metrics.get("slider_max_motor_force"))
-    if slider_max_force is None or slider_max_force == 0:
-        slider_max_force = 5000.0
     entries = []
     for i, st in enumerate(finger_states):
         torque = _f(st.get("motor_torque"))
-        max_torque = _f(st.get("max_motor_torque", 100.0))
+        max_torque = _f(st.get("max_motor_torque"))
         angle = _f(st.get("angle_deg"))
         if torque is not None and max_torque is not None and max_torque > 0:
             pct_util = abs(torque) / max_torque * 100.0
@@ -435,7 +430,6 @@ def _format_load_distribution(metrics: Dict[str, Any], prev_metrics: Optional[Di
 def _format_energy_flow(metrics: Dict[str, Any]) -> List[str]:
     parts = ["## Energy & Velocity"]
     obj_vel = metrics.get("object_velocity") or {}
-    obj_mass = _f(metrics.get("object_mass"))
     peak_speed = _f(metrics.get("peak_object_speed"))
     vx = _f(obj_vel.get("vx")) if obj_vel else None
     vy = _f(obj_vel.get("vy")) if obj_vel else None
@@ -450,10 +444,6 @@ def _format_energy_flow(metrics: Dict[str, Any]) -> List[str]:
         has_any = True
     if peak_speed is not None and peak_speed > 50.0:
         parts.append(f"- ⚠️ **Peak speed**: {peak_speed:.1f} m/s — possible solver instability")
-        has_any = True
-    if obj_mass is not None and speed is not None:
-        ke = 0.5 * obj_mass * speed * speed
-        parts.append(f"- **Kinetic energy**: {ke:.3f} J (mass={obj_mass:.2f}kg)")
         has_any = True
     if not has_any:
         parts.append("- No velocity data")
@@ -515,26 +505,28 @@ def _build_constraint_profile_from_metrics(metrics: Dict[str, Any]) -> List[Dict
             "name": "Target height", "status": "PASS" if m >= 0 else ("NEAR" if m >= -0.5 else "FAIL"),
             "value": obj_y, "limit": target_y, "margin": m, "unit": "m",
         })
-    if metrics.get("object_fell"):
+    min_seen = _f(metrics.get("min_object_y_seen"))
+    min_height = _f(metrics.get("min_object_height"))
+    if metrics.get("object_fell") and min_seen is not None and min_height is not None:
         profile.append({
             "name": "Min height maintained", "status": "FAIL",
             "value": metrics.get("min_object_y_seen"),
-            "limit": metrics.get("min_object_height", 2.0), "margin": None, "unit": "m",
+            "limit": metrics.get("min_object_height"), "margin": None, "unit": "m",
         })
-    else:
+    elif min_seen is not None and min_height is not None:
         profile.append({
             "name": "Min height maintained", "status": "PASS",
             "value": metrics.get("min_object_y_seen"),
-            "limit": metrics.get("min_object_height", 2.0), "margin": None, "unit": "m",
+            "limit": metrics.get("min_object_height"), "margin": None, "unit": "m",
         })
     grasped = metrics.get("object_grasped", False)
     profile.append({
         "name": "Grasp", "status": "PASS" if grasped else "FAIL",
-        "value": metrics.get("gripper_bodies_touching_object", 0),
-        "limit": "≥1", "margin": None, "unit": "bodies",
+        "value": bool(grasped),
+        "limit": "evaluator grasp proxy true", "margin": None, "unit": "",
     })
     held = metrics.get("steps_with_object_above_target", 0)
-    req = _f(metrics.get("min_simulation_steps_required", 80))
+    req = _f(metrics.get("min_simulation_steps_required"))
     if req is not None and req > 0:
         pct_v = (held / req * 100.0) if isinstance(held, (int, float)) else 0.0
         profile.append({
@@ -554,20 +546,17 @@ def _build_constraint_profile_from_metrics(metrics: Dict[str, Any]) -> List[Dict
 def format_task_metrics(metrics: Dict[str, Any]) -> List[str]:
     if not metrics:
         return ["**No metrics available**"]
-    prev = _fb_state._prev_metrics
-    is_new = prev is not None and _is_new_run(metrics, prev)
-    if is_new:
-        prev = None
-    first_moment = prev is None
-    _fb_state._prev_metrics = dict(metrics)
+    prev = None
+    first_moment = True
     parts: List[str] = []
-    score = _f(metrics.get("score", 0.0))
+    score = _f(metrics.get("score"))
     success = metrics.get("success", False)
     failed = metrics.get("failed", False)
     failure_reason = metrics.get("failure_reason", "")
     step_count = metrics.get("step_count", 0)
     status = "SUCCESS ✓" if success else ("FAILED ❌" if failed else "IN PROGRESS")
-    header = f"## Summary: {status} | score={score:.1f} | step={step_count}"
+    score_text = f"{score:.1f}" if score is not None else "n/a"
+    header = f"## Summary: {status} | score={score_text} | step={step_count}"
     parts.append(header)
     if failure_reason and str(failure_reason).strip():
         parts.append(f"**Failure**: {failure_reason}")
@@ -575,7 +564,7 @@ def format_task_metrics(metrics: Dict[str, Any]) -> List[str]:
     if health:
         parts.append(health)
     elif first_moment:
-        parts.append("## Numerical Health\n- All metrics finite ✓")
+        parts.append("## Numerical Health\n- No anomalies detected in the available metrics ✓")
     if first_moment:
         parts.extend(_format_environment_context(metrics))
     events = _format_event_timeline(metrics, prev)
@@ -600,46 +589,6 @@ def get_improvement_suggestions(
     error: Optional[str] = None,
 
 ) -> List[str]:
-    suggestions = []
     if error:
-        suggestions.append("- Code execution failed. Review error details above.")
-        return suggestions
-    if success:
-        return suggestions
-    if failed and failure_reason:
-        fr_lower = str(failure_reason).lower()
-        if "design constraint" in fr_lower:
-            suggestions.append("- Build-time constraint violated. Review constraint satisfaction profile.")
-        elif "fell" in fr_lower:
-            suggestions.append("- Object fell below minimum height. Review event chronology for grasp loss timing.")
-        elif "not lifted" in fr_lower:
-            suggestions.append("- Object was never lifted. Review spatial diagnostics for finger-object geometry.")
-        else:
-            suggestions.append("- Review constraint satisfaction profile for specific violation details.")
-    grasped = metrics.get("object_grasped", False)
-    contact_pts = metrics.get("object_contact_points", 0)
-    contact_bodies = metrics.get("gripper_bodies_touching_object", 0)
-    if not grasped:
-        suggestions.append(
-            f"- Grasp not secured: {contact_pts} contact points, "
-            f"{contact_bodies} bodies touching. Review spatial and load diagnostics."
-        )
-    lost_count = metrics.get("contact_lost_count", 0)
-    if lost_count and int(lost_count) > 0:
-        suggestions.append(
-            f"- Contact was lost {int(lost_count)} time(s). Review event chronology for loss timing."
-        )
-    obj_y = _f(metrics.get("object_y"))
-    target_y = _f(metrics.get("target_object_y"))
-    if obj_y is not None and target_y is not None and obj_y < target_y:
-        suggestions.append(
-            f"- Object below target: y={obj_y:.2f}m, target y={target_y:.2f}m "
-            f"(margin {target_y - obj_y:.2f}m)."
-        )
-    held = metrics.get("steps_with_object_above_target", 0)
-    req = _f(metrics.get("min_simulation_steps_required", 80))
-    if req is not None and req > 0 and held < req:
-        suggestions.append(
-            f"- Insufficient sustain: {held}/{int(req)} steps at target height."
-        )
-    return suggestions
+        return ["- Code execution failed. Review the execution error above."]
+    return []

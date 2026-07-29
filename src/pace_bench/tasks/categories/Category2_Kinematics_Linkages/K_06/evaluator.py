@@ -1,11 +1,5 @@
 import math
 
-import sys
-
-import os
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../..'))
-
 from pace_bench.simulator import TIME_STEP
 
 from pace_bench.primitives import compute_constraint_penalty
@@ -90,6 +84,7 @@ class Evaluator:
             'failed': failed,
             'failure_reason': failure_reason,
             'step_count': step_count,
+            'time_step': TIME_STEP,
             'min_simulation_steps_required': self.min_simulation_steps,
             'structure_mass': self.environment.get_structure_mass(),
             'max_structure_mass': getattr(self.environment, 'MAX_STRUCTURE_MASS', 15.0),
@@ -100,8 +95,6 @@ class Evaluator:
             metrics['forensic_snapshot'] = snap
             metrics['forensic_snapshots'] = list(self._forensic_snapshots)
         env = self.environment
-        if hasattr(env, 'get_particle_properties'):
-            metrics['particle_properties'] = env.get_particle_properties()
         if hasattr(env, 'get_joint_angle_info'):
             metrics['joint_angle_summary'] = env.get_joint_angle_info()
         if hasattr(env, 'get_motor_energy'):
@@ -121,8 +114,11 @@ class Evaluator:
             metrics['build_zone_y_max'] = env.BUILD_ZONE_Y_MAX
         if hasattr(env, '_glass_y'):
             metrics['glass_y'] = env._glass_y
-            metrics['glass_friction'] = getattr(env, '_glass_friction', 0.25)
-        metrics['torque_adequacy'] = self._compute_torque_adequacy(metrics)
+        snap = metrics.get('forensic_snapshot') or {}
+        metrics['torque_adequacy'] = {
+            'torque_cap_nm': snap.get('max_motor_torque_cap'),
+            'note': 'no torque cap configured' if snap.get('max_motor_torque_cap') is None else None,
+        }
         metrics['constraint_profile'] = self._build_constraint_profile(metrics)
         metrics['temporal_events'] = self._build_temporal_events(metrics)
         metrics['removal_rate_analysis'] = self._compute_removal_rate_analysis(metrics)
@@ -254,8 +250,8 @@ class Evaluator:
                 profile.append({
                     'constraint': 'Motion duration (≥8.0s)',
                     'status': 'PASS' if dur_margin >= 0 else 'FAIL',
-                    'current': f'{s} steps ({s/60:.1f}s)',
-                    'limit': f'{ms} steps ({ms/60:.1f}s)',
+                    'current': f'{s} steps ({s * TIME_STEP:.1f}s)',
+                    'limit': f'{ms} steps ({ms * TIME_STEP:.1f}s)',
                     'margin': f'{dur_margin:+d} steps',
                     'phase': 'runtime (end)',
                 })

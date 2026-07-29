@@ -12,23 +12,14 @@ BACKWARD_SPEED_MAX = 100.0
 
 EXIT_X_MIN = 15.0
 
-HOLD_STEPS = 5
-
-ONEWAY_FORCE_RIGHT = 50.0
-
-ONEWAY_X = 10.2
-
 TIME_STEP = 1.0 / 60.0
 
-def _control_cfg(sandbox):
+def _control_cfg(_sandbox):
     return {
-        "act_lo": float(getattr(sandbox, "_activation_x_min", ACTIVATION_X_MIN)),
-        "act_hi": float(getattr(sandbox, "_activation_x_max", ACTIVATION_X_MAX)),
-        "bfx": float(getattr(sandbox, "_backward_fx_threshold", BACKWARD_FX_THRESHOLD)),
-        "bspd": float(getattr(sandbox, "_backward_speed_max", BACKWARD_SPEED_MAX)),
-        "hold": int(getattr(sandbox, "_backward_steps_required", HOLD_STEPS)),
-        "ow_x": float(getattr(sandbox, "_oneway_x", ONEWAY_X)),
-        "ow_f": float(getattr(sandbox, "_oneway_force_right", ONEWAY_FORCE_RIGHT)),
+        "act_lo": ACTIVATION_X_MIN,
+        "act_hi": ACTIVATION_X_MAX,
+        "bfx": BACKWARD_FX_THRESHOLD,
+        "bspd": BACKWARD_SPEED_MAX,
     }
 
 class Memory:
@@ -40,21 +31,19 @@ class Memory:
 MEM = Memory()
 
 def _weight_comp(sandbox):
-    try:
-        gy = float(sandbox.world.gravity[1])
-    except (AttributeError, TypeError, IndexError):
-        gy = -9.8
+    gy = float(sandbox.world.gravity[1])
     return float(AGENT_MASS) * abs(gy)
 
 def _exit_x_min(_sandbox):
     return float(EXIT_X_MIN)
 
 def build_agent(sandbox):
+    MEM.clear()
     return sandbox.get_agent_body()
 
 def agent_action(sandbox, agent_body, step_count):
-    if not hasattr(agent_body, "_controller_state"):
-        agent_body._controller_state = {
+    if "initial_state" not in MEM.data:
+        MEM.data["initial_state"] = {
             "phase": "APPROACH",
             "t": 0,
             "lx": None,
@@ -62,7 +51,7 @@ def agent_action(sandbox, agent_body, step_count):
             "vx": 0.0,
             "vy": 0.0,
         }
-    state = agent_body._controller_state
+    state = MEM.data["initial_state"]
     cfg = _control_cfg(sandbox)
     pd = sandbox.get_agent_position()
     dt = TIME_STEP
@@ -111,10 +100,7 @@ def agent_action_stage_1(sandbox, agent_body, step_count):
     p, v = sandbox.get_agent_position(), sandbox.get_agent_velocity()
     w_comp = _weight_comp(sandbox)
     ty = 1.5
-    m_y = float(getattr(sandbox, "_magnetic_floor_y_max", -999.0))
-    m_f = float(getattr(sandbox, "_magnetic_floor_force", 0.0))
-    y_phys = float(agent_body.position.y) if agent_body is not None else p[1]
-    mag_comp = (-m_f) if (m_y > -500.0 and y_phys < m_y) else 0.0
+    mag_comp = 60.0 if p[1] < 1.6 else 0.0
     if "phase1" not in MEM.data:
         MEM.data["phase1"] = "APPROACH"
         MEM.data["t1"] = step_count
@@ -258,10 +244,7 @@ def agent_action_stage_4(sandbox, agent_body, step_count):
     p, v = sandbox.get_agent_position(), sandbox.get_agent_velocity()
     w_comp = _weight_comp(sandbox)
     ty = 1.5
-    m_y = float(getattr(sandbox, "_magnetic_floor_y_max", -999.0))
-    m_f = float(getattr(sandbox, "_magnetic_floor_force", 0.0))
-    y_phys = float(agent_body.position.y) if agent_body is not None else p[1]
-    mag_comp = (-m_f) if (m_y > -500.0 and y_phys < m_y) else 0.0
+    mag_comp = 80.0 if p[1] < 1.5 else 0.0
     if "phase4" not in MEM.data:
         MEM.data["phase4"] = "APPROACH"
         MEM.data["t4"] = step_count

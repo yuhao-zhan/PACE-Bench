@@ -1,13 +1,7 @@
 import math
 
-import sys
-
-import os
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../.."))
-
 try:
-    from environment import (
+    from .environment import (
         BARRIER_X_LEFT,
         BARRIER_X_RIGHT,
         BARRIER_Y_BOTTOM,
@@ -19,7 +13,6 @@ try:
         LAND_TOLERANCE,
         LANDER_HALF_HEIGHT,
         LANDER_HALF_WIDTH,
-        LANDER_MASS,
         MAX_EPISODE_STEPS,
         MAX_LANDING_ANGLE,
         MAX_SAFE_VERTICAL_SPEED,
@@ -49,7 +42,6 @@ except ImportError:
         LAND_TOLERANCE,
         LANDER_HALF_HEIGHT,
         LANDER_HALF_WIDTH,
-        LANDER_MASS,
         MAX_EPISODE_STEPS,
         MAX_LANDING_ANGLE,
         MAX_SAFE_VERTICAL_SPEED,
@@ -88,6 +80,11 @@ class Evaluator:
         self._min_fuel_remaining = float(
             terrain_bounds.get("min_fuel_remaining_at_landing", MIN_FUEL_REMAINING_AT_LANDING)
         )
+        self._total_fuel_impulse = float(
+            terrain_bounds.get("total_fuel_impulse", TOTAL_FUEL_IMPULSE)
+        )
+        self._max_thrust = float(terrain_bounds.get("max_thrust", MAX_THRUST))
+        self._max_torque = float(terrain_bounds.get("max_torque", MAX_TORQUE))
         self._barrier_x_left = float(terrain_bounds.get("barrier_x_left", BARRIER_X_LEFT))
         self._barrier_x_right = float(terrain_bounds.get("barrier_x_right", BARRIER_X_RIGHT))
         self._barrier_y_top = float(terrain_bounds.get("barrier_y_top", BARRIER_Y_TOP))
@@ -103,7 +100,7 @@ class Evaluator:
                 else self._episode_step_limit
             )
             td = int(self.terrain_bounds.get("thrust_delay_steps", THRUST_DELAY_STEPS))
-            return False, 0.0, {
+            return True, 0.0, {
                 "error": "Environment not available",
                 "failed": True,
                 "success": False,
@@ -131,17 +128,17 @@ class Evaluator:
                 else getattr(self.environment, "_barrier_failure_kind", None)
             )
             if kind == "ceiling":
-                reason = "Entered forbidden zone (atmospheric ceiling): you must fly lower within this region."
+                reason = "Forbidden corridor upper-bound violation"
             elif kind == "obstacle":
-                reason = "Entered forbidden zone (obstacle): you must fly higher within this region."
+                reason = "Forbidden corridor lower-bound violation"
             else:
                 bt = float(self.terrain_bounds.get("barrier_y_top", BARRIER_Y_TOP))
                 bb = float(self.terrain_bounds.get("barrier_y_bottom", BARRIER_Y_BOTTOM))
                 mid = 0.5 * (bt + bb)
                 if y < mid:
-                    reason = "Entered forbidden zone (obstacle): you must fly higher within this region."
+                    reason = "Forbidden corridor lower-bound violation"
                 else:
-                    reason = "Entered forbidden zone (atmospheric ceiling): you must fly lower within this region."
+                    reason = "Forbidden corridor upper-bound violation"
             if hasattr(self.environment, "get_zone_x_bounds_at_step"):
                 zone_x_min, zone_x_max = self.environment.get_zone_x_bounds_at_step(step_count)
             else:
@@ -180,6 +177,9 @@ class Evaluator:
                 "max_landing_angle": self._max_landing_angle,
                 "min_fuel_remaining_at_landing": self._min_fuel_remaining,
                 "remaining_fuel": rfuel,
+                "total_fuel_impulse": self._total_fuel_impulse,
+                "max_thrust": self._max_thrust,
+                "max_torque": self._max_torque,
                 "ground_y_top": ground_y_top,
                 "barrier_x_left": self._barrier_x_left,
                 "barrier_x_right": self._barrier_x_right,
@@ -192,6 +192,12 @@ class Evaluator:
                 "thrust_delay_steps": thrust_delay_steps,
                 "corridor_transit": self.environment.get_corridor_transit_data()
                 if hasattr(self.environment, "get_corridor_transit_data")
+                else {},
+                "actuation_diagnostics": self.environment.get_actuation_diagnostics()
+                if hasattr(self.environment, "get_actuation_diagnostics")
+                else {},
+                "motion_diagnostics": self.environment.get_motion_diagnostics()
+                if hasattr(self.environment, "get_motion_diagnostics")
                 else {},
                 "constraint_profile": self._compute_full_constraint_profile(
                     landed=False, landing_vy=None, landing_angle=None,
@@ -210,18 +216,37 @@ class Evaluator:
         x, y = self.environment.get_lander_position()
         vx, vy = self.environment.get_lander_velocity()
         angle = self.environment.get_lander_angle()
-        landed_this_step = bottom_y <= ground_y_top + self._land_tolerance
+        touchdown_snapshot = (
+            self.environment.get_touchdown_snapshot()
+            if hasattr(self.environment, "get_touchdown_snapshot")
+            else None
+        )
+        landed_this_step = (
+            touchdown_snapshot is not None
+            or bottom_y <= ground_y_top + self._land_tolerance
+        )
         if landed_this_step and not self._landed:
             self._landed = True
-            self._landing_vy = vy
-            self._landing_angle = angle
-            self._landing_x = x
-            self._landing_step = step_count
-            if hasattr(self.environment, "get_lander_bottom_contact_x_span"):
+            if touchdown_snapshot is not None:
+                self._landing_vy = float(touchdown_snapshot["vy"])
+                self._landing_angle = float(touchdown_snapshot["angle"])
+                self._landing_x = float(touchdown_snapshot["x"])
+                self._landing_step = int(touchdown_snapshot["step"])
+                self._landing_x_lo = float(touchdown_snapshot["x_lo"])
+                self._landing_x_hi = float(touchdown_snapshot["x_hi"])
+            else:
+                self._landing_vy = vy
+                self._landing_angle = angle
+                self._landing_x = x
+                self._landing_step = step_count
+            if (
+                touchdown_snapshot is None
+                and hasattr(self.environment, "get_lander_bottom_contact_x_span")
+            ):
                 self._landing_x_lo, self._landing_x_hi = (
                     self.environment.get_lander_bottom_contact_x_span()
                 )
-            else:
+            elif touchdown_snapshot is None:
                 self._landing_x_lo = self._landing_x_hi = x
         failed = False
         failure_reason = None
@@ -249,7 +274,7 @@ class Evaluator:
                 x_lo < zone_x_min or x_hi > zone_x_max
             ):
                 landing_reasons.append(
-                    f"Hull footprint x=[{x_lo:.2f}, {x_hi:.2f}] not fully inside landing zone "
+                    f"Hull ground-contact edge x=[{x_lo:.2f}, {x_hi:.2f}] not fully inside landing zone "
                     f"[{zone_x_min:.2f}, {zone_x_max:.2f}] at touchdown"
                 )
             if self._landing_angle is not None and abs(self._landing_angle) > self._max_landing_angle:
@@ -316,6 +341,9 @@ class Evaluator:
             "zone_x_max": zone_x_max,
             "max_landing_angle": self._max_landing_angle,
             "remaining_fuel": remaining_fuel if remaining_fuel is not None else None,
+            "total_fuel_impulse": self._total_fuel_impulse,
+            "max_thrust": self._max_thrust,
+            "max_torque": self._max_torque,
             "min_fuel_remaining_at_landing": self._min_fuel_remaining,
             "landing_step": self._landing_step,
             "barrier_x_left": self._barrier_x_left,
@@ -327,6 +355,12 @@ class Evaluator:
             "thrust_delay_steps": thrust_delay_steps,
             "corridor_transit": self.environment.get_corridor_transit_data()
             if self.environment and hasattr(self.environment, "get_corridor_transit_data")
+            else {},
+            "actuation_diagnostics": self.environment.get_actuation_diagnostics()
+            if self.environment and hasattr(self.environment, "get_actuation_diagnostics")
+            else {},
+            "motion_diagnostics": self.environment.get_motion_diagnostics()
+            if self.environment and hasattr(self.environment, "get_motion_diagnostics")
             else {},
             "constraint_profile": self._compute_full_constraint_profile(
                 landed=self._landed,
@@ -348,19 +382,16 @@ class Evaluator:
             ),
         }
         if self._landed and self._landing_step is not None and self.environment:
-            try:
-                landing_t = self._landing_step * float(
-                    self.terrain_bounds.get("time_step", DEFAULT_TIME_STEP))
-                if hasattr(self.environment, "get_platform_center_at_time"):
-                    plat_center = self.environment.get_platform_center_at_time(landing_t)
-                    metrics["platform_center_at_landing"] = plat_center
-                if hasattr(self.environment, "get_zone_x_bounds_at_step"):
-                    zx_lo, zx_hi = self.environment.get_zone_x_bounds_at_step(self._landing_step)
-                    metrics["platform_zone_at_landing"] = [zx_lo, zx_hi]
-                if self._landing_x is not None:
-                    metrics["platform_timing_offset_s"] = None
-            except (TypeError, ValueError, AttributeError):
-                pass
+            landing_t = self._landing_step * float(
+                self.terrain_bounds.get("time_step", DEFAULT_TIME_STEP)
+            )
+            metrics["platform_center_at_landing"] = (
+                self.environment.get_platform_center_at_time(landing_t)
+            )
+            zx_lo, zx_hi = self.environment.get_zone_x_bounds_at_step(
+                self._landing_step
+            )
+            metrics["platform_zone_at_landing"] = [zx_lo, zx_hi]
         done = failed or self._landed
         return done, score, metrics
     def compute_score_with_penalty(self, score: float, metrics: dict) -> float:
@@ -426,7 +457,7 @@ class Evaluator:
             margin_right = zx_hi - hi
             worst_margin = min(margin_left, margin_right)
             constraints.append({
-                "name": "Hull in landing zone",
+                "name": "Hull ground-contact edge in landing zone",
                 "key": "hull_footprint",
                 "status": "PASS" if (lo >= zx_lo and hi <= zx_hi) else "FAIL",
                 "value": [lo, hi],
@@ -437,7 +468,7 @@ class Evaluator:
             })
         elif not landed:
             constraints.append({
-                "name": "Hull in landing zone",
+                "name": "Hull ground-contact edge in landing zone",
                 "key": "hull_footprint",
                 "status": "PENDING",
                 "value": None,
@@ -550,7 +581,6 @@ class Evaluator:
             return default
         spawn_x = float(tb.get("spawn_x", _from_env("_spawn_x", SPAWN_X)))
         spawn_y = float(tb.get("spawn_y", _from_env("_spawn_y", SPAWN_Y)))
-        lander_mass = float(tb.get("lander_mass", _from_env("_lander_mass", LANDER_MASS)))
         pc = float(tb.get("platform_center_base", _from_env("_platform_center_base", PLATFORM_CENTER_BASE)))
         pa = float(tb.get("platform_amplitude", _from_env("_platform_amplitude", PLATFORM_AMPLITUDE)))
         pp = float(tb.get("platform_period", _from_env("_platform_period", PLATFORM_PERIOD)))
@@ -560,10 +590,11 @@ class Evaluator:
         return {
             "task": "C-02: The Lander (obstacle + moving platform)",
             "description": (
+                "Control a delayed-thrust lander through a bounded corridor and "
+                "touch down safely inside a moving horizontal landing zone."
             ),
             "spawn_m": {"x": spawn_x, "y": spawn_y},
             "lander": {
-                "mass_kg": lander_mass,
                 "half_width_m": float(tb.get("lander_half_width", LANDER_HALF_WIDTH)),
                 "half_height_m": float(tb.get("lander_half_height", LANDER_HALF_HEIGHT)),
             },
@@ -606,8 +637,12 @@ class Evaluator:
             "min_fuel_remaining_at_landing": self._min_fuel_remaining,
             "success_criteria": {
                 "primary": (
+                    "Reach first ground contact within the live speed, angle, "
+                    "platform-footprint, fuel, corridor, and episode limits."
                 ),
                 "failure": (
+                    "Any forbidden-corridor entry, exhausted fuel before contact, "
+                    "touchdown constraint violation, or episode timeout."
                 ),
             },
             "evaluation": {

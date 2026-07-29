@@ -40,6 +40,9 @@ class DaVinciSandbox:
         self._current_anchor_torques: List[float] = []
         self._current_internal_forces: List[float] = []
         self._current_internal_torques: List[float] = []
+        self._joint_observation_error_count: int = 0
+        self._last_joint_observation_error: str | None = None
+        self.JOINT_WARNING_FRACTION = 0.9
         self._step_count: int = 0
         self.BUILD_ZONE_X_MIN = 0.0
         self.BUILD_ZONE_X_MAX = 50.0
@@ -187,7 +190,10 @@ class DaVinciSandbox:
                         hist["peak_force"] = fm
                     if torque > hist["peak_torque"]:
                         hist["peak_torque"] = torque
-                    if self._first_warning_step < 0 and (fm > 0.9 * max_f or torque > 0.9 * max_t):
+                    if self._first_warning_step < 0 and (
+                        fm > self.JOINT_WARNING_FRACTION * max_f
+                        or torque > self.JOINT_WARNING_FRACTION * max_t
+                    ):
                         self._first_warning_step = self._step_count
                 if fm > max_f or torque > max_t:
                     joints_to_remove.append(joint)
@@ -209,7 +215,11 @@ class DaVinciSandbox:
                         "limit_torque": max_t,
                         "fail_step": self._step_count,
                     })
-            except Exception: pass
+            except Exception as exc:
+                # Reaction telemetry is diagnostic-only, but losing it silently makes
+                # the serialized stress report look complete when it is not.
+                self._joint_observation_error_count += 1
+                self._last_joint_observation_error = f"{type(exc).__name__}: {exc}"
         for j in joints_to_remove:
             self._world.DestroyJoint(j)
             if j in self._joints:

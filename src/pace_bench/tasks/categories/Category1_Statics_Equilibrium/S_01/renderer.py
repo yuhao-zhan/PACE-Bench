@@ -1,8 +1,4 @@
-import sys
-import os
 import pygame
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../..'))
 
 from pace_bench.renderer import Renderer
 from Box2D.b2 import dynamicBody, staticBody
@@ -41,9 +37,15 @@ class S01Renderer(Renderer):
             if self.simulator.can_display:
                 self.simulator.screen = pygame.Surface((600, 600))
 
-        self.simulator.ppm = 28.0
-        center_x_world = 18.0
-        center_y_world = 6.5
+        view_x_min = 2.0
+        view_x_max = max(float(target_x) + 2.0, 32.0)
+        view_y_min = -1.0
+        view_y_max = 16.0
+        horizontal_ppm = 560.0 / (view_x_max - view_x_min)
+        vertical_ppm = 560.0 / (view_y_max - view_y_min)
+        self.simulator.ppm = min(horizontal_ppm, vertical_ppm)
+        center_x_world = (view_x_min + view_x_max) / 2.0
+        center_y_world = (view_y_min + view_y_max) / 2.0
         cam_x = center_x_world * self.simulator.ppm - self.simulator.screen_width / 2
         cam_y = self.simulator.screen_height / 2 - center_y_world * self.simulator.ppm
         self.set_camera_offset(cam_x, cam_y)

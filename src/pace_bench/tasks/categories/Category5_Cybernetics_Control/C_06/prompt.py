@@ -2,10 +2,6 @@ import os
 
 import json
 
-import sys
-
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
-
 from pace_bench.tasks.primitives_api import API_INTRO
 
 with open(os.path.join(os.path.dirname(__file__), '..', '..', 'primitives_api.json'), 'r') as f:
@@ -37,13 +33,12 @@ TASK_PROMPT = {
     "task_description": f"""
 Design a controller (a "governor") to maintain a wheel's rotation at the commanded target speed despite varying external loads.
 
-- **Wheel**: Single circular body (mass {DEFAULT_WHEEL_MASS_KG:g} kg, radius {DEFAULT_WHEEL_RADIUS_M:g} m) rotating about a fixed vertical axis through its center (revolute joint to the environment). The wheel body is subject to speed-dependent resistance. Additional resisting torques and dynamics may be present—infer behavior from data rather than assuming a simple first-order plant.
-- **Motor**: Each step you request motor torque; delivered torque magnitude is **capped** each step. The torque limit varies with rotational speed: at rest, the limit is {TORQUE_LIMIT_AT_ZERO:g} N·m, increasing by {TORQUE_LIMIT_SLOPE:g} N·m per rad/s until {TORQUE_LIMIT_OMEGA_CAP_RAD_S:g} rad/s. Additionally, an actuator **deadzone** of {TORQUE_DEADZONE:g} N·m applies, where requested torques with small absolute magnitudes will not be applied.
+- **Wheel**: The single circular body has undisclosed mass and visible radius {DEFAULT_WHEEL_RADIUS_M:g} m, and rotates about a fixed vertical axis through its center (revolute joint to the environment). The wheel body is subject to speed-dependent resistance. Infer inertia and additional resisting dynamics from data rather than assuming a simple first-order plant.
+- **Motor**: Each step you request motor torque; delivered torque magnitude is **capped** each step. In the source environment, the torque limit at rest is {TORQUE_LIMIT_AT_ZERO:g} N·m, increasing by {TORQUE_LIMIT_SLOPE:g} N·m per rad/s until {TORQUE_LIMIT_OMEGA_CAP_RAD_S:g} rad/s, and the actuator **deadzone** is {TORQUE_DEADZONE:g} N·m. Changed cap/deadzone constraints are stated explicitly; other actuator dynamics remain latent.
 - **Target Speed**: The commanded angular velocity **can change during the run**; call the API **each step** for the current setpoint. Only the **initial** segment speed is stated here: {TARGET_SPEED_RAD_S} rad/s—later setpoints must be read from the API.
 - **Angular velocity readout**: Use the documented API each step as your feedback signal for control. Note that measurements are **delayed** relative to the true instantaneous state (the exact delay is not disclosed).
 - **Time discretization**: Each simulation step is {TIME_STEP:.6f} s ({int(round(1.0 / TIME_STEP))} Hz physics).
-- **Opposing dynamics**: Resisting torques and disturbances are **not** fully specified here; they may vary with speed (including stiction effects at very low speeds), time, and internal state. Use closed-loop control and feedback to maintain tracking. An additional sustained resisting torque appears at simulation step {STEP_LOAD_AT_STEP}, beyond the nominal speed-dependent load.
-- **Load onset**: The additional sustained load activates at step {STEP_LOAD_AT_STEP}.
+- **Opposing dynamics**: Resisting torques and disturbances are **not** fully specified here; they may vary with speed (including stiction effects at very low speeds), time, and internal state. Use closed-loop control and feedback to maintain tracking. Additional sustained load may appear at an undisclosed step.
 
 Design a control loop that:
 1. Reads the sensed angular velocity and the time-varying target speed each step.
@@ -62,7 +57,7 @@ Design a control loop that:
 - **Speed Regulation Threshold**: MEAN_SPEED_ERROR_THRESHOLD = {MEAN_SPEED_ERROR_THRESHOLD} rad/s.
 - **Stall Speed Threshold**: STALL_SPEED_THRESHOLD = {STALL_SPEED_THRESHOLD} rad/s.
 - **Stall Steps Threshold**: STALL_STEPS_THRESHOLD = {STALL_STEPS_THRESHOLD} steps.
-- **Torque Deadzone**: TORQUE_DEADZONE = {TORQUE_DEADZONE:g} N·m.
+- **Torque Deadzone**: TORQUE_DEADZONE = {TORQUE_DEADZONE:g} N·m; a non-standard run may differ.
 - **APIs**: Use only the primitives documented below.
 - **Sensing**: Use only the documented angular-velocity call for rotational speed feedback (do not derive speed from other object or joint state).
 """,

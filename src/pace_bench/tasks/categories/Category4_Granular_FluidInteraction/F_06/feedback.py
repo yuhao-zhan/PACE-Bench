@@ -2,356 +2,334 @@ from typing import Any, Dict, List
 
 import math
 
-def _f(v: Any, dec: int = 2) -> str:
-    if v is None:
-        return "N/A"
+
+def _number(value: Any):
     try:
-        fv = float(v)
-        if not math.isfinite(fv):
-            return str(v)
-        return f"{fv:.{dec}f}"
+        result = float(value)
     except (TypeError, ValueError):
-        return str(v)
+        return None
+    return result if math.isfinite(result) else None
+
+
+def _f(value: Any, decimals: int = 2) -> str:
+    number = _number(value)
+    return f"{number:.{decimals}f}" if number is not None else "N/A"
+
+
+def _non_finite_paths(value: Any, path: str = "metrics") -> List[str]:
+    bad: List[str] = []
+    if isinstance(value, dict):
+        for key, nested in value.items():
+            bad.extend(_non_finite_paths(nested, f"{path}.{key}"))
+    elif isinstance(value, (list, tuple)):
+        for index, nested in enumerate(value):
+            bad.extend(_non_finite_paths(nested, f"{path}[{index}]"))
+    elif isinstance(value, float) and not math.isfinite(value):
+        bad.append(path)
+    return bad
+
+
+def _zone_text(bounds: Dict[str, Any]) -> str:
+    if not isinstance(bounds, dict):
+        return "bounds unavailable"
+    if "y_threshold" in bounds:
+        return f"y>{_f(bounds.get('y_threshold'), 1)} m"
+    return (
+        f"x=[{_f(bounds.get('x_min'), 1)},{_f(bounds.get('x_max'), 1)}], "
+        f"y=[{_f(bounds.get('y_min'), 1)},{_f(bounds.get('y_max'), 1)}] m"
+    )
+
+
+def _section_outcome(metrics: Dict[str, Any]) -> List[str]:
+    success = metrics.get("success") is True
+    failed = metrics.get("failed") is True
+    reason = metrics.get("failure_reason")
+    if success:
+        status = "PASS"
+    elif failed or reason:
+        status = "FAIL"
+    else:
+        status = "INCOMPLETE"
+    parts = ["### Outcome", f"- {status}"]
+    if reason:
+        parts.append(f"- Reason: {reason}")
+    elif success:
+        parts.append("- Reason: all evaluated success conditions were satisfied.")
+    else:
+        parts.append("- Reason: no terminal result was reported.")
+    return parts
+
+
+def _section_constraints(metrics: Dict[str, Any]) -> List[str]:
+    parts = ["\n### 1. Constraint profile"]
+    violations = metrics.get("constraint_violations")
+    if isinstance(violations, list) and violations:
+        parts.extend(f"- Build constraint: FAIL — {violation}" for violation in violations)
+        mass = _number(metrics.get("structure_mass"))
+        limit = _number(metrics.get("max_structure_mass"))
+        if mass is not None and limit is not None:
+            parts.append(f"- Mass measured/limit: {mass:.2f}/{limit:.2f} kg")
+        parts.append(
+            "- Allowed component-center bounds: "
+            f"x=[{_f(metrics.get('build_zone_x_min'), 1)},{_f(metrics.get('build_zone_x_max'), 1)}], "
+            f"y=[{_f(metrics.get('build_zone_y_min'), 1)},{_f(metrics.get('build_zone_y_max'), 1)}] m "
+            f"with {_f(metrics.get('build_zone_tolerance'), 1)} m tolerance."
+        )
+        parts.append(
+            "- Runtime delivery, integrity, and force usage were not evaluated after rejection; "
+            f"configured delivery threshold={_f(metrics.get('min_delivery_ratio_percent'), 1)}%, "
+            f"force cap={_f(metrics.get('force_budget'), 1)} N per step."
+        )
+        parts.append(f"- Simulation rejected at step {metrics.get('step_count', 'N/A')}.")
+        return parts
+
+    delivery = _number(metrics.get("delivery_ratio_percent"))
+    minimum = _number(metrics.get("min_delivery_ratio_percent"))
+    if delivery is not None and minimum is not None:
+        margin = delivery - minimum
+        state = "PASS" if margin >= 0.0 else "FAIL"
+        parts.append(
+            f"- Delivery: {state} — {delivery:.1f}% measured / {minimum:.1f}% required "
+            f"(margin {margin:+.1f} percentage points)."
+        )
+    else:
+        parts.append("- Delivery: measurement or threshold unavailable.")
+
+    mass = _number(metrics.get("structure_mass"))
+    mass_limit = _number(metrics.get("max_structure_mass"))
+    if mass is not None and mass_limit is not None:
+        margin = mass_limit - mass
+        state = "PASS" if margin >= 0.0 else "FAIL"
+        parts.append(
+            f"- Mass: {state} — {mass:.2f}/{mass_limit:.2f} kg "
+            f"(headroom {margin:+.2f} kg)."
+        )
+
+    if "structure_broken" in metrics:
+        if metrics.get("structure_broken"):
+            parts.append("- Integrity: FAIL — at least one initial joint was lost.")
+        else:
+            parts.append("- Integrity: PASS — initial joint count was preserved.")
+    build_keys = (
+        "build_zone_x_min", "build_zone_x_max",
+        "build_zone_y_min", "build_zone_y_max", "build_zone_tolerance",
+    )
+    if all(_number(metrics.get(key)) is not None for key in build_keys):
+        parts.append(
+            "- Build/anchoring: PASS at initialization; component centers were within "
+            f"x=[{_f(metrics.get('build_zone_x_min'), 1)},{_f(metrics.get('build_zone_x_max'), 1)}], "
+            f"y=[{_f(metrics.get('build_zone_y_min'), 1)},{_f(metrics.get('build_zone_y_max'), 1)}] m "
+            f"plus {_f(metrics.get('build_zone_tolerance'), 1)} m tolerance, and at least one joint existed."
+        )
+    else:
+        parts.append("- Build/anchoring: status unavailable.")
+    return parts
+
+
+def _section_spatial(metrics: Dict[str, Any]) -> List[str]:
+    parts = ["\n### 2. Spatial diagnostics"]
+    initial = _number(metrics.get("initial_particle_count"))
+    active = _number(metrics.get("particle_active_count"))
+    if initial is not None and active is not None:
+        parts.append(
+            f"- Active/lost particles: {int(active)}/{int(initial)} active, "
+            f"{int(initial - active)} lost."
+        )
+    parts.append(
+        "- Distribution: "
+        f"source={metrics.get('particles_in_source', 'N/A')}, "
+        f"build={metrics.get('particles_in_build_zone', 'N/A')}, "
+        f"target={metrics.get('particles_in_target', 'N/A')}."
+    )
+    parts.append(
+        "- Target bounds: "
+        f"x=[{_f(metrics.get('target_x_min'), 1)},{_f(metrics.get('target_x_max'), 1)}], "
+        f"y=[{_f(metrics.get('target_y_min'), 1)},{_f(metrics.get('target_y_max'), 1)}] m."
+    )
+
+    if active is not None and active <= 0:
+        parts.append("- No active particles remained; centroid and closest-particle position are unavailable.")
+        return parts
+
+    mean_x = _number(metrics.get("particle_mean_x"))
+    mean_y = _number(metrics.get("particle_mean_y"))
+    max_x = _number(metrics.get("particle_max_x"))
+    if mean_x is not None and mean_y is not None:
+        parts.append(f"- Active-particle centroid: ({mean_x:.2f},{mean_y:.2f}) m.")
+    if max_x is not None:
+        parts.append(f"- Rightmost active particle: x={max_x:.2f} m.")
+
+    closest = _number(metrics.get("closest_particle_distance_to_target"))
+    position = metrics.get("closest_particle_position")
+    if closest is None or closest < 0.0:
+        parts.append("- Closest active particle: unavailable.")
+    elif closest == 0.0:
+        parts.append("- Closest active particle: inside the target bounds.")
+    else:
+        position_text = ""
+        if isinstance(position, (list, tuple)) and len(position) >= 2:
+            position_text = f" at ({_f(position[0])},{_f(position[1])}) m"
+        parts.append(f"- Closest active particle: {closest:.2f} m from target{position_text}.")
+    return parts
+
+
+def _section_hazards(metrics: Dict[str, Any]) -> List[str]:
+    parts = ["\n### 3. Hazard interaction"]
+    counts = metrics.get("hazard_losses")
+    if not isinstance(counts, dict):
+        parts.append("- Hazard measurements unavailable.")
+        return parts
+    bounds = metrics.get("hazard_zone_bounds") or {}
+    positions = metrics.get("hazard_loss_positions") or {}
+    loss_names = ("pit1", "pit2", "pit3", "out_of_bounds", "floor")
+    total_lost = sum(int(counts.get(name, 0) or 0) for name in loss_names)
+    initial = metrics.get("initial_particle_count", "N/A")
+    parts.append(f"- Hazard-attributed losses: {total_lost}/{initial} particles.")
+    for name in ("pit1", "pit2", "pit3"):
+        count = int(counts.get(name, 0) or 0)
+        if count <= 0:
+            continue
+        first_position = ""
+        recorded = positions.get(name) or []
+        if recorded and isinstance(recorded[0], (list, tuple)) and len(recorded[0]) >= 2:
+            first_position = f"; first loss at ({_f(recorded[0][0])},{_f(recorded[0][1])}) m"
+        parts.append(
+            f"- {name}: {count} lost in {_zone_text(bounds.get(name, {}))}{first_position}."
+        )
+    if counts.get("out_of_bounds", 0):
+        parts.append(f"- Out of bounds: {int(counts['out_of_bounds'])} lost.")
+    if counts.get("floor", 0):
+        parts.append(f"- Below floor: {int(counts['floor'])} lost.")
+    parts.append(
+        "- Exposure (particle-steps): "
+        f"headwind={int(counts.get('headwind', 0) or 0)} "
+        f"({_zone_text(bounds.get('headwind', {}))}); "
+        f"gravity well={int(counts.get('gravwell', 0) or 0)} "
+        f"({_zone_text(bounds.get('gravwell', {}))})."
+    )
+    return parts
+
+
+def _section_actuation(metrics: Dict[str, Any]) -> List[str]:
+    parts = ["\n### 4. Actuation and motion"]
+    budget = _number(metrics.get("force_budget"))
+    peak = _number(metrics.get("force_budget_peak_used"))
+    last = _number(metrics.get("force_budget_last_used"))
+    if budget is not None and peak is not None:
+        parts.append(
+            f"- Peak commanded force: {peak:.2f}/{budget:.2f} N per step "
+            f"({peak / budget * 100.0:.1f}% used, {budget - peak:+.2f} N headroom)."
+            if budget > 0.0
+            else f"- Peak commanded force: {peak:.2f} N; configured budget is {budget:.2f} N."
+        )
+    if last is not None:
+        parts.append(f"- Final simulated step commanded force: {last:.2f} N.")
+    if budget is None:
+        parts.append("- Force-use measurements unavailable.")
+
+    zone_stats = metrics.get("zone_velocity_stats") or {}
+    zone_order = (
+        "source", "build_pre_pit3", "pit3_zone", "build_mid",
+        "pit1_zone", "pit2_zone", "build_post_pit2", "target",
+    )
+    occupied = []
+    for name in zone_order:
+        stats = zone_stats.get(name)
+        if not isinstance(stats, dict) or not stats.get("count"):
+            continue
+        occupied.append(
+            f"{name}: n={int(stats['count'])}, "
+            f"mean velocity=({_f(stats.get('mean_vx'))},{_f(stats.get('mean_vy'))}) m/s"
+        )
+    if occupied:
+        parts.append("- Occupied-zone motion: " + "; ".join(occupied) + ".")
+    elif not isinstance(metrics.get("zone_velocity_stats"), dict):
+        parts.append("- Occupied-zone motion: velocity measurements unavailable.")
+    else:
+        parts.append("- Occupied-zone motion: no active particles in tracked transport zones.")
+    return parts
+
+
+def _section_timeline(metrics: Dict[str, Any]) -> List[str]:
+    parts = ["\n### 5. Timeline"]
+    step = metrics.get("step_count")
+    maximum = metrics.get("max_steps")
+    if step is not None:
+        parts.append(f"- Evaluation ended at step {step}/{maximum}.")
+    else:
+        parts.append("- Evaluation end step unavailable.")
+    timeline = metrics.get("transport_timeline")
+    if not isinstance(timeline, dict):
+        parts.append("- Transport milestones unavailable.")
+        return parts
+    milestone_labels = (
+        ("first_source_exit_step", "First source exit"),
+        ("first_build_zone_entry_step", "First build-zone entry"),
+        ("first_target_entry_step", "First target entry"),
+    )
+    for key, label in milestone_labels:
+        observed = timeline.get(key)
+        parts.append(f"- {label}: " + (f"step {observed}." if observed is not None else "not observed."))
+    peak_count = timeline.get("peak_particles_in_target")
+    peak_step = timeline.get("peak_particles_in_target_step")
+    if peak_count is not None:
+        suffix = f" at step {peak_step}" if peak_step is not None else ""
+        parts.append(f"- Peak simultaneous target occupancy: {peak_count} particles{suffix}.")
+
+    first_exposures = timeline.get("first_hazard_exposure_steps") or {}
+    exposure_events = [
+        f"{name}=step {event_step}"
+        for name, event_step in first_exposures.items()
+        if event_step is not None
+    ]
+    if exposure_events:
+        parts.append("- First hazard exposures: " + ", ".join(exposure_events) + ".")
+    first_losses = timeline.get("first_hazard_loss_steps") or {}
+    loss_events = [
+        f"{name}=step {event_step}"
+        for name, event_step in first_losses.items()
+        if event_step is not None
+    ]
+    if loss_events:
+        parts.append("- First hazard losses: " + ", ".join(loss_events) + ".")
+    return parts
+
 
 def _section_numerical_health(metrics: Dict[str, Any]) -> List[str]:
-    numeric_keys = [
-        "delivery_ratio", "delivery_ratio_percent",
-        "structure_mass", "max_structure_mass",
-        "particle_mean_x", "particle_mean_y", "particle_max_x",
-        "closest_particle_distance_to_target",
+    bad = _non_finite_paths(metrics)
+    if not bad:
+        return ["\n### 6. Numerical health", "- All reported numeric metrics are finite."]
+    displayed = ", ".join(bad[:8])
+    suffix = f" (+{len(bad) - 8} more)" if len(bad) > 8 else ""
+    return [
+        "\n### 6. Numerical health",
+        f"- {len(bad)} non-finite numeric value(s): {displayed}{suffix}.",
     ]
-    bad = []
-    for k in numeric_keys:
-        v = metrics.get(k)
-        if v is None:
-            continue
-        try:
-            fv = float(v)
-            if not math.isfinite(fv):
-                bad.append(f"{k}={fv}")
-        except (TypeError, ValueError):
-            pass
-    if bad:
-        return [f"### 0. Numerical Health — {len(bad)} non-finite value(s): " + ", ".join(bad)]
-    return []
 
-def _section_constraint_profile(metrics: Dict[str, Any]) -> List[str]:
-    parts = ["### 1. Constraints"]
-    viols = metrics.get("constraint_violations")
-    if isinstance(viols, list) and viols:
-        for v in viols:
-            parts.append(f"- FAIL: {v}")
-        parts.append("- Agent rejected before simulation.")
-        return parts
-    fail_near: List[str] = []
-    pass_tags: List[str] = []
-    delivery_pct = metrics.get("delivery_ratio_percent")
-    target_pct = metrics.get("min_delivery_ratio_percent")
-    if delivery_pct is not None and target_pct is not None:
-        try:
-            dp = float(delivery_pct)
-            tp = float(target_pct)
-            if math.isfinite(dp) and math.isfinite(tp) and tp > 0:
-                margin = dp - tp
-                if dp < tp:
-                    fail_near.append(f"- Delivery: FAIL — {dp:.1f}% / {tp:.1f}% (gap: {abs(margin):.1f}%)")
-                elif dp < tp * 1.1:
-                    fail_near.append(f"- Delivery: PASS [NEAR] — {dp:.1f}% / {tp:.1f}% (margin: {margin:+.1f}%)")
-                else:
-                    pass_tags.append("delivery")
-        except (TypeError, ValueError):
-            pass
-    mass = metrics.get("structure_mass")
-    max_mass = metrics.get("max_structure_mass")
-    mass_ok = False
-    if mass is not None and max_mass is not None:
-        try:
-            m = float(mass)
-            mm = float(max_mass)
-            if math.isfinite(m) and math.isfinite(mm) and mm > 0:
-                pct = m / mm * 100.0
-                if m > mm:
-                    fail_near.append(f"- Mass: FAIL — {m:.1f} kg / {mm:.1f} kg (over by {m - mm:.1f} kg)")
-                elif pct > 80.0:
-                    fail_near.append(f"- Mass: PASS [NEAR] — {m:.1f} kg / {mm:.1f} kg ({pct:.0f}%)")
-                else:
-                    mass_ok = True
-        except (TypeError, ValueError):
-            pass
-    if mass_ok:
-        pass_tags.append("mass")
-    if "structure_broken" in metrics:
-        if metrics["structure_broken"]:
-            fail_near.append("- Structure: FAIL — joints lost during simulation")
-    bx_min = metrics.get("build_zone_x_min")
-    bx_max = metrics.get("build_zone_x_max")
-    by_min = metrics.get("build_zone_y_min")
-    by_max = metrics.get("build_zone_y_max")
-    if bx_min is None or bx_max is None:
-        cinfo = metrics.get("constraint_info", {}) or {}
-        bx_min = cinfo.get("build_zone_x_min")
-        bx_max = cinfo.get("build_zone_x_max")
-        by_min = cinfo.get("build_zone_y_min")
-        by_max = cinfo.get("build_zone_y_max")
-    zone_ref = ""
-    if bx_min is not None and bx_max is not None:
-        zone_ref = f"Build zone: x=[{_f(bx_min, 1)},{_f(bx_max, 1)}] y=[{_f(by_min, 1)},{_f(by_max, 1)}]"
-    if fail_near:
-        parts.extend(fail_near)
-    if pass_tags:
-        parts.append("- PASS: " + " | ".join(pass_tags))
-    if zone_ref:
-        parts.append(f"- {zone_ref}")
-    return parts
-
-def _section_spatial_diagnostics(metrics: Dict[str, Any]) -> List[str]:
-    parts = ["\n### 2. Spatial"]
-    initial = metrics.get("initial_particle_count", 0)
-    active = metrics.get("particle_active_count")
-    if initial is not None and active is not None:
-        try:
-            ai = int(active)
-            ri = int(initial)
-            lost = ri - ai
-            parts.append(f"- Particles: {ai}/{ri} active, {lost} lost")
-        except (TypeError, ValueError):
-            pass
-    mean_x = metrics.get("particle_mean_x")
-    mean_y = metrics.get("particle_mean_y")
-    target_x_min = metrics.get("target_x_min")
-    target_x_max = metrics.get("target_x_max")
-    if mean_x is not None:
-        try:
-            mx = float(mean_x)
-            if math.isfinite(mx):
-                tmn = float(target_x_min) if target_x_min is not None else None
-                tmx = float(target_x_max) if target_x_max is not None else None
-                if tmn is not None and tmx is not None:
-                    if mx < tmn:
-                        parts.append(f"- Centroid: ({_f(mean_x)},{_f(mean_y)}) m — {tmn - mx:.1f} m behind target")
-                    elif mx > tmx:
-                        parts.append(f"- Centroid: ({_f(mean_x)},{_f(mean_y)}) m — {mx - tmx:.1f} m past target")
-                    else:
-                        parts.append(f"- Centroid: ({_f(mean_x)},{_f(mean_y)}) m — inside target x-range")
-                else:
-                    parts.append(f"- Centroid: ({_f(mean_x)},{_f(mean_y)}) m")
-        except (TypeError, ValueError):
-            pass
-    max_x = metrics.get("particle_max_x")
-    if max_x is not None:
-        try:
-            fx = float(max_x)
-            if math.isfinite(fx) and target_x_min is not None:
-                tmn = float(target_x_min)
-                if fx < tmn:
-                    parts.append(f"- Rightmost: x={fx:.1f} m ({tmn - fx:.1f} m short)")
-                else:
-                    parts.append(f"- Rightmost: x={fx:.1f} m (past target x={tmn:.1f})")
-        except (TypeError, ValueError):
-            pass
-    closest_dist = metrics.get("closest_particle_distance_to_target")
-    closest_pos = metrics.get("closest_particle_position")
-    if closest_dist is not None:
-        try:
-            cd = float(closest_dist)
-            if math.isfinite(cd):
-                if cd <= 0:
-                    parts.append("- Closest particle: INSIDE target zone")
-                else:
-                    pos_str = ""
-                    if closest_pos and isinstance(closest_pos, (list, tuple)) and len(closest_pos) >= 2:
-                        pos_str = f" at ({_f(closest_pos[0])},{_f(closest_pos[1])})"
-                    parts.append(f"- Closest particle: {cd:.1f} m to target{pos_str}")
-        except (TypeError, ValueError):
-            pass
-    in_target = metrics.get("particles_in_target")
-    in_source = metrics.get("particles_in_source")
-    in_build = metrics.get("particles_in_build_zone")
-    tgt_y_min = metrics.get("target_y_min")
-    tgt_y_max = metrics.get("target_y_max")
-    zone_parts = []
-    if in_source is not None:
-        zone_parts.append(f"source={in_source}")
-    if in_build is not None:
-        zone_parts.append(f"build={in_build}")
-    if in_target is not None:
-        zone_parts.append(f"target={in_target}")
-    try:
-        tgt_str = (f"Target zone: x=[{float(target_x_min):.1f},{float(target_x_max):.1f}] "
-                   f"y=[{float(tgt_y_min):.1f},{float(tgt_y_max):.1f}]")
-    except (TypeError, ValueError):
-        tgt_str = f"Target zone: x=[{target_x_min},{target_x_max}] y=[{tgt_y_min},{tgt_y_max}]"
-    if zone_parts:
-        parts.append(f"- Distribution: {', '.join(zone_parts)} | {tgt_str}")
-    else:
-        parts.append(f"- {tgt_str}")
-    return parts
-
-def _section_hazard_losses(metrics: Dict[str, Any]) -> List[str]:
-    parts = ["\n### 3. Hazards"]
-    hazard_losses = metrics.get("hazard_losses", {}) or {}
-    initial = metrics.get("initial_particle_count", 0)
-    if not hazard_losses:
-        parts.append("- No hazard data available.")
-        return parts
-    total_lost = (hazard_losses.get("pit1", 0) + hazard_losses.get("pit2", 0) +
-                  hazard_losses.get("pit3", 0) + hazard_losses.get("out_of_bounds", 0) +
-                  hazard_losses.get("floor", 0))
-    if total_lost == 0:
-        parts.append("- No particles lost to hazards (pits, floor, OOB).")
-    else:
-        parts.append(f"- Lost: {total_lost}/{initial} particles")
-        for pit_name, pit_label in [
-            ("pit1", "Pit 1 (x=13.5-15.5)"),
-            ("pit2", "Pit 2 (x=16.0-17.5)"),
-            ("pit3", "Pit 3 (x=11.0-12.5)"),
-        ]:
-            count = hazard_losses.get(pit_name, 0)
-            if count > 0:
-                parts.append(f"  - {pit_label}: {count}")
-        oob = hazard_losses.get("out_of_bounds", 0)
-        if oob > 0:
-            parts.append(f"  - Out of bounds: {oob}")
-        floor = hazard_losses.get("floor", 0)
-        if floor > 0:
-            parts.append(f"  - Fell below floor: {floor}")
-    hw = hazard_losses.get("headwind", 0)
-    gw = hazard_losses.get("gravwell", 0)
-    if hw > 0:
-        parts.append(f"- Headwind (y>3.0m): {hw} particle-steps affected")
-    if gw > 0:
-        parts.append(f"- Gravity well (x=10-14, y=1.5-3.5): {gw} particle-steps affected")
-    elif "gravwell" in hazard_losses and hw == 0:
-        pass
-    return parts
-
-def _section_force_utilization(metrics: Dict[str, Any]) -> List[str]:
-    parts = ["\n### 4. Force Utilization"]
-    budget = metrics.get("force_budget")
-    peak_pct = metrics.get("force_budget_peak_utilization_pct")
-    last_pct = metrics.get("force_budget_last_utilization_pct")
-    if budget is None:
-        parts.append("- No force budget data available.")
-        return parts
-    try:
-        b = float(budget)
-        if math.isfinite(b) and b > 0:
-            line = f"- Budget: {b:.0f} N/step"
-            if peak_pct is not None:
-                try:
-                    pp = float(peak_pct)
-                    if math.isfinite(pp):
-                        tier = ""
-                        if pp > 90.0:
-                            tier = " [SATURATED]"
-                        elif pp > 70.0:
-                            tier = " [high]"
-                        elif pp < 30.0:
-                            tier = " [underused]"
-                        line += f" | peak: {pp:.0f}%{tier}"
-                except (TypeError, ValueError):
-                    pass
-            if last_pct is not None:
-                try:
-                    lp = float(last_pct)
-                    if math.isfinite(lp):
-                        line += f" | last: {lp:.0f}%"
-                except (TypeError, ValueError):
-                    pass
-            parts.append(line)
-    except (TypeError, ValueError):
-        pass
-    zone_stats = metrics.get("zone_velocity_stats", {}) or {}
-    if zone_stats:
-        active_zones = []
-        zone_order = [
-            "source", "build_pre_pit3", "pit3_zone", "build_mid",
-            "pit1_zone", "pit2_zone", "build_post_pit2", "target",
-            "headwind", "gravwell",
-        ]
-        for zone_name in zone_order:
-            zs = zone_stats.get(zone_name)
-            if zs is None:
-                continue
-            count = zs.get("count", 0)
-            if count == 0:
-                continue
-            mvx = zs.get("mean_vx", 0.0)
-            mvy = zs.get("mean_vy", 0.0)
-            try:
-                if abs(float(mvx)) > 0.01 or abs(float(mvy)) > 0.01:
-                    active_zones.append(f"{zone_name}: vx={_f(mvx)} vy={_f(mvy)} ({count}p)")
-            except (TypeError, ValueError):
-                pass
-        if active_zones:
-            parts.append("- Zone velocities (non-trivial):")
-            for z in active_zones:
-                parts.append(f"  - {z}")
-    return parts
-
-def _section_temporal_chronology(metrics: Dict[str, Any]) -> List[str]:
-    parts = ["\n### 5. Timeline"]
-    step_count = metrics.get("step_count")
-    max_steps = metrics.get("max_steps")
-    if step_count is not None:
-        if max_steps is not None:
-            try:
-                s = int(step_count)
-                ms = int(max_steps)
-                if ms > 0:
-                    parts.append(f"- Terminated at step {s}/{ms} ({s / ms * 100:.0f}%)")
-                else:
-                    parts.append(f"- Terminated at step {s}")
-            except (TypeError, ValueError):
-                parts.append(f"- Terminated at step {step_count}")
-        else:
-            parts.append(f"- Terminated at step {step_count}")
-    snapshots = metrics.get("granular_snapshots")
-    if isinstance(snapshots, list) and snapshots:
-        prev = None
-        changes = []
-        for snap in snapshots:
-            if not isinstance(snap, dict):
-                continue
-            snap_metrics = snap.get("metrics", {}) or {}
-            step = snap.get("step_count", "?")
-            delivery = snap_metrics.get("delivery_ratio_percent")
-            if delivery is not None:
-                try:
-                    d = float(delivery)
-                    if prev is None or abs(d - prev) > 0.5:
-                        in_target = snap_metrics.get("particles_in_target")
-                        total_p = snap_metrics.get("initial_particle_count")
-                        line = f"  - Step {step}: {d:.0f}%"
-                        if in_target is not None and total_p is not None:
-                            line += f" ({in_target}/{total_p} in target)"
-                        changes.append(line)
-                        prev = d
-                except (TypeError, ValueError):
-                    pass
-        if changes:
-            parts.append("- Delivery trajectory:")
-            parts.extend(changes)
-    return parts
 
 def format_task_metrics(metrics: Dict[str, Any]) -> List[str]:
     if not metrics:
         return ["**No evaluation metrics available.**"]
-    viols = metrics.get("constraint_violations")
-    if isinstance(viols, list) and viols:
-        parts = ["### Design Constraint Violations (Build Phase)"]
-        for v in viols:
-            parts.append(f"- {v}")
-        if "failure_reason" in metrics:
-            parts.append(f"- Outcome: {metrics['failure_reason']}")
+    parts = _section_outcome(metrics)
+    diagnostic_keys = {
+        "constraint_violations", "delivery_ratio_percent", "structure_mass",
+        "particle_active_count", "hazard_losses", "force_budget", "step_count",
+    }
+    if not diagnostic_keys.intersection(metrics):
+        parts.extend([
+            "\n### Diagnostics",
+            "- Task metrics are unavailable; refer to the execution error reported above.",
+        ])
+        parts.extend(_section_numerical_health(metrics))
         return parts
-    parts: List[str] = []
+    parts.extend(_section_constraints(metrics))
+    violations = metrics.get("constraint_violations")
+    if not (isinstance(violations, list) and violations):
+        parts.extend(_section_spatial(metrics))
+        parts.extend(_section_hazards(metrics))
+        parts.extend(_section_actuation(metrics))
+        parts.extend(_section_timeline(metrics))
     parts.extend(_section_numerical_health(metrics))
-    parts.extend(_section_constraint_profile(metrics))
-    parts.extend(_section_spatial_diagnostics(metrics))
-    parts.extend(_section_hazard_losses(metrics))
-    parts.extend(_section_force_utilization(metrics))
-    parts.extend(_section_temporal_chronology(metrics))
     return parts
 
 def get_improvement_suggestions(
@@ -364,37 +342,5 @@ def get_improvement_suggestions(
 
 ) -> List[str]:
     if error:
-        return ["- Fix the code error reported above before tuning the design."]
-    if metrics.get("constraint_violations"):
-        return ["- Resolve the design constraint violation(s) listed above."]
-    suggestions = []
-    delivery_pct = metrics.get("delivery_ratio_percent")
-    target_pct = metrics.get("min_delivery_ratio_percent")
-    if delivery_pct is not None and target_pct is not None:
-        try:
-            dp = float(delivery_pct)
-            tp = float(target_pct)
-            if dp < tp:
-                shortfall = tp - dp
-                suggestions.append(
-                    f"- Delivery efficiency is {shortfall:.1f}% below the {tp:.1f}% threshold. "
-                    f"Review the hazard loss accounting (Section 3) to identify where particles are being lost."
-                )
-        except (TypeError, ValueError):
-            pass
-    if metrics.get("structure_broken"):
-        suggestions.append("- Structure integrity was lost during simulation. Inspect joint anchoring.")
-    peak_pct = metrics.get("force_budget_peak_utilization_pct")
-    if peak_pct is not None:
-        try:
-            pp = float(peak_pct)
-            if pp > 100.0:
-                suggestions.append(
-                    f"- Force budget peak utilization ({pp:.1f}%) exceeded 100%. "
-                    f"Some force commands were truncated."
-                )
-        except (TypeError, ValueError):
-            pass
-    if not suggestions:
-        suggestions.append("- Review the diagnostic sections above for detailed forensic data.")
-    return suggestions
+        return [f"- Resolve the reported execution error: {error}"]
+    return []

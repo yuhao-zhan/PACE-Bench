@@ -130,6 +130,10 @@ CORRIDOR_PINCH_THRESHOLD = 0.25
 
 DEFAULT_GROUND_Y_TOP = 1.0
 
+CORRIDOR_VIOLATION_TOLERANCE = 0.02
+
+OBSTACLE_PENETRATION_LIMIT = 0.05
+
 class Sandbox:
     def __init__(self, *, terrain_config=None, physics_config=None):
         terrain_config = terrain_config or {}
@@ -216,10 +220,13 @@ class Sandbox:
         self._cooldown_remaining = 0
         self._activation_achieved = False
         self._activation_consecutive_steps = 0
+        self._activation_max_consecutive_steps = 0
+        self._activation_achieved_step = None
         self._seeker_heading = 0.0
         self._thrust_next_mag = 0.0
         self._thrust_next_desired_angle = 0.0
         self._thrust_delayed_mag = 0.0
+        self._last_applied_thrust_magnitude = 0.0
         self._obstacle_collision = False
         wz = terrain_config.get("wind_zone_x", WIND_ZONE_X)
         if wz is not None and len(wz) >= 2:
@@ -382,6 +389,8 @@ class Sandbox:
         return (self._target_x, self._target_y)
     def apply_seeker_force(self, force_x, force_y):
         fx, fy = float(force_x), float(force_y)
+        if not math.isfinite(fx) or not math.isfinite(fy):
+            raise ValueError("Seeker force components must be finite")
         mag = math.sqrt(fx * fx + fy * fy)
         max_mag = self._cooldown_max_thrust if self._cooldown_remaining > 0 else self._max_thrust_magnitude
         if mag > 1e-9:
@@ -413,6 +422,9 @@ class Sandbox:
             return (wx, wy)
         return (0.0, 0.0)
     def step(self, time_step):
+        time_step = float(time_step)
+        if not math.isfinite(time_step) or time_step <= 0:
+            raise ValueError(f"C-03 requires a finite positive time step, received {time_step!r}")
         self._step_count += 1
         self._sim_time += time_step
         self._delay_change_counter += 1
@@ -472,13 +484,18 @@ class Sandbox:
             self._moving_obstacle_2.position = (new_x, cy)
         seeker = self._terrain_bodies.get("seeker")
         if seeker is not None:
+            cooldown_active = self._cooldown_remaining > 0
             wx, wy = self.get_local_wind()
             if wx != 0 or wy != 0:
                 wind_force = (self._seeker_mass * wx, self._seeker_mass * wy)
                 seeker.ApplyForceToCenter(wind_force, True)
             applied_mag = self._thrust_delayed_mag
+            if cooldown_active:
+                applied_mag = min(applied_mag, self._cooldown_max_thrust)
+            self._last_applied_thrust_magnitude = applied_mag
             self._thrust_x = applied_mag * math.cos(self._seeker_heading)
             self._thrust_y = applied_mag * math.sin(self._seeker_heading)
+            cooldown_triggered = False
             if self._thrust_x != 0.0 or self._thrust_y != 0.0:
                 seeker.ApplyForceToCenter((self._thrust_x, self._thrust_y), True)
                 thrust_mag = math.sqrt(self._thrust_x ** 2 + self._thrust_y ** 2)
@@ -497,7 +514,8 @@ class Sandbox:
                         })
                 if thrust_mag > self._cooldown_threshold:
                     self._cooldown_remaining = self._cooldown_steps
-            if self._cooldown_remaining > 0:
+                    cooldown_triggered = True
+            if cooldown_active and not cooldown_triggered:
                 self._cooldown_remaining -= 1
             delta = self._thrust_next_desired_angle - self._seeker_heading
             while delta > math.pi: delta -= 2.0 * math.pi
@@ -523,7 +541,7 @@ class Sandbox:
             if len(self._acceleration_samples) > 200:
                 self._acceleration_samples.pop(0)
             self._prev_seeker_velocity = (cvx, cvy)
-        _penetration_min = 0.05
+        _penetration_min = OBSTACLE_PENETRATION_LIMIT
         if seeker is not None and not self._obstacle_collision:
             sx, sy = self.get_seeker_position()
             r = self._seeker_radius
@@ -548,7 +566,10 @@ class Sandbox:
         if seeker is not None and not self._corridor_violation:
             sx, _ = self.get_seeker_position()
             x_lo, x_hi = self._corridor_bounds_at_time(self._sim_time)
-            if sx < x_lo - 0.02 or sx > x_hi + 0.02:
+            if (
+                sx < x_lo - CORRIDOR_VIOLATION_TOLERANCE
+                or sx > x_hi + CORRIDOR_VIOLATION_TOLERANCE
+            ):
                 self._corridor_violation = True
                 margin_lo = sx - x_lo
                 margin_hi = x_hi - sx
@@ -575,8 +596,13 @@ class Sandbox:
             sx, _ = self.get_seeker_position()
             if self._activation_zone_x_min <= sx <= self._activation_zone_x_max:
                 self._activation_consecutive_steps += 1
+                self._activation_max_consecutive_steps = max(
+                    self._activation_max_consecutive_steps,
+                    self._activation_consecutive_steps,
+                )
                 if self._activation_consecutive_steps >= self._activation_required_steps:
                     self._activation_achieved = True
+                    self._activation_achieved_step = self._step_count
                     self._failure_events.append({
                         "step": self._step_count,
                         "type": "activation_achieved",
@@ -651,6 +677,16 @@ class Sandbox:
         return self._corridor_violation
     def get_activation_achieved(self):
         return self._activation_achieved
+    def get_activation_progress(self):
+        return {
+            "current_consecutive_steps": int(self._activation_consecutive_steps),
+            "max_consecutive_steps": int(self._activation_max_consecutive_steps),
+            "achieved_step": self._activation_achieved_step,
+        }
+    def get_cooldown_remaining_steps(self):
+        return int(self._cooldown_remaining)
+    def get_last_applied_thrust_magnitude(self):
+        return float(self._last_applied_thrust_magnitude)
     def get_obstacle_collision(self):
         return self._obstacle_collision
     def get_terrain_bounds(self):
@@ -689,6 +725,8 @@ class Sandbox:
             "blind_zone_x_max": self._blind_zone_x_max,
             "speed_blind_threshold_mps": self._speed_blind_threshold,
             "target_sensor_visual_radius": TARGET_SENSOR_VISUAL_RADIUS,
+            "corridor_violation_tolerance": CORRIDOR_VIOLATION_TOLERANCE,
+            "obstacle_penetration_limit": OBSTACLE_PENETRATION_LIMIT,
         }
         if "slots_phase1" in self._terrain_config:
             out["slots_phase1"] = self._terrain_config["slots_phase1"]

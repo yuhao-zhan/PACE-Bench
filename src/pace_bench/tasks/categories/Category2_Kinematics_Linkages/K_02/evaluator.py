@@ -1,11 +1,5 @@
 import math
 
-import sys
-
-import os
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../..'))
-
 from pace_bench.simulator import TIME_STEP
 
 from pace_bench.primitives import compute_constraint_penalty
@@ -24,6 +18,7 @@ class Evaluator:
         self.initial_y = 1.5
         self.max_y_reached = 1.5
         self.min_height_seen = 1.5
+        self._initial_position_captured = False
         self.design_constraints_checked = False
         self._failure_step: int = -1
         self._failure_type: str = ""
@@ -75,6 +70,14 @@ class Evaluator:
     def evaluate(self, agent_body, step_count, max_steps):
         if not self.environment:
             return (False, 0.0, {"error": "Environment not available"})
+        initial_body = agent_body
+        if initial_body is None and self.environment._bodies:
+            initial_body = self.environment._bodies[0]
+        if not self._initial_position_captured and initial_body is not None:
+            self.initial_y = float(initial_body.position.y)
+            self.max_y_reached = self.initial_y
+            self.min_height_seen = self.initial_y
+            self._initial_position_captured = True
         if self._max_joint_force == float("inf") and hasattr(self.environment, "get_joint_limits"):
             self._sync_environment_config(self.environment)
         if step_count == 0 and not self.design_constraints_checked:
@@ -368,6 +371,8 @@ class Evaluator:
             'inf_flag': inf_flag,
             'extreme_speed_flag': extreme_speed_flag,
             'initial_y': self.initial_y,
+            'observation_error_count': getattr(self.environment, '_observation_error_count', 0),
+            'last_observation_error': getattr(self.environment, '_last_observation_error', None),
         }
         return done, score, metrics
     def compute_score_with_penalty(self, score: float, metrics: dict) -> float:

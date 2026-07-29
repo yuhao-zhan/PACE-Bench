@@ -48,44 +48,59 @@ def build_agent_stage_2(sandbox):
     return posts[0]
 
 def build_agent_stage_3(sandbox):
-    d = 0.04
-    post_xs = [6.5, 8.25, 9.0, 11.0, 11.75, 13.5]
-    posts = []
-    for px in post_xs:
-        post = sandbox.add_beam(px, 2.0, 0.20, 3.5, angle=0, density=d)
-        sandbox.add_joint(post, None, (px, 0.0), type='rigid')
-        posts.append(post)
-    roof = sandbox.add_beam(10.0, 3.55, 7.0, 0.2, angle=0, density=d)
-    for px, post in zip(post_xs, posts):
-        sandbox.add_joint(post, roof, (px, 3.5), type='rigid')
-    return posts[0]
+    d = 0.018
+    apex_y = 5.4
+    left_feet = [6.8, 7.1, 7.4, 7.7]
+    right_feet = [13.2, 12.9, 12.6, 12.3]
+    ribs = []
+    for foot_x, apex_x in [(x, 10.2) for x in left_feet] + [(x, 9.8) for x in right_feet]:
+        dx = apex_x - foot_x
+        length = math.hypot(dx, apex_y)
+        rib = sandbox.add_beam(
+            (foot_x + apex_x) / 2,
+            apex_y / 2,
+            length,
+            0.12,
+            angle=math.atan2(apex_y, dx),
+            density=d,
+        )
+        sandbox.add_joint(rib, None, (foot_x, 0.04), type='rigid')
+        sandbox.add_joint(rib, None, (foot_x - 0.04 if foot_x < 10.0 else foot_x + 0.04, 0.02), type='rigid')
+        ribs.append(rib)
+    for left_rib, right_rib in zip(ribs[:4], ribs[4:]):
+        sandbox.add_joint(left_rib, right_rib, (10.0, 5.35), type='rigid')
+
+    shields = []
+    for x in [8.92, 9.08, 10.92, 11.08]:
+        shield = sandbox.add_beam(x, 2.45, 0.12, 4.9, angle=0, density=d)
+        sandbox.add_joint(shield, None, (x - 0.035, 0.02), type='rigid')
+        sandbox.add_joint(shield, None, (x + 0.035, 0.02), type='rigid')
+        feet = left_feet if x < 10.0 else right_feet
+        apex_x = 10.2 if x < 10.0 else 9.8
+        members = ribs[:4] if x < 10.0 else ribs[4:]
+        for foot_x, rib in zip(feet, members):
+            intersection_y = apex_y * (x - foot_x) / (apex_x - foot_x)
+            sandbox.add_joint(shield, rib, (x, intersection_y), type='rigid')
+        shields.append(shield)
+    return ribs[0]
 
 def build_agent_stage_4(sandbox):
-    d = 0.066
-    post_h = 4.5
-    offset = 0.4
-    post_cy = post_h / 2 + offset
-    # Leave the core's physical footprint clear; the keep-out API checks beam
-    # centers, while a full-height member near x=14 can still touch the core.
-    post_xs = [5.1, 6.0, 6.9, 8.7573, 8.7, 9.6, 10.5, 11.4, 12.2]
-    posts = []
-    for px in post_xs:
-        p = sandbox.add_beam(px, post_cy, 0.16, post_h, angle=0, density=d)
-        sandbox.add_joint(p, None, (px, 0.0), type='rigid')
-        posts.append(p)
-    roof_cy = post_h + offset + 0.12
-    roof = sandbox.add_beam(10.0, roof_cy, 10.0, 0.16, angle=0, density=d)
-    for px, p in zip(post_xs, posts):
-        sandbox.add_joint(p, roof, (px, post_h + offset - 0.08), type='rigid')
-    wall_h = post_h + offset + 0.4
-    wall_cy = wall_h / 2
-    rwall = sandbox.add_beam(14.9, wall_cy, 0.16, wall_h, angle=0, density=d)
-    for ay in [0.0, 0.55, 1.1, 1.65, 2.2, 2.75, 3.3, 3.85, 4.4]:
-        sandbox.add_joint(rwall, None, (14.9, ay), type='rigid')
-    inner_wall = sandbox.add_beam(13.2, wall_cy, 0.16, wall_h, angle=0, density=0.0035)
-    for ay in [0.0, 0.55, 1.1, 1.65, 2.2, 2.75, 3.3, 3.85, 4.4]:
-        sandbox.add_joint(inner_wall, None, (13.2, ay), type='rigid')
-    return posts[0]
+    d = 0.05
+    wall_h = 5.8
+    wall_specs = [(12.1, 0.2), (14.9, 0.2)]
+    walls = []
+    for x, width in wall_specs:
+        wall = sandbox.add_beam(x, wall_h / 2, width, wall_h, angle=0, density=d)
+        for dx in [-0.06, 0.0, 0.06]:
+            sandbox.add_joint(wall, None, (x + dx, 0.02), type='rigid')
+        walls.append(wall)
+
+    shield = sandbox.add_beam(13.5, 4.05, 3.0, 3.2, angle=0, density=0.025)
+    for wall in walls:
+        x = wall.position.x
+        for y in [2.5, 3.1, 3.7, 4.3, 4.9, 5.5]:
+            sandbox.add_joint(shield, wall, (x, y), type='rigid')
+    return walls[0]
 
 def agent_action_stage_1(sandbox, agent_body, step_count):
     pass

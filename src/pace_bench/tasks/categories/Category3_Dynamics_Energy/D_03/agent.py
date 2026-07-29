@@ -16,6 +16,8 @@ def agent_action(sandbox, agent_body, step_count):
 
 def build_agent_stage_1(sandbox):
     cabin = sandbox.get_vehicle_cabin()
+    if cabin is None:
+        raise ValueError("Cart not found")
     beams = []
     for (xx, yy) in [(4.8, 2.6), (4.9, 2.6), (5.0, 2.6), (5.1, 2.6)]:
         b = sandbox.add_beam(xx, yy, 0.08, 0.16, angle=0, density=1.0)
@@ -84,6 +86,8 @@ def agent_action_stage_2(sandbox, agent_body, step_count):
 
 def build_agent_stage_3(sandbox):
     cabin = sandbox.get_vehicle_cabin()
+    if cabin is None:
+        raise ValueError("Cart not found")
     beams = []
     for (xx, yy) in [(4.8, 2.6), (4.9, 2.6), (5.0, 2.6), (5.1, 2.6)]:
         b = sandbox.add_beam(xx, yy, 0.08, 0.16, angle=0, density=60.0)
@@ -125,6 +129,8 @@ def agent_action_stage_3(sandbox, agent_body, step_count):
 
 def build_agent_stage_4(sandbox):
     cabin = sandbox.get_vehicle_cabin()
+    if cabin is None:
+        raise ValueError("Cart not found")
     beams = []
     for (xx, yy) in [(4.8, 2.6), (4.9, 2.6), (5.0, 2.6), (5.1, 2.6), (5.2, 2.6)]:
         b = sandbox.add_beam(xx, yy, 0.08, 0.16, angle=0, density=1.0)

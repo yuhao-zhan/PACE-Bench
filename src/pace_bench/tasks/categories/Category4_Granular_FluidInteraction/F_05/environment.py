@@ -30,7 +30,7 @@ class Sandbox:
         self.WATER_X_MIN = 5.0
         self.WATER_X_MAX = 25.0
         self.WATER_SURFACE_Y = 2.0
-        self.CARGO_WATER_Y = float(terrain_config.get("cargo_water_y", 1.98))
+        self.CARGO_WATER_Y = float(terrain_config.get("cargo_water_y", 1.90))
         self.BOAT_MAX_ANGLE_RAD = math.radians(float(terrain_config.get("max_capsize_angle_deg", 18.0)))
         self.BUILD_ZONE_X_MIN = float(terrain_config.get("build_zone_x_min", 12.0))
         self.BUILD_ZONE_X_MAX = float(terrain_config.get("build_zone_x_max", 18.0))
@@ -64,9 +64,12 @@ class Sandbox:
         self._create_cargo(terrain_config)
         self._peak_abs_boat_angle_rad = 0.0
         self._cargo_ever_below_loss_plane = False
+        self._cargo_ever_below_indices = set()
+        self._cargo_loss_first_step: Optional[int] = None
         self._physics_steps_done = 0
-        self._cargo_loss_grace_steps = int(terrain_config.get("cargo_loss_grace_steps", 120))
+        self._cargo_loss_grace_steps = int(terrain_config.get("cargo_loss_grace_steps", 180))
         self._capsize_first_step: Optional[int] = None
+        self._first_joint_break_step: Optional[int] = None
         self._joint_peak_force: float = 0.0
         self._joint_peak_torque: float = 0.0
         self._peak_angular_velocity_rad_s: float = 0.0
@@ -143,14 +146,14 @@ class Sandbox:
         cargo_rest = cargo_config.get("restitution", terrain_config.get("cargo_restitution", None))
         restitution = float(cargo_rest if cargo_rest is not None else 0.12)
         seed = int(cargo_config.get("seed", terrain_config.get("target_rng_seed", 42)))
-        random.seed(seed)
+        rng = random.Random(seed)
         boat = self._terrain_bodies["boat"]
         bx, by = boat.position.x, boat.position.y
         boat_half_w = 1.5
         boat_top_y = by + 0.2
         for i in range(n_cargo):
-            ox = random.uniform(-boat_half_w + radius, boat_half_w - radius)
-            oy = random.uniform(0.0, 0.55)
+            ox = rng.uniform(-boat_half_w + radius, boat_half_w - radius)
+            oy = rng.uniform(0.0, 0.55)
             x = bx + ox
             y = boat_top_y + oy + radius
             body = self._world.CreateDynamicBody(
@@ -344,6 +347,8 @@ class Sandbox:
                     broken_joints.append(j)
             for j in broken_joints:
                 if j in self._joints:
+                    if self._first_joint_break_step is None:
+                        self._first_joint_break_step = self._physics_steps_done + 1
                     self._world.DestroyJoint(j)
                     self._joints.remove(j)
         self._physics_steps_done += 1
@@ -359,19 +364,23 @@ class Sandbox:
                     self._capsize_first_step = self._physics_steps_done
                 if abs_ang_vel > self._peak_angular_velocity_rad_s:
                     self._peak_angular_velocity_rad_s = abs_ang_vel
-            for c in self._cargo:
+            for cargo_index, c in enumerate(self._cargo):
                 if c.active:
                     cy = float(c.position.y)
                     if cy < self.CARGO_WATER_Y:
                         self._cargo_ever_below_loss_plane = True
+                        self._cargo_ever_below_indices.add(cargo_index)
+                        if self._cargo_loss_first_step is None:
+                            self._cargo_loss_first_step = self._physics_steps_done
                     if self._cargo_lowest_y is None or cy < self._cargo_lowest_y:
                         self._cargo_lowest_y = cy
                         self._cargo_lowest_y_step = self._physics_steps_done
             milestone_steps = (2000, 4000, 6000, 8000, 10000)
             if self._physics_steps_done in milestone_steps:
-                retained = sum(
-                    1 for c in self._cargo
-                    if c.active and c.position.y >= self.CARGO_WATER_Y
+                retained = max(
+                    0,
+                    self._initial_cargo_count
+                    - len(self._cargo_ever_below_indices),
                 )
                 self._cargo_retention_milestones[self._physics_steps_done] = retained
             if self._physics_steps_done == self._cargo_loss_grace_steps + 1:
@@ -411,12 +420,20 @@ class Sandbox:
         return float(self._peak_abs_boat_angle_rad)
     def get_cargo_ever_below_loss_plane(self) -> bool:
         return bool(self._cargo_ever_below_loss_plane)
+    def get_cargo_ever_below_loss_plane_count(self) -> int:
+        return len(self._cargo_ever_below_indices)
+    def get_cargo_loss_first_step(self) -> Optional[int]:
+        return self._cargo_loss_first_step
     def get_capsize_first_step(self) -> Optional[int]:
         return self._capsize_first_step
     def get_joint_peak_force(self) -> float:
         return float(self._joint_peak_force)
     def get_joint_peak_torque(self) -> float:
         return float(self._joint_peak_torque)
+    def get_joint_max_torque(self) -> float:
+        return float(self.JOINT_MAX_FORCE * WELD_TORQUE_FORCE_RATIO)
+    def get_first_joint_break_step(self) -> Optional[int]:
+        return self._first_joint_break_step
     def get_peak_angular_velocity_rad_s(self) -> float:
         return float(self._peak_angular_velocity_rad_s)
     def get_lowest_beam_y_floor_margin(self) -> Optional[float]:
@@ -433,18 +450,6 @@ class Sandbox:
             if self._capsize_margin_at_grace_end is not None
             else None
         )
-    def get_restoring_coeff(self) -> float:
-        return float(self._restoring_coeff)
-    def get_wave_amplitude(self) -> float:
-        return float(self._wave_amplitude)
-    def get_wave2_amplitude(self) -> float:
-        return float(self._wave2_amplitude)
-    def get_rogue_amplitude(self) -> float:
-        return float(self._rogue_amplitude)
-    def get_lateral_impulse_amplitude(self) -> float:
-        return float(self._lateral_impulse_amplitude)
-    def get_wind_amplitude(self) -> float:
-        return float(self._wind_amplitude)
     def get_joint_max_force(self) -> float:
         return float(self.JOINT_MAX_FORCE)
     def get_grace_steps(self) -> int:

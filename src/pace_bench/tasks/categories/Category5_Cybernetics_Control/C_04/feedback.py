@@ -1,471 +1,315 @@
 import math
 
-from typing import Dict, Any, List, Optional
+from typing import Any, Dict, List
 
-_prev_metrics: Optional[Dict[str, Any]] = None
 
 def reset_feedback_state():
-    global _prev_metrics
-    _prev_metrics = None
+    return None
 
-def _m(metrics: Dict[str, Any], key: str, default: float = 0.0) -> float:
-    v = metrics.get(key, default)
+
+def _number(value: Any):
     try:
-        f = float(v)
-        return f if math.isfinite(f) else float(default)
+        result = float(value)
     except (TypeError, ValueError):
-        return float(default)
+        return None
+    return result if math.isfinite(result) else None
 
-def _mi(metrics: Dict[str, Any], key: str, default: int = 0) -> int:
-    v = metrics.get(key, default)
-    try:
-        return int(v)
-    except (TypeError, ValueError):
-        return int(default)
 
-def _mb(metrics: Dict[str, Any], key: str, default: bool = False) -> bool:
-    v = metrics.get(key, default)
-    if isinstance(v, bool):
-        return v
-    if isinstance(v, str):
-        return v.lower() in ("true", "yes", "1")
-    try:
-        return bool(v)
-    except (TypeError, ValueError):
-        return default
+def _fmt(value: Any, decimals: int = 2) -> str:
+    number = _number(value)
+    return f"{number:.{decimals}f}" if number is not None else "N/A"
 
-def _is_finite(x: Any) -> bool:
-    if x is None:
-        return True
-    try:
-        return math.isfinite(float(x))
-    except (TypeError, ValueError):
-        return True
 
-def _fmt(val: float, decimals: int = 2) -> str:
-    try:
-        f = float(val)
-        if not math.isfinite(f):
-            return str(val)
-        return f"{f:.{decimals}f}"
-    except (TypeError, ValueError):
-        return str(val)
+def _non_finite_paths(value: Any, path: str = "metrics") -> List[str]:
+    bad: List[str] = []
+    if isinstance(value, dict):
+        for key, nested in value.items():
+            bad.extend(_non_finite_paths(nested, f"{path}.{key}"))
+    elif isinstance(value, (list, tuple)):
+        for index, nested in enumerate(value):
+            bad.extend(_non_finite_paths(nested, f"{path}[{index}]"))
+    elif isinstance(value, float) and not math.isfinite(value):
+        bad.append(path)
+    return bad
 
-def _exit_hold_required(metrics: Dict[str, Any]) -> int:
-    return _mi(metrics, "consecutive_exit_steps_required", 5)
 
-def _speed(vx: float, vy: float) -> float:
-    return math.sqrt(vx * vx + vy * vy)
-
-def _delta(metrics: Dict[str, Any], key: str, tol: float = 1e-6) -> bool:
-    global _prev_metrics
-    if _prev_metrics is None:
-        return True
-    prev = _prev_metrics.get(key)
-    curr = metrics.get(key)
-    if prev is None and curr is None:
-        return False
-    if prev is None or curr is None:
-        return True
-    try:
-        return abs(float(curr) - float(prev)) > tol
-    except (TypeError, ValueError):
-        return str(curr) != str(prev)
-
-def _delta_any(metrics: Dict[str, Any], keys: List[str], tol: float = 1e-6) -> bool:
-    return any(_delta(metrics, k, tol) for k in keys)
-
-def _is_first_moment() -> bool:
-    return _prev_metrics is None
-
-def _pos_changed(metrics: Dict[str, Any]) -> bool:
-    return _delta_any(metrics, ["agent_x", "agent_y", "progress_x_pct"])
-
-def _force_changed(metrics: Dict[str, Any]) -> bool:
-    return _delta_any(metrics, ["force_ledger", "agent_vx", "agent_vy"])
-
-def _section_temporal_chronology(metrics: Dict[str, Any]) -> List[str]:
-    parts = []
-    step_count = _mi(metrics, "step_count", 0)
-    max_steps_val = max(_mi(metrics, "max_steps", 0), 250000)
-    x = _m(metrics, "agent_x")
-    y = _m(metrics, "agent_y")
-    vx = _m(metrics, "agent_vx")
-    vy = _m(metrics, "agent_vy")
-    spd = _speed(vx, vy)
-    unlocked = _mb(metrics, "unlocked", False)
-    reached_exit = _mb(metrics, "reached_exit", False)
-    consec_in_exit = _mi(metrics, "consecutive_steps_in_exit", 0)
-    exit_hold_need = _exit_hold_required(metrics)
-    gate = "UNLOCKED" if unlocked else "LOCKED"
-    exit_label = "IN EXIT" if reached_exit else "not at exit"
-    parts.append(
-        f"Step {step_count} | pos=({_fmt(x)}, {_fmt(y)}) | "
-        f"speed={_fmt(spd, 3)} (vx={_fmt(vx, 3)}, vy={_fmt(vy, 3)}) | "
-        f"gate={gate} | {exit_label} | dwell={consec_in_exit}/{exit_hold_need}"
-    )
-    events = []
-    ucs = metrics.get("unlock_condition_status")
-    if isinstance(ucs, dict) and not unlocked:
-        conditions = ucs.get("conditions", [])
-        for cond in conditions:
-            if not cond.get("pass", False):
-                name = cond.get("name", "?")
-                margin = cond.get("margin", 0.0)
-                try:
-                    margin_f = float(margin)
-                except (TypeError, ValueError):
-                    margin_f = 0.0
-                short_name = {
-                    "reported_x_in_activation_zone": "x not in activation zone",
-                    "commanded_fx_below_threshold": "Fx above threshold",
-                    "physical_speed_below_max": "speed above max",
-                }.get(name, name)
-                events.append(f"Unlock FAIL: {short_name} (margin {_fmt(margin_f, 3)})")
-    if ucs and isinstance(ucs, dict):
-        cons = ucs.get("consecutive_count", 0)
-        req = ucs.get("required_consecutive", 5)
-        all_met = ucs.get("all_conditions_met", False)
-        if all_met and cons < req:
-            events.insert(0, f"Unlock progressing: {cons}/{req} consecutive steps met")
-        elif not all_met and cons > 0:
-            events.insert(0, f"Unlock counter reset (was {cons}/{req})")
-    ledger = metrics.get("force_ledger")
-    if isinstance(ledger, dict):
-        ch = ledger.get("channels", {})
-        mag = ch.get("magnetic_floor", {})
-        if mag.get("active", False):
-            events.append(
-                f"Magnetic floor: {_fmt(mag.get('force_fy', 0))} N downward (y < {_fmt(mag.get('y_threshold', 0))} m)"
-            )
-        rev = ch.get("control_reversal", {})
-        if rev.get("active", False):
-            events.append("Control reversal: Fx sign flipped")
-        turb = ch.get("turbulence", {})
-        if turb.get("active", False):
-            events.append(
-                f"Turbulence: intensity {_fmt(turb.get('intensity', 0))} N, "
-                f"last=({_fmt(turb.get('last_fx', 0), 1)}, {_fmt(turb.get('last_fy', 0), 1)})"
-            )
-        drag = ch.get("fluid_drag", {})
-        if drag.get("active", False):
-            events.append(f"Fluid drag: coeff {_fmt(drag.get('coefficient', 0))}")
-    wh = metrics.get("whisker_health")
-    if isinstance(wh, dict) and wh.get("agent_in_blind_zone", False):
-        events.append("Whiskers BLIND (all report max range)")
-    wcm = metrics.get("wall_clearance_map")
-    if isinstance(wcm, dict):
-        for w in wcm.get("walls", []):
-            rel = w.get("agent_relative", {})
-            if rel.get("at_wall_x", False):
-                w_idx = w.get("wall_index", "?")
-                above = w.get("clearance_needed_m", {}).get("to_pass_above", 0)
-                events.append(f"Agent AT wall #{w_idx} — clearance above: {_fmt(above)} m")
-    if events:
-        parts.append("Events:")
-        for i, ev in enumerate(events, 1):
-            parts.append(f"  {i}. {ev}")
-    failed = _mb(metrics, "failed", False)
-    if failed and metrics.get("failure_reason"):
-        fr = str(metrics["failure_reason"])
-        if "Structural Failure" in fr or "Collision impulse" in fr:
-            parts.append(f"  CRITICAL: {fr}")
+def _section_outcome(metrics: Dict[str, Any]) -> List[str]:
+    error = metrics.get("error") or metrics.get("error_message")
+    if error:
+        return ["### Outcome", "- ERROR", f"- Execution evidence: {error}"]
+    success = metrics.get("success") is True
+    failed = metrics.get("failed") is True
+    reason = metrics.get("failure_reason")
+    status = "FAIL" if failed or reason else "PASS" if success else "INCOMPLETE"
+    parts = ["### Outcome", f"- {status}"]
+    if reason:
+        parts.append(f"- Decisive evidence: {reason}")
+    elif success:
+        parts.append("- Decisive evidence: unlock and exit-dwell requirements were satisfied.")
+    else:
+        parts.append("- Decisive evidence: no terminal result was reported.")
     return parts
+
+
+def _section_chronology(metrics: Dict[str, Any]) -> List[str]:
+    parts = ["\n### 1. Chronology"]
+    step = metrics.get("step_count")
+    maximum = metrics.get("max_steps")
+    if step is not None:
+        parts.append(f"- Evaluation ended at step {step}/{maximum}.")
+    else:
+        parts.append("- Evaluation end step unavailable.")
+
+    timeline = metrics.get("diagnostic_timeline")
+    if not isinstance(timeline, dict):
+        parts.append("- Transport event timeline unavailable.")
+        return parts
+    events = []
+    for key, label in (
+        ("first_activation_entry_step", "first activation-zone entry"),
+        ("first_unlock_step", "unlock achieved"),
+        ("first_exit_entry_step", "first geometric exit-zone entry"),
+        ("first_all_whiskers_max_step", "first simultaneous max-range whisker report"),
+        ("destruction_step", "structural destruction"),
+    ):
+        event_step = timeline.get(key)
+        if event_step is not None:
+            events.append((int(event_step), label))
+    qualified_exit = metrics.get("first_qualified_exit_step")
+    if qualified_exit is not None:
+        events.append((int(qualified_exit), "first post-unlock exit-dwell step"))
+    hold_completion = metrics.get("exit_hold_completion_step")
+    if hold_completion is not None:
+        events.append((int(hold_completion), "exit-dwell requirement first satisfied"))
+    if events:
+        for event_step, label in sorted(events):
+            parts.append(f"- Step {event_step}: {label}.")
+    else:
+        parts.append("- No tracked milestone was observed.")
+
+    parts.append(
+        f"- Furthest reported x: {_fmt(timeline.get('max_reported_x_m'))} m "
+        f"at step {timeline.get('max_reported_x_step', 'N/A')}."
+    )
+    parts.append(
+        f"- Closest exit-zone distance: {_fmt(timeline.get('closest_exit_distance_m'))} m "
+        f"at step {timeline.get('closest_exit_distance_step', 'N/A')}."
+    )
+    return parts
+
 
 def _section_spatial(metrics: Dict[str, Any]) -> List[str]:
-    parts = []
-    x = _m(metrics, "agent_x")
-    y = _m(metrics, "agent_y")
-    exit_x = _m(metrics, "exit_x_min", 15.0)
-    exit_ylo = _m(metrics, "exit_y_min", 0.5)
-    exit_yhi = _m(metrics, "exit_y_max", 2.5)
-    act_lo = _m(metrics, "activation_x_min", 5.0)
-    act_hi = _m(metrics, "activation_x_max", 10.0)
-    lock_lo = _m(metrics, "lock_gate_x_min", 12.0)
-    lock_hi = _m(metrics, "lock_gate_x_max", 16.0)
-    oneway_x = _m(metrics, "oneway_x_threshold", 10.2)
-    unlocked = _mb(metrics, "unlocked", False)
-    zone_parts = []
-    exit_str = f"Exit: x≥{_fmt(exit_x)} y∈[{_fmt(exit_ylo)},{_fmt(exit_yhi)}]"
-    if x < exit_x:
-        exit_str += f" →{_fmt(exit_x - x)}m"
-    else:
-        exit_str += " ✓x"
-    if y < exit_ylo:
-        exit_str += f" y↓{_fmt(exit_ylo - y)}"
-    elif y > exit_yhi:
-        exit_str += f" y↑{_fmt(y - exit_yhi)}"
-    else:
-        exit_str += " ✓y"
-    zone_parts.append(exit_str)
-    act_str = f"Act: [{_fmt(act_lo)},{_fmt(act_hi)}]"
-    if x < act_lo:
-        act_str += f" →{_fmt(act_lo - x)}m"
-    elif x > act_hi:
-        act_str += f" ←past {_fmt(x - act_hi)}m"
-    else:
-        act_str += " IN"
-    zone_parts.append(act_str)
-    lock_str = f"Lock: [{_fmt(lock_lo)},{_fmt(lock_hi)}]"
-    if x < lock_lo:
-        lock_str += f" →{_fmt(lock_lo - x)}m"
-    elif x > lock_hi:
-        lock_str += " ←past"
-    else:
-        lock_str += " IN" + (" (unlocked)" if unlocked else " LOCKED")
-    zone_parts.append(lock_str)
-    if oneway_x > 0:
-        ow_str = f"Oneway: x={_fmt(oneway_x)}"
-        if x < oneway_x:
-            ow_str += f" →{_fmt(oneway_x - x)}m"
-        else:
-            ow_str += " PAST"
-        zone_parts.append(ow_str)
-    parts.append(" | ".join(zone_parts))
-    wcm = metrics.get("wall_clearance_map")
-    if isinstance(wcm, dict):
-        walls = wcm.get("walls", [])
-        nearby = []
-        for w in walls:
-            pos = w.get("position", {})
-            wx_min = pos.get("x_min", 0)
-            wx_max = pos.get("x_max", 0)
-            dist = wx_min - x
-            rel = w.get("agent_relative", {})
-            if dist < -2.0:
-                continue
-            if dist > 6.0:
-                continue
-            w_idx = w.get("wall_index", "?")
-            gaps = w.get("gaps", {})
-            ga = gaps.get("above", {})
-            gb = gaps.get("below", {})
-            gap_parts = []
-            if ga.get("exists"):
-                gap_parts.append(f"↑{_fmt(ga.get('size_m', 0))}m")
-            if gb.get("exists"):
-                gap_parts.append(f"↓{_fmt(gb.get('size_m', 0))}m")
-            gap_str = ",".join(gap_parts) if gap_parts else "solid"
-            if rel.get("at_wall_x"):
-                status = "AT"
-            elif rel.get("behind_wall"):
-                status = f"ahead{_fmt(dist)}m"
-            else:
-                status = "past"
-            nearby.append(f"#{w_idx}@{_fmt(wx_min)} gap:{gap_str} {status}")
-        if nearby:
-            parts.append("Walls: " + " | ".join(nearby))
-    wf = _m(metrics, "whisker_front")
-    wu = _m(metrics, "whisker_up")
-    wd = _m(metrics, "whisker_down")
-    wh = metrics.get("whisker_health")
-    blind = isinstance(wh, dict) and wh.get("agent_in_blind_zone", False)
-    whisk_str = f"f={_fmt(wf)} u={_fmt(wu)} d={_fmt(wd)}"
-    if blind:
-        whisk_str += " [BLIND]"
-    progress = _m(metrics, "progress_x_pct")
-    parts.append(f"Whiskers: {whisk_str} | Progress: {_fmt(progress, 1)}%")
+    parts = ["\n### 2. Spatial and sensor state"]
+    x = _number(metrics.get("agent_x"))
+    y = _number(metrics.get("agent_y"))
+    vx = _number(metrics.get("agent_vx"))
+    vy = _number(metrics.get("agent_vy"))
+    speed = math.hypot(vx, vy) if vx is not None and vy is not None else None
+    parts.append(
+        f"- Reported pose: ({_fmt(x)},{_fmt(y)}) m; velocity "
+        f"({_fmt(vx)},{_fmt(vy)}) m/s; speed {_fmt(speed)} m/s."
+    )
+    parts.append(
+        f"- Exit bounds: x>={_fmt(metrics.get('exit_x_min'))} m, "
+        f"y=[{_fmt(metrics.get('exit_y_min'))},{_fmt(metrics.get('exit_y_max'))}] m; "
+        f"current deficits dx={_fmt(metrics.get('distance_to_exit_x'))} m, "
+        f"dy={_fmt(metrics.get('distance_y_to_exit_band'))} m."
+    )
+    parts.append(
+        f"- Activation x-band: [{_fmt(metrics.get('activation_x_min'))},"
+        f"{_fmt(metrics.get('activation_x_max'))}] m."
+    )
+
+    wall_map = metrics.get("wall_clearance_map")
+    if isinstance(wall_map, dict) and x is not None:
+        candidates = []
+        for wall in wall_map.get("walls", []):
+            position = wall.get("position") or {}
+            wall_x = _number(position.get("x_min"))
+            if wall_x is not None:
+                candidates.append((abs(wall_x - x), wall))
+        if candidates:
+            _, wall = min(candidates, key=lambda item: item[0])
+            position = wall.get("position") or {}
+            relative = wall.get("agent_relative") or {}
+            gaps = wall.get("gaps") or {}
+            clearance = wall.get("clearance_needed_m") or {}
+            parts.append(
+                f"- Nearest tracked inner wall #{wall.get('wall_index', 'N/A')}: "
+                f"x=[{_fmt(position.get('x_min'))},{_fmt(position.get('x_max'))}] m, "
+                f"y=[{_fmt(position.get('y_min'))},{_fmt(position.get('y_max'))}] m; "
+                f"forward distance={_fmt(relative.get('distance_to_wall_x'))} m; "
+                f"boundary-to-wall gaps above/below={_fmt((gaps.get('above') or {}).get('size_m'))}/"
+                f"{_fmt((gaps.get('below') or {}).get('size_m'))} m; "
+                f"center-height deficits above/below="
+                f"{_fmt(clearance.get('to_pass_above'))}/"
+                f"{_fmt(clearance.get('to_pass_below'))} m."
+            )
+
+    max_range = metrics.get("whisker_max_range")
+    readings = [
+        metrics.get("whisker_front"), metrics.get("whisker_up"),
+        metrics.get("whisker_down"),
+    ]
+    parts.append(
+        f"- Whiskers front/up/down: {_fmt(readings[0])}/{_fmt(readings[1])}/"
+        f"{_fmt(readings[2])} m (maximum range {_fmt(max_range)} m)."
+    )
+    numeric_readings = [_number(value) for value in readings]
+    numeric_max = _number(max_range)
+    if numeric_max is not None and all(value is not None for value in numeric_readings):
+        all_at_max = all(abs(value - numeric_max) <= 1e-6 for value in numeric_readings)
+        parts.append(f"- All three current whisker readings at maximum: {all_at_max}.")
     return parts
 
-def _section_load_distribution(metrics: Dict[str, Any]) -> List[str]:
-    parts = []
-    ledger = metrics.get("force_ledger")
-    if not isinstance(ledger, dict):
-        parts.append("No force ledger data.")
-        return parts
-    ch = ledger.get("channels", {})
-    if not ch:
-        parts.append("No channel data.")
-        return parts
-    cmd = ledger.get("commanded_force", {})
-    cfx = _m(cmd, "fx")
-    cfy = _m(cmd, "fy")
-    rev = ch.get("control_reversal", {})
-    if rev.get("active", False):
-        eff_fx = _m(rev, "effective_commanded_fx_after_reversal", cfx)
-        cli = metrics.get("control_lag_info")
-        lag = _mi(cli, "control_lag_steps", 0) if isinstance(cli, dict) else 0
-        lag_suffix = f" lag={lag}" if lag > 0 else ""
-        parts.append(f"Cmd: ({_fmt(cfx)}, {_fmt(cfy)}) [REVERSED Fx→{_fmt(eff_fx)}{lag_suffix}]")
-    else:
-        cli = metrics.get("control_lag_info")
-        lag = _mi(cli, "control_lag_steps", 0) if isinstance(cli, dict) else 0
-        lag_suffix = f" lag={lag}" if lag > 0 else ""
-        parts.append(f"Cmd: ({_fmt(cfx)}, {_fmt(cfy)}){lag_suffix}")
-    active_env = []
-    mag = ch.get("magnetic_floor", {})
-    if mag.get("active", False):
-        mfy = _m(mag, "force_fy")
-        if abs(mfy) > 0.01:
-            active_env.append(f"MagFloor: {_fmt(mfy)}N ↓")
-    lock = ch.get("lock_gate", {})
-    if lock.get("active", False):
-        lfx = _m(lock, "force_fx")
-        if abs(lfx) > 0.01:
-            active_env.append(f"LockGate: {_fmt(lfx)}N ←")
-    wind = ch.get("wind", {})
-    wfx = _m(wind, "fx_total")
-    if abs(wfx) > 0.01:
-        active_env.append(f"Wind: {_fmt(wfx)}N")
-    turb = ch.get("turbulence", {})
-    if turb.get("active", False):
-        tfx = _m(turb, "last_fx")
-        tfy = _m(turb, "last_fy")
-        if abs(tfx) > 0.01 or abs(tfy) > 0.01:
-            active_env.append(f"Turb: ({_fmt(tfx, 1)}, {_fmt(tfy, 1)})")
-    drag = ch.get("fluid_drag", {})
-    if drag.get("active", False):
-        dfx = _m(drag, "drag_fx")
-        dfy = _m(drag, "drag_fy")
-        if abs(dfx) > 0.001 or abs(dfy) > 0.001:
-            active_env.append(f"Drag: ({_fmt(dfx, 3)}, {_fmt(dfy, 3)})")
-    oneway = ch.get("oneway_assist", {})
-    if oneway.get("active", False):
-        ofx = _m(oneway, "force_fx")
-        if abs(ofx) > 0.01:
-            active_env.append(f"Oneway: +{_fmt(ofx)}N →")
-    if active_env:
-        parts.append("Env: " + " | ".join(active_env))
-    net = ledger.get("net_forces", {})
-    nfx = _m(net, "net_total_fx")
-    nfy = _m(net, "net_total_fy")
-    efx = _m(net, "environmental_fx")
-    efy = _m(net, "environmental_fy")
-    cefx = _m(net, "commanded_effective_fx")
-    cefy = _m(net, "commanded_effective_fy")
-    nfy_safe = float(nfy)
-    if abs(nfy_safe) < 1e-9:
-        nfy_safe = 0.0
-    vy_sym = "↑" if nfy_safe > 0 else ("↓" if nfy_safe < 0 else "=")
-    parts.append(f"Net: Σ=({_fmt(nfx)}, {_fmt(nfy)}) {vy_sym}")
-    return parts
 
-def _section_energy_power(metrics: Dict[str, Any]) -> List[str]:
-    return []
-
-def _section_constraint_profile(metrics: Dict[str, Any]) -> List[str]:
-    parts = []
-    unlocked = _mb(metrics, "unlocked", False)
-    reached_exit = _mb(metrics, "reached_exit", False)
-    consec_in_exit = _mi(metrics, "consecutive_steps_in_exit", 0)
-    exit_hold_need = _exit_hold_required(metrics)
-    ucs = metrics.get("unlock_condition_status")
-    if isinstance(ucs, dict):
-        conds = ucs.get("conditions", [])
-        passed = sum(1 for c in conds if c.get("pass", False))
-        total = len(conds)
-        cons = ucs.get("consecutive_count", 0)
-        req = ucs.get("required_consecutive", 5)
-        parts.append(
-            f"Unlock: {'PASS' if unlocked else 'FAIL'} "
-            f"({passed}/{total} conds met, {cons}/{req} consecutive)"
+def _format_unlock_condition(condition: Dict[str, Any]) -> str:
+    name = str(condition.get("name", "unnamed"))
+    state = "PASS" if condition.get("pass") is True else "FAIL"
+    value = condition.get("value")
+    if isinstance(condition.get("zone"), (list, tuple)) and len(condition["zone"]) >= 2:
+        zone = condition["zone"]
+        numeric_value = _number(value)
+        lower = _number(zone[0])
+        upper = _number(zone[1])
+        outside = None
+        if None not in (numeric_value, lower, upper):
+            outside = max(lower - numeric_value, numeric_value - upper, 0.0)
+        detail = (
+            f"value {_fmt(value)}; allowed [{_fmt(zone[0])},{_fmt(zone[1])}]; "
+            f"distance outside {_fmt(outside)}"
         )
     else:
-        parts.append(f"Unlock: {'PASS' if unlocked else 'FAIL'}")
-    if reached_exit:
-        dwell_ok = consec_in_exit >= exit_hold_need
-        parts.append(
-            f"Exit: {'PASS' if dwell_ok else 'FAIL'} "
-            f"(in zone, dwell {consec_in_exit}/{exit_hold_need})"
+        limit = condition.get("limit")
+        detail = (
+            f"value {_fmt(value)}; strict upper limit {_fmt(limit)}; "
+            f"signed excess {_fmt(condition.get('margin'))}"
         )
+    return f"- {name}: {state} — {detail}."
+
+
+def _section_constraints(metrics: Dict[str, Any]) -> List[str]:
+    parts = ["\n### 3. Constraint profile"]
+    unlock = metrics.get("unlock_condition_status")
+    if isinstance(unlock, dict):
+        parts.append(
+            f"- Unlock state: {'PASS' if metrics.get('unlocked') is True else 'FAIL'}; "
+            f"current streak {unlock.get('consecutive_count', 'N/A')}/"
+            f"{unlock.get('required_consecutive', 'N/A')} steps; "
+            f"maximum observed streak {(metrics.get('diagnostic_timeline') or {}).get('max_unlock_condition_streak', 'N/A')}."
+        )
+        for condition in unlock.get("conditions", []):
+            if isinstance(condition, dict):
+                parts.append(_format_unlock_condition(condition))
     else:
-        x = _m(metrics, "agent_x")
-        exit_x = _m(metrics, "exit_x_min", 15)
-        exit_ylo = _m(metrics, "exit_y_min", 0.5)
-        exit_yhi = _m(metrics, "exit_y_max", 2.5)
-        y = _m(metrics, "agent_y")
-        reasons = []
-        if x < exit_x:
-            reasons.append(f"x={_fmt(x)} < {_fmt(exit_x)}")
-        if y < exit_ylo:
-            reasons.append(f"y={_fmt(y)} < {_fmt(exit_ylo)}")
-        elif y > exit_yhi:
-            reasons.append(f"y={_fmt(y)} > {_fmt(exit_yhi)}")
-        parts.append(f"Exit: FAIL ({'; '.join(reasons) if reasons else 'not reached'})")
-    failed = _mb(metrics, "failed", False)
-    fr = metrics.get("failure_reason", "")
-    if failed and fr:
-        parts.append(f"Terminal: {fr}")
+        parts.append("- Unlock-condition measurements unavailable.")
+
+    current_dwell = _number(metrics.get("consecutive_steps_in_exit"))
+    max_dwell = _number(metrics.get("max_consecutive_steps_in_exit"))
+    required_dwell = _number(metrics.get("consecutive_exit_steps_required"))
+    if current_dwell is not None and required_dwell is not None:
+        achieved_dwell = max_dwell is not None and max_dwell >= required_dwell
+        state = "PASS" if achieved_dwell else "FAIL"
+        historical_margin = (
+            f"{max_dwell - required_dwell:+.0f}"
+            if max_dwell is not None else "N/A"
+        )
+        parts.append(
+            f"- Exit dwell: {state} — current {int(current_dwell)}/{int(required_dwell)} steps; "
+            f"maximum observed {int(max_dwell) if max_dwell is not None else 'N/A'}; "
+            f"historical margin {historical_margin} steps."
+        )
+
+    timeline = metrics.get("diagnostic_timeline") or {}
+    peak_impulse = _number(timeline.get("peak_collision_impulse_ns"))
+    impulse_limit = _number(metrics.get("structural_impulse_limit_ns"))
+    if peak_impulse is not None and impulse_limit is not None:
+        state = "PASS" if peak_impulse <= impulse_limit else "FAIL"
+        parts.append(
+            f"- Structural impulse: {state} — peak {peak_impulse:.2f}/{impulse_limit:.2f} N·s "
+            f"at step {timeline.get('peak_collision_impulse_step', 'N/A')}; "
+            f"headroom {impulse_limit - peak_impulse:+.2f} N·s."
+        )
+    parts.append(f"- Agent destroyed: {bool(metrics.get('agent_destroyed', False))}.")
+
+    step = _number(metrics.get("step_count"))
+    maximum = _number(metrics.get("max_steps"))
+    if step is not None and maximum is not None:
+        parts.append(
+            f"- Step limit: {int(step)}/{int(maximum)} used; "
+            f"{max(0, int(maximum - step))} steps remaining at termination."
+        )
     return parts
 
-def _section_numerical_health(metrics: Dict[str, Any]) -> List[str]:
-    issues = []
-    for key, label in [
-        ("agent_x", "x"), ("agent_y", "y"),
-        ("agent_vx", "vx"), ("agent_vy", "vy"),
-    ]:
-        v = metrics.get(key)
-        if v is not None and not _is_finite(v):
-            issues.append(f"{label}={v}")
-    vx = _m(metrics, "agent_vx")
-    vy = _m(metrics, "agent_vy")
-    spd = _speed(vx, vy)
-    if spd > 2000.0:
-        issues.append(f"speed={spd:.0f} extreme")
-    elif spd > 100.0:
-        issues.append(f"speed={spd:.0f} elevated")
-    for key, label in [
-        ("whisker_front", "wf"), ("whisker_up", "wu"), ("whisker_down", "wd"),
-    ]:
-        v = metrics.get(key)
-        if v is not None and not _is_finite(v):
-            issues.append(f"{label}={v}")
+
+def _section_actuation(metrics: Dict[str, Any]) -> List[str]:
+    parts = ["\n### 4. Actuation and stability"]
     ledger = metrics.get("force_ledger")
     if isinstance(ledger, dict):
-        net = ledger.get("net_forces", {})
-        for k, lbl in [("net_total_fx", "ΣFx"), ("net_total_fy", "ΣFy")]:
-            try:
-                if abs(float(net.get(k, 0))) > 5000.0:
-                    issues.append(f"{lbl}={_fmt(net[k])} extreme")
-            except (TypeError, ValueError):
-                pass
-    if issues:
-        return ["Health: ISSUES — " + "; ".join(issues)]
-    return ["Health: OK"]
+        requested = ledger.get("requested_force") or {}
+        evaluated = ledger.get("unlock_evaluated_force") or {}
+        parts.append(
+            f"- Latest requested force: ({_fmt(requested.get('fx'))},"
+            f"{_fmt(requested.get('fy'))}) N; force used by the unlock check: "
+            f"({_fmt(evaluated.get('fx'))},{_fmt(evaluated.get('fy'))}) N."
+        )
+        req_fx = _number(requested.get("fx"))
+        req_fy = _number(requested.get("fy"))
+        eval_fx = _number(evaluated.get("fx"))
+        eval_fy = _number(evaluated.get("fy"))
+        if None not in (req_fx, req_fy, eval_fx, eval_fy):
+            mismatch = math.hypot(req_fx - eval_fx, req_fy - eval_fy)
+            parts.append(f"- Requested/evaluated command mismatch: {mismatch:.2f} N.")
+    else:
+        parts.append("- Command measurements unavailable.")
+
+    timeline = metrics.get("diagnostic_timeline")
+    if isinstance(timeline, dict):
+        parts.append(
+            f"- Peak requested force magnitude: {_fmt(timeline.get('peak_requested_force_n'))} N "
+            f"at step {timeline.get('peak_requested_force_step', 'N/A')}."
+        )
+        parts.append(
+            f"- Peak speed: {_fmt(timeline.get('max_speed_mps'))} m/s at step "
+            f"{timeline.get('max_speed_step', 'N/A')}."
+        )
+    return parts
+
+
+def _section_numerical_health(metrics: Dict[str, Any]) -> List[str]:
+    bad = _non_finite_paths(metrics)
+    if not bad:
+        return ["\n### 5. Numerical health", "- All reported numeric metrics are finite."]
+    shown = ", ".join(bad[:8])
+    suffix = f" (+{len(bad) - 8} more)" if len(bad) > 8 else ""
+    return [
+        "\n### 5. Numerical health",
+        f"- {len(bad)} non-finite numeric value(s): {shown}{suffix}.",
+    ]
+
 
 def format_task_metrics(metrics: Dict[str, Any]) -> List[str]:
-    global _prev_metrics
     if not metrics:
         return ["**No metrics available**"]
-    if metrics.get("error"):
-        return [f"**Error**: {metrics.get('error')}"]
-    is_delta = _prev_metrics is not None
-    all_parts: List[str] = []
-    all_parts.append("## 1. Events")
-    all_parts.extend(_section_temporal_chronology(metrics))
-    if not is_delta or _pos_changed(metrics):
-        all_parts.append("")
-        all_parts.append("## 2. Spatial")
-        all_parts.extend(_section_spatial(metrics))
-    elif is_delta:
-        all_parts.append("")
-        all_parts.append("## 2. Spatial — unchanged from previous moment")
-    if not is_delta or _force_changed(metrics):
-        all_parts.append("")
-        all_parts.append("## 3. Forces")
-        all_parts.extend(_section_load_distribution(metrics))
-    elif is_delta:
-        all_parts.append("")
-        all_parts.append("## 3. Forces — unchanged from previous moment")
-    all_parts.append("")
-    all_parts.append("## 5. Constraints")
-    all_parts.extend(_section_constraint_profile(metrics))
-    all_parts.append("")
-    all_parts.append("## 6. Health")
-    all_parts.extend(_section_numerical_health(metrics))
-    all_parts.append("")
-    success = _mb(metrics, "success", False)
-    failed = _mb(metrics, "failed", False)
-    fr = metrics.get("failure_reason", "")
-    if success:
-        all_parts.append("**Status**: SUCCESS")
-    elif failed:
-        all_parts.append(f"**Status**: FAILED — {fr}")
-    else:
-        pct = _m(metrics, "progress_x_pct")
-        all_parts.append(f"**Status**: IN PROGRESS ({_fmt(pct, 1)}%)")
-    _prev_metrics = dict(metrics)
-    return all_parts
+    parts = _section_outcome(metrics)
+    diagnostic_keys = {
+        "agent_x", "step_count", "unlock_condition_status", "force_ledger",
+        "constraint_violations", "diagnostic_timeline",
+    }
+    if not diagnostic_keys.intersection(metrics):
+        parts.extend([
+            "\n### Diagnostics",
+            "- Task metrics are unavailable; refer to the execution error reported above.",
+        ])
+        parts.extend(_section_numerical_health(metrics))
+        return parts
+    parts.extend(_section_chronology(metrics))
+    parts.extend(_section_spatial(metrics))
+    parts.extend(_section_constraints(metrics))
+    parts.extend(_section_actuation(metrics))
+    parts.extend(_section_numerical_health(metrics))
+    return parts
+
 
 def get_improvement_suggestions(
     metrics: Dict[str, Any],

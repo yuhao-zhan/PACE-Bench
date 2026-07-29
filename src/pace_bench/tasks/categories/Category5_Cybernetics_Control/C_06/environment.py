@@ -14,6 +14,8 @@ from Box2D.b2 import (
 
 TARGET_SPEED_RAD_S = 3.0
 
+TIME_STEP = 1.0 / 60.0
+
 STALL_SPEED_THRESHOLD = 0.3
 
 MEAN_SPEED_ERROR_THRESHOLD = 0.22
@@ -165,7 +167,7 @@ class Sandbox:
         self._terrain_bodies["wheel"] = wheel
     def get_wheel_angular_velocity(self):
         return self._omega_history[0]
-    def get_wheel_angular_velocity_actual(self):
+    def _get_wheel_angular_velocity_actual(self):
         return self._get_real_omega()
     def get_target_speed(self):
         return self._get_target_speed_for_step(self._step_count)
@@ -198,6 +200,10 @@ class Sandbox:
         angle = self._get_wheel_angle()
         return self._cogging_amplitude * math.sin(angle)
     def step(self, time_step):
+        if not math.isclose(float(time_step), TIME_STEP, rel_tol=0.0, abs_tol=1e-12):
+            raise ValueError(
+                f"C-06 requires time_step={TIME_STEP}, received {time_step}"
+            )
         wheel = self._terrain_bodies.get("wheel")
         if wheel is not None:
             motor = self._motor_torque
@@ -230,45 +236,7 @@ class Sandbox:
             "max_steps_hint": MAX_STEPS,
         }
         return out
-    def get_wheel_body(self):
+    def _get_wheel_body(self):
         return self._terrain_bodies.get("wheel")
-    def get_anchor_position(self):
-        return (self._anchor_x, self._anchor_y)
-    def get_last_commanded_torque(self):
+    def _get_last_commanded_torque(self):
         return self._last_commanded_torque
-    def get_last_applied_torque(self):
-        return self._last_applied_torque
-    def get_last_load_torque(self):
-        return self._last_load_torque
-    def get_last_max_torque(self):
-        return self._last_max_torque
-    def get_torque_deadzone(self):
-        return self._torque_deadzone
-    def get_torque_limit_at_zero(self):
-        return self._torque_limit_at_zero
-    def get_torque_limit_slope(self):
-        return self._torque_limit_slope
-    def get_torque_limit_omega_cap(self):
-        return self._torque_limit_omega_cap
-    def get_step_count(self):
-        return self._step_count
-    def get_measurement_delay(self):
-        return self._measure_delay_steps
-    def get_wheel_angle(self):
-        return self._get_wheel_angle()
-    def get_k_drag(self):
-        return self._k_drag
-    def get_base_load(self):
-        return self._base_load
-    def get_step_load_at_step(self):
-        return self._step_load_at_step
-    def get_step_load_extra(self):
-        return self._step_load_extra
-    def get_cogging_amplitude(self):
-        return self._cogging_amplitude
-    def get_stiction_factor(self):
-        return self._stiction_factor
-    def get_stiction_speed_band(self):
-        return self._stiction_speed_band
-    def get_wheel_moment_of_inertia(self):
-        return 0.5 * self._wheel_mass * self._wheel_radius * self._wheel_radius

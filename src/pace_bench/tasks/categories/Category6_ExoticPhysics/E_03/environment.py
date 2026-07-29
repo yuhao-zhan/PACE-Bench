@@ -69,6 +69,7 @@ class Sandbox:
         self._step_count = 0
         self._checkpoint_a_reached = False
         self._checkpoint_b_reached = False
+        self._target_reached = False
         self._zone_traversal: Dict[str, dict] = {
             zone_key: {"entered": False, "entry_step": -1,
                        "exited": False, "exit_step": -1,
@@ -90,13 +91,20 @@ class Sandbox:
             ]
         }
         self._peak_systemic_velocity = 0.0
+        self._furthest_x = self._sled_start_x if hasattr(self, "_sled_start_x") else self.SLED_START_X
+        self._furthest_x_step = 0
+        self._closest_objective_distance = {
+            "checkpoint_a": {"distance": float("inf"), "step": 0},
+            "checkpoint_b": {"distance": float("inf"), "step": 0},
+            "target_zone": {"distance": float("inf"), "step": 0},
+        }
         self._peak_thrust_magnitude = 0.0
         self._commanded_fx = 0.0
         self._commanded_fy = 0.0
         self._delivered_fx = 0.0
         self._delivered_fy = 0.0
-        self._thrust_saturation_steps = 0
-        self._max_commandable_thrust = 0.0
+        self._near_running_peak_command_steps = 0
+        self._peak_commanded_thrust = 0.0
         self._longest_stuck_duration = 0
         self._longest_stuck_start_step = -1
         self._longest_stuck_x = 0.0
@@ -112,6 +120,66 @@ class Sandbox:
         self._sled_start_y = float(terrain_config.get("sled_start_y", self.SLED_START_Y))
         self._create_terrain(terrain_config)
         self._create_sled(terrain_config)
+        self._furthest_x = self._sled_start_x
+        self._update_observations(self._sled_start_x, self._sled_start_y, 0.0, 0.0)
+
+    @staticmethod
+    def _distance_to_box(x, y, x_min, x_max, y_min, y_max):
+        dx = max(x_min - x, 0.0, x - x_max)
+        dy = max(y_min - y, 0.0, y - y_max)
+        return math.sqrt(dx * dx + dy * dy)
+
+    def _update_objectives(self, x, y):
+        if (
+            self.CHECKPOINT_X_LO <= x <= self.CHECKPOINT_X_HI
+            and self.CHECKPOINT_Y_LO <= y <= self.CHECKPOINT_Y_HI
+        ):
+            self._checkpoint_a_reached = True
+        if (
+            self._checkpoint_a_reached
+            and self.CHECKPOINT_B_X_LO <= x <= self.CHECKPOINT_B_X_HI
+            and self.CHECKPOINT_B_Y_LO <= y <= self.CHECKPOINT_B_Y_HI
+        ):
+            self._checkpoint_b_reached = True
+        if (
+            self._checkpoint_b_reached
+            and self.TARGET_X_MIN <= x <= self.TARGET_X_MAX
+            and self.TARGET_Y_MIN <= y <= self.TARGET_Y_MAX
+        ):
+            self._target_reached = True
+
+    def _update_observations(self, x, y, vx, vy):
+        if x > self._furthest_x:
+            self._furthest_x = float(x)
+            self._furthest_x_step = self._step_count
+        objective_boxes = {
+            "checkpoint_a": (
+                self.CHECKPOINT_X_LO,
+                self.CHECKPOINT_X_HI,
+                self.CHECKPOINT_Y_LO,
+                self.CHECKPOINT_Y_HI,
+            ),
+            "checkpoint_b": (
+                self.CHECKPOINT_B_X_LO,
+                self.CHECKPOINT_B_X_HI,
+                self.CHECKPOINT_B_Y_LO,
+                self.CHECKPOINT_B_Y_HI,
+            ),
+            "target_zone": (
+                self.TARGET_X_MIN,
+                self.TARGET_X_MAX,
+                self.TARGET_Y_MIN,
+                self.TARGET_Y_MAX,
+            ),
+        }
+        for key, bounds in objective_boxes.items():
+            distance = self._distance_to_box(x, y, *bounds)
+            if distance < self._closest_objective_distance[key]["distance"]:
+                self._closest_objective_distance[key] = {
+                    "distance": float(distance),
+                    "step": self._step_count,
+                }
+        self._track_zone_forensics(float(x), float(y), float(vx), float(vy))
     def _create_terrain(self, terrain_config: dict):
         ground_length = 50.0
         ground_height = 1.0
@@ -151,15 +219,10 @@ class Sandbox:
         self._commanded_fx = fx
         self._commanded_fy = fy
         commanded_mag = math.sqrt(fx * fx + fy * fy)
-        if commanded_mag > self._max_commandable_thrust:
-            self._max_commandable_thrust = commanded_mag
+        if commanded_mag > self._peak_commanded_thrust:
+            self._peak_commanded_thrust = commanded_mag
         sx, sy = sled.position.x, sled.position.y
-        if (self.CHECKPOINT_X_LO <= sx <= self.CHECKPOINT_X_HI and
-                self.CHECKPOINT_Y_LO <= sy <= self.CHECKPOINT_Y_HI):
-            self._checkpoint_a_reached = True
-        if self._checkpoint_a_reached and (self.CHECKPOINT_B_X_LO <= sx <= self.CHECKPOINT_B_X_HI and
-                self.CHECKPOINT_B_Y_LO <= sy <= self.CHECKPOINT_B_Y_HI):
-            self._checkpoint_b_reached = True
+        self._update_objectives(sx, sy)
         if self.THRUST_SCALE_X_LO <= sx <= self.THRUST_SCALE_X_HI:
             fx *= self._thrust_scale_factor
             fy *= self._thrust_scale_factor
@@ -174,9 +237,9 @@ class Sandbox:
         self._delivered_fx = fx
         self._delivered_fy = fy
         delivered_mag = math.sqrt(fx * fx + fy * fy)
-        if self._max_commandable_thrust > 0.01:
-            if commanded_mag >= self._max_commandable_thrust * 0.98:
-                self._thrust_saturation_steps += 1
+        if self._peak_commanded_thrust > 0.01:
+            if commanded_mag >= self._peak_commanded_thrust * 0.98:
+                self._near_running_peak_command_steps += 1
         sled.ApplyForceToCenter((fx, fy), wake=True)
         self._world.Step(time_step, 10, 10)
         if self.MOMENTUM_DRAIN_X_LO <= sled.position.x <= self.MOMENTUM_DRAIN_X_HI:
@@ -188,8 +251,11 @@ class Sandbox:
             if speed > self._speed_penalty_threshold:
                 sled.linearVelocity = (vx * self._speed_penalty_factor, vy * self._speed_penalty_factor)
         self._step_count += 1
+        post_x = float(sled.position.x)
+        post_y = float(sled.position.y)
         post_vx = sled.linearVelocity.x
         post_vy = sled.linearVelocity.y
+        self._update_objectives(post_x, post_y)
         post_speed = math.sqrt(post_vx * post_vx + post_vy * post_vy)
         if post_speed < 0.05:
             if self._consecutive_near_zero_steps == 0:
@@ -207,7 +273,7 @@ class Sandbox:
             self._current_stuck_start_step = -1
         svx = float(sled.linearVelocity.x)
         svy = float(sled.linearVelocity.y)
-        self._track_zone_forensics(sx, sy, svx, svy)
+        self._update_observations(post_x, post_y, svx, svy)
     def _track_zone_forensics(self, sx: float, sy: float, svx: float, svy: float):
         zt = self._zone_traversal
         sc = self._step_count
@@ -296,16 +362,17 @@ class Sandbox:
                 "speed_at_exit": z["speed_at_exit"],
             }
         return {
-            "momentum_drain": _zone_dict("momentum_drain"),
             "checkpoint_a": _zone_dict("checkpoint_a"),
-            "thrust_scale": _zone_dict("thrust_scale"),
-            "oscillating_wind": _zone_dict("oscillating_wind"),
-            "speed_penalty": _zone_dict("speed_penalty"),
-            "vertical_reverse": _zone_dict("vertical_reverse"),
             "checkpoint_b": _zone_dict("checkpoint_b"),
             "target_zone": _zone_dict("target_zone"),
             "peak_systemic_speed": self._peak_systemic_velocity,
             "peak_thrust_magnitude": self._peak_thrust_magnitude,
+            "furthest_x": self._furthest_x,
+            "furthest_x_step": self._furthest_x_step,
+            "closest_objective_distance": {
+                key: dict(value)
+                for key, value in self._closest_objective_distance.items()
+            },
             "total_steps": self._step_count,
         }
     def apply_thrust(self, fx, fy):
@@ -329,6 +396,8 @@ class Sandbox:
         return getattr(self, "_checkpoint_b_reached", False)
     def get_checkpoint_reached(self):
         return self.get_checkpoint_a_reached() and self.get_checkpoint_b_reached()
+    def get_target_reached(self):
+        return getattr(self, "_target_reached", False)
     def get_thrust_forensics(self) -> dict:
         return {
             "commanded_fx": self._commanded_fx,
@@ -341,8 +410,8 @@ class Sandbox:
             "delivered_magnitude": math.sqrt(
                 self._delivered_fx ** 2 + self._delivered_fy ** 2
             ),
-            "max_commandable_thrust": self._max_commandable_thrust,
-            "thrust_saturation_steps": self._thrust_saturation_steps,
+            "peak_commanded_thrust": self._peak_commanded_thrust,
+            "near_running_peak_command_steps": self._near_running_peak_command_steps,
             "total_steps": self._step_count,
         }
     def get_stuck_forensics(self) -> dict:
@@ -376,12 +445,4 @@ class Sandbox:
                 "y_min": self.CHECKPOINT_B_Y_LO,
                 "y_max": self.CHECKPOINT_B_Y_HI,
             },
-            "momentum_drain_x_lo": self.MOMENTUM_DRAIN_X_LO,
-            "momentum_drain_x_hi": self.MOMENTUM_DRAIN_X_HI,
-            "thrust_scale_x_lo": self.THRUST_SCALE_X_LO,
-            "thrust_scale_x_hi": self.THRUST_SCALE_X_HI,
-            "speed_penalty_x_lo": self.SPEED_PENALTY_X_LO,
-            "speed_penalty_x_hi": self.SPEED_PENALTY_X_HI,
-            "vertical_reverse_x_lo": self.VERT_REVERSE_X_LO,
-            "vertical_reverse_x_hi": self.VERT_REVERSE_X_HI,
         }

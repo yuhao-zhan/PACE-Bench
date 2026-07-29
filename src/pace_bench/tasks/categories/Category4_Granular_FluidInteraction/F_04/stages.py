@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pace_bench.tasks.stage_prompt import uniform_suffix_for_task
+
 import re
 
 from typing import Any, Dict, List, Tuple
@@ -24,11 +26,12 @@ def _f04_particle_counts_core(terrain_config: Dict[str, Any]) -> str:
     tm = nm * 2 + nt_m
     tl = nl * 2 + nt_l
     total = ts + tm + tl
-    if nt_s == nt_m == nt_l:
-        third_seg = f"and {nt_s} of each size again at step {s3}"
-    else:
-        third_seg = f"and {nt_s} small, {nt_m} medium, and {nt_l} large at step {s3}"
-    return f"Wave 1: {ns} small, {nm} medium, {nl} large; Wave 2: {nt_s} small, {nt_m} medium, {nt_l} large at step {s2}; Wave 3: {third_seg} (total ~{total} particles)"
+    return (
+        f"Wave 1: {ns} small, {nm} medium, {nl} large; "
+        f"Wave 2: {ns} small, {nm} medium, {nl} large at step {s2}; "
+        f"Wave 3: {nt_s} small, {nt_m} medium, {nt_l} large at step {s3}; "
+        f"{total} particles total"
+    )
 
 def _f04_particle_counts_visible(terrain_config: Dict[str, Any], base_terrain_config: Dict[str, Any]) -> str:
     t = _f04_particle_counts_core(terrain_config)
@@ -53,6 +56,8 @@ def _f04_sync_particle_counts_bullet(
     base_terrain_config: Dict[str, Any],
 
 ) -> str:
+    if _f04_particle_counts_core(target_terrain_config) == _f04_particle_counts_core(base_terrain_config):
+        return description
     middle = _f04_particle_counts_visible(target_terrain_config, base_terrain_config)
     pat = r"- \*\*Particle counts \(default\)\*\*:.*?(?=\. \*\*Classification purity\*\*)"
     if not re.search(pat, description):
@@ -70,11 +75,37 @@ def _f04_sync_feed_schedule_bullet(
     base_terrain_config: Dict[str, Any],
 
 ) -> str:
+    target_schedule = (
+        int(target_terrain_config.get("second_wave_step", 1800)),
+        int(target_terrain_config.get("third_wave_step", 3600)),
+    )
+    base_schedule = (
+        int(base_terrain_config.get("second_wave_step", 1800)),
+        int(base_terrain_config.get("third_wave_step", 3600)),
+    )
+    if target_schedule == base_schedule:
+        return description
     new_para = _f04_feed_schedule_paragraph(target_terrain_config, base_terrain_config)
-    pat = r"- \*\*Feed schedule.*?(?=\. \*\*|$)"
+    pat = r"- \*\*Feed schedule\*\*:.*?\.\s*(?=\*\*Simulation budget\*\*:)"
     if not re.search(pat, description):
         return description
-    return re.sub(pat, new_para, description, count=1)
+    return re.sub(pat, new_para + " ", description, count=1)
+
+def _f04_sync_settle_schedule(
+    description: str,
+    target_terrain_config: Dict[str, Any],
+    base_terrain_config: Dict[str, Any],
+) -> str:
+    target_step = int(target_terrain_config.get("third_wave_step", 3600))
+    base_step = int(base_terrain_config.get("third_wave_step", 3600))
+    if target_step == base_step:
+        return description
+    pattern = r"\(which starts at step \d+\)"
+    replacement = (
+        f"(which starts at step {target_step}, originally {base_step} "
+        "in the source environment)"
+    )
+    return re.sub(pattern, replacement, description, count=1)
 
 def _f04_feed_bounds(terrain_config: Dict[str, Any]) -> Tuple[float, float, float, float]:
     return (
@@ -126,7 +157,7 @@ def update_task_description_for_visible_changes(
         if re.search(mass_pattern, description):
             description = re.sub(
                 mass_pattern,
-                lambda m: f"{m.group(1)}{target_mass:.0f}{m.group(3)} (originally {m.group(2)} kg in the source environment)",
+                lambda m: f"{m.group(1)}{_f04_fmt_m(target_mass)}{m.group(3)} (originally {m.group(2)} kg in the source environment)",
                 description,
                 count=1,
             )
@@ -135,7 +166,7 @@ def update_task_description_for_visible_changes(
             if needle_mass in description:
                 description = description.replace(
                     needle_mass,
-                    f"<= {target_mass:.0f} kg (originally {base_mass:.0f} kg in the source environment)",
+                    f"<= {_f04_fmt_m(target_mass)} kg (originally {_f04_fmt_m(base_mass)} kg in the source environment)",
                     1,
                 )
     base_beams = base_terrain_config.get("max_beams", 6)
@@ -160,13 +191,30 @@ def update_task_description_for_visible_changes(
     base_feed = _f04_feed_bounds(base_terrain_config)
     target_feed = _f04_feed_bounds(target_terrain_config)
     if target_feed != base_feed:
-        feed_pat = r"- \*\*Feed zone bounds.*?(?=\. \*\*|$)"
-        feed_repl = f"- **Feed zone bounds**: x=[{target_feed[0]:.1f}, {target_feed[1]:.1f}] m, y=[{target_feed[2]:.1f}, {target_feed[3]:.1f}] m (originally x=[{base_feed[0]:.1f}, {base_feed[1]:.1f}], y=[{base_feed[2]:.1f}, {base_feed[3]:.1f}] in the source environment)"
+        feed_pat = (
+            r"(- \*\*Feed Zone\*\*: Particles are introduced in )"
+            r"x=\[[^\]]+\] m, y=\[[^\]]+\] m"
+        )
+        feed_repl = (
+            f"- **Feed Zone**: Particles are introduced in "
+            f"x=[{_f04_fmt_m(target_feed[0])}, {_f04_fmt_m(target_feed[1])}] m, "
+            f"y=[{_f04_fmt_m(target_feed[2])}, {_f04_fmt_m(target_feed[3])}] m "
+            f"(originally x=[{_f04_fmt_m(base_feed[0])}, {_f04_fmt_m(base_feed[1])}] m, "
+            f"y=[{_f04_fmt_m(base_feed[2])}, {_f04_fmt_m(base_feed[3])}] m "
+            "in the source environment)"
+        )
         if re.search(feed_pat, description):
             description = re.sub(feed_pat, feed_repl, description, count=1)
         else:
-            old_snip = f"x=[{base_feed[0]:.1f}, {base_feed[1]:.1f}] m, y=[{base_feed[2]:.1f}, {base_feed[3]:.1f}] m"
-            new_snip = f"x=[{target_feed[0]:.1f}, {target_feed[1]:.1f}] m, y=[{target_feed[2]:.1f}, {target_feed[3]:.1f}] m (originally {old_snip} in the source environment)"
+            old_snip = (
+                f"x=[{_f04_fmt_m(base_feed[0])}, {_f04_fmt_m(base_feed[1])}] m, "
+                f"y=[{_f04_fmt_m(base_feed[2])}, {_f04_fmt_m(base_feed[3])}] m"
+            )
+            new_snip = (
+                f"x=[{_f04_fmt_m(target_feed[0])}, {_f04_fmt_m(target_feed[1])}] m, "
+                f"y=[{_f04_fmt_m(target_feed[2])}, {_f04_fmt_m(target_feed[3])}] m "
+                f"(originally {old_snip} in the source environment)"
+            )
             if old_snip in description:
                 description = description.replace(old_snip, new_snip, 1)
     base_purity = base_terrain_config.get("min_purity", 0.35)
@@ -249,6 +297,7 @@ def update_task_description_for_visible_changes(
             )
     description = _f04_sync_particle_counts_bullet(description, target_terrain_config, base_terrain_config)
     description = _f04_sync_feed_schedule_bullet(description, target_terrain_config, base_terrain_config)
+    description = _f04_sync_settle_schedule(description, target_terrain_config, base_terrain_config)
     bf = _f04_feed_bounds(base_terrain_config)
     tf = _f04_feed_bounds(target_terrain_config)
     description = _f04_sync_feed_y_cross_zone_line(description, bf, tf)
@@ -286,7 +335,7 @@ def update_success_criteria_for_visible_changes(
         if re.search(mass_pattern, criteria):
             criteria = re.sub(
                 mass_pattern,
-                lambda m: f"{m.group(1)}{target_mass:.0f} kg (originally {m.group(2)} kg in the source environment)",
+                lambda m: f"{m.group(1)}{_f04_fmt_m(target_mass)} kg (originally {m.group(2)} kg in the source environment)",
                 criteria,
                 count=1,
             )
@@ -303,7 +352,7 @@ def update_success_criteria_for_visible_changes(
                 if needle in criteria:
                     criteria = criteria.replace(
                         needle,
-                        f"<= {target_mass:.0f} kg (originally {base_mass:.0f} kg in the source environment).",
+                        f"<= {_f04_fmt_m(target_mass)} kg (originally {_f04_fmt_m(base_mass)} kg in the source environment).",
                         1,
                     )
                     break
@@ -333,31 +382,13 @@ def update_success_criteria_for_visible_changes(
     return criteria
 
 def get_f04_curriculum_stages() -> List[Dict[str, Any]]:
-    UNIFORM_SUFFIX = """
-
-Sensors indicate that this region exhibits non-standard physical properties.
-While the following variables **MIGHT** have changed from the initial environment, **NOT ALL** of them will necessarily be mutated in any given task. You must use active interaction and environmental feedback to deduce which specific conditions apply:
-- **Feed obstruction**: Vertical baffle placement or vertical extent may differ from the source layout.
-- **Sweeper kinematics**: Horizontal sweeper motion parameters may differ from the source environment.
-- **Structural budgets**: Limits on beam count and total structural mass may differ from the source environment.
-- **Lateral wind & gusts**: Lateral forcing on particles may differ from the source environment.
-- **Gravitational field**: Net gravitational acceleration may differ from the source environment.
-- **Gravitational oscillation**: Gravitational acceleration may oscillate periodically with configurable amplitude and frequency.
-- **Ambient damping**: Linear and angular damping applied to bodies may differ from the source environment.
-- **Particle bulk properties**: Particle inertia, contact behavior, and nominal size distribution may differ from the source environment.
-- **Particle population**: The number of particles released per wave may differ from the source environment.
-- **Wave release schedule**: The timing of subsequent particle waves may differ from the source environment.
-- **Feed zone placement**: The vertical placement of the feed zone may differ from the source environment.
-- **Structure–particle contact**: Tangential interaction between your beams and particles may differ from the source environment.
-
-**Discovery via feedback**: Identify the effective physical rules of this environment through trial and reasoning. When a design fails, use observed motion, contacts, and metrics to revise the structure and control strategy.
-"""
+    UNIFORM_SUFFIX = uniform_suffix_for_task("F_04")
     return [
         {
             "stage_id": "Stage-1",
             "title": "Anti-Gravity Siege — Extreme Upward Field",
             "mutation_description": "Single change: gravity (0,+32.0) — extreme net upward acceleration 58× stronger than baseline; particles rocket upward, passive settling is impossible, and only massive continuous active counter-forces can push particles down through the sieve.",
-            "task_description_suffix": UNIFORM_SUFFIX,
+            "task_description_suffix": uniform_suffix_for_task("F_04"),
             "terrain_config": {
                 "min_purity": 0.35,
             },
@@ -369,7 +400,7 @@ While the following variables **MIGHT** have changed from the initial environmen
             "stage_id": "Stage-2",
             "title": "Diagonal Gravity Hurricane — Extreme Rightward Drift with Violent Upward Pull",
             "mutation_description": "Single change: gravity=(55.0, 16.0) — extreme 55 m/s² rightward (5.5g) and 16 m/s² upward (1.6g) acceleration on every particle. Every small particle (~9kg) experiences ~495N rightward + ~144N upward continuously; every medium particle (~25kg) experiences ~1375N rightward + ~400N upward. The baseline vertical-only periodic nudges (30N down every 32 steps, avg ~0.94N/step) are utterly negligible against these forces, and there is zero horizontal counter in the baseline. Particles rocket up-and-right at extreme speed, completely bypassing the sieve. Only massive continuous VECTOR counter-forces — hundreds to thousands of newtons leftward AND downward — applied every single step can overcome both components of this extreme diagonal gravity field and force particles through the sieve gaps. The horizontal drift is so severe that particles slide off bars in ~2-3 simulation steps without immediate counter-force.",
-            "task_description_suffix": UNIFORM_SUFFIX,
+            "task_description_suffix": uniform_suffix_for_task("F_04"),
             "terrain_config": {
                 "min_purity": 0.35,
             },
@@ -381,7 +412,7 @@ While the following variables **MIGHT** have changed from the initial environmen
             "stage_id": "Stage-3",
             "title": "Hypergravity Cascade — Near-Cataclysmic Multi-Field Particle Avalanche",
             "mutation_description": "MAXIMUM multi-variable escalation pushed to the absolute breaking-point limit of every dimension while remaining strictly below Stage-4 on every axis: (1) gravity (93.0,+1.15) — 9.3g rightward with net 1.15 m/s^2 UPWARD; small particle (~351kg at density 17500) experiences ~32643N rightward, (2) density 17500 (21.9x baseline 800) — small ~351kg, medium ~538kg, large ~1046kg; extreme inertia makes particles nearly immovable, (3) damping 0.992 (49.6x baseline 0.02) — forces decay to ~0.8% residual per step requiring ENORMOUS CONTINUOUS re-application EVERY single step, (4) gravity oscillation ±52 m/s^2 period 11 — vertical acceleration flips between +53.15 and -50.85 every 5-6 steps; small particle sees ~18252N oscillation peak, (5) near-perfect restitution 0.998 — 99.8% velocity retention on collision creating push-bounce-push self-defeating ricochet cycle, (6) beam friction 0.0 + particle friction 0.0001 — essentially zero tangential grip; beams provide ZERO passive holding, (7) wind 6200 amplitude 13-step period + gust 2300 at 7-step period — up to 8500N additional horizontal per particle; creates VIOLENT lateral shaking with direction reversal every 6-7 steps, (8) SEVERE structural strangulation: ONLY 3 BEAMS, ONLY 1.6 kg total mass — 66% fewer beams and 69% tighter mass than baseline, (9) DEEP baffles y_bottom 0.05 — baffles intrude from y=0.05 through y=5.2, penetrating from near-floor through the entire classification region, (10) feed y_min 1.78 — particles spawn merely 0.06m above build zone ceiling; near-ZERO passive settling space, (11) 45x sweeper speed churning feed zone at 4.05/2.25 m/s, (12) particle overload: 48 per size per wave (432 total vs baseline 135), (13) ULTRA-compressed wave schedule: second wave at step 140, third at step 300 — all 432 particles active by step 300, (14) compressed radii 0.08/0.099/0.138 — small maxD=0.16m, medium minD=0.186m maxD=0.21m, large minD=0.264m. CATASTROPHIC DILEMMA: net-upward gravity (+1.15) means particles drift UP naturally — MUST apply continuous downward force; BUT 0.998 restitution means downward beam contact creates push-bounce-push cycle; oscillation flips vertical from +53 to -51 every 5-6 steps; 0.992 damping means forces vanish instantly; zero beam friction provides no passive holding; only 3 beams must sort 432 ultra-massive particles arriving in 140-step bursts; baffles at y=0.05 block nearly entire classification path.",
-            "task_description_suffix": UNIFORM_SUFFIX,
+            "task_description_suffix": uniform_suffix_for_task("F_04"),
             "terrain_config": {
                 "min_purity": 0.35,
                 "max_beams": 3,
@@ -423,7 +454,7 @@ While the following variables **MIGHT** have changed from the initial environmen
             "stage_id": "Stage-4",
             "title": "Singularity Siege — Cataclysmic Multi-Field Entropy Collapse",
             "mutation_description": "HARDEST POSSIBLE escalation — every physical dimension pushed to near-physics-breaking extremes simultaneously: (1) density 18000 (22.5x baseline 800) — small ~362kg, medium ~554kg, large ~1109kg; extreme inertia makes particles nearly immovable without massive continuous force, (2) gravity (95.0, 1.2) — 9.5g rightward + NET UPWARD 1.2 m/s^2 (6x Stage-3 upward); particles NATURALLY drift UPWARD rapidly — passive settling is physically impossible without continuous downward counter-force; small particle experiences ~34390N rightward from gravity alone (~1146x baseline 30N nudge), (3) gravity oscillation +-55 m/s^2 period 10 — vertical acceleration flips between +56.2 (MASSIVE 5.6g UPWARD SURGE) and -53.8 (5.4g downward) every 5 steps; oscillation 6x faster period and 104% larger amplitude than Stage-3; small particle sees up to ~19910N vertical at oscillation peak, (4) extreme damping 0.995 (49.8x baseline 0.02) — 99.5% velocity decay per unit time; applied forces decay to ~0.5% residual by next step; at this damping level a 40000N push has only ~200N residual after 1 step — continuous massive re-application EVERY single step is mandatory, (5) wind 6500 amplitude with 10-step period + gust 2500 at 5-step period — up to 9000N additional horizontal per particle; wind direction flips every 5 simulation steps creating violent lateral shaking; combined with gravity creates up to ~43390N rightward on every small particle (~1446x baseline's 30N nudge), (6) beam friction 0.0 + particle friction 0.0 — ABSOLUTE ZERO tangential grip; particles and beams have NO passive interaction; beams provide ZERO holding, ZERO guiding, ZERO passive sorting — all sorting must be purely active-force-driven, (7) restitution 1.0 — PERFECT elastic bounce; every beam collision conserves 100% velocity magnitude; any downward push that contacts a beam causes FULL upward rebound with zero energy loss, (8) sweepers at 50x speed churn feed zone at 4.5/2.5 m/s — 50x faster than baseline 0.09 m/s and 285% faster than Stage-3; feed zone particles violently randomized, (9) MAXIMUM baffle intrusion: y_bottom 0.01 — baffles extend from y=0.01 to y=5.2, penetrating from floor level through the ENTIRE classification region; walls block essentially ALL direct vertical descent paths, (10) CRITICAL structural strangulation: ONLY 3 BEAMS, ONLY 1.5 kg total mass — 70% tighter mass budget than Stage-3; beams must be ultra-thin and ultra-light, (11) particle OVERLOAD: 50 of each size per wave (150/wave, 450 total vs baseline 135 — 3.33x overload); massive volumetric pressure, (12) ULTRA-COMPRESSED wave schedule: second wave at step 120, third at step 240 — particles flood at 15x baseline rate with only 120 steps between waves; all 450 particles active by step 240, (13) feed zone y_min 1.76 — particles spawn INSIDE the build zone vertical extent (1.72-2.45); ZERO passive settling distance — particles materialize directly on top of the sieve structure, (14) compressed radii at clamp ceilings: small 0.08 (maxD=0.16m at clamp max), medium 0.099 (minD=0.186m, maxD=0.21m), large 0.14 (minD=0.268m, maxD=0.292m) — only 0.024m diameter margin between medium max and large min; only 0.026m margin between small max and medium min; near-zero tolerance for gap sizing error. The CATASTROPHIC DILEMMA: net-upward gravity (+1.2) with 55 m/s^2 oscillation means particles experience vertical accelerations from +56.2 (CATASTROPHIC UPWARD) to -53.8 (extreme downward); during upward phases particles rocket skyward with ~19910N; 1.0 restitution means every beam contact causes perfect velocity reversal; 0.995 damping means forces vanish to ~0.5% per step requiring ENORMOUS CONTINUOUS re-application; zero friction means beams provide ABSOLUTELY ZERO passive holding; 6500N wind with 10-step period creates violent 5-step direction reversals; baffles at y=0.01 block the ENTIRE vertical path; 3-beam/1.5kg constraint forces extreme minimalism; 450 particles at 3.33x baseline volume with 15x faster spawn rate creates a particle avalanche by step 240; feed_y_min at 1.76 places particle spawns INSIDE the build zone. Baseline's 30N/32-step periodic nudges (avg 0.94N/step) are ~46160x smaller than a single small particle's max horizontal force (~43390N vs 0.94N); a weak baseline model using periodic nudges or passive sieves stands ZERO CHANCE.",
-            "task_description_suffix": UNIFORM_SUFFIX,
+            "task_description_suffix": uniform_suffix_for_task("F_04"),
             "terrain_config": {
                 "min_purity": 0.35,
                 "max_beams": 3,

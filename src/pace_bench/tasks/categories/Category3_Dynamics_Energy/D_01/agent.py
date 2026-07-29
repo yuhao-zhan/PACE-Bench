@@ -35,6 +35,8 @@ def build_agent(sandbox):
     total_mass = sandbox.get_structure_mass()
     if total_mass > sandbox.MAX_STRUCTURE_MASS:
         raise ValueError(
+            f"Launcher mass {total_mass:.2f} kg exceeds the "
+            f"{sandbox.MAX_STRUCTURE_MASS:.2f} kg budget"
         )
     return projectile
 

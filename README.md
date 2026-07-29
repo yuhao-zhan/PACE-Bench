@@ -49,6 +49,7 @@ PACE-Bench/
 │       │   └── verification/       # safety checks and Box2D verification
 │       ├── tasks/
 │       │   ├── registry.py         # task discovery and selectors
+│       │   ├── stage_prompt.py     # canonical mutation suffixes and variable inventories
 │       │   ├── categories/         # 36 tasks and their local prompts/physics
 │       │   └── demos/basic/        # tutorial demo; not benchmark data
 │       ├── primitives.py           # task-facing physics helpers
@@ -278,7 +279,7 @@ The evaluation engine owns attempt accounting and verification; providers only g
 
 ### Task prompts and shared prompt data
 
-Each task's `prompt.py` defines its description, criteria, visible geometry, constraints, and primitive API. `stages.py` applies environment-specific updates without exposing Invisible values; this is the authoritative context for all 180 environments.
+Each task's `prompt.py` defines its description, criteria, visible geometry, constraints, and primitive API. `stages.py` applies environment-specific updates without exposing Invisible values; this is the authoritative context for all 180 environments. `tasks/stage_prompt.py` generates the canonical, value-free mutation suffix from each task's union of mutated variable names, and the task registry rejects any mutated environment whose suffix diverges from that shared format.
 
 `evaluation/prompt_data/` contains task-independent baseline fragments, not task/environment definitions:
 

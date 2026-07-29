@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pace_bench.tasks.stage_prompt import uniform_suffix_for_task
+
 import re
 
 from typing import Any, Dict, List
@@ -25,8 +27,6 @@ _BASE_RECENT_B_FOR_C = _env.RECENT_B_FOR_C
 _BASE_FORCE_LIMIT = _env.FORCE_LIMIT_INSIDE
 
 _BASE_REPULSION_MAG = _env.REPULSION_MAG
-
-_BASE_REPULSION_TANGENTIAL_MAG = _env.REPULSION_TANGENTIAL_MAG
 
 _BASE_BARRIER_X = _env.BARRIER_X
 
@@ -208,37 +208,8 @@ def update_task_description_for_visible_changes(
                 f"Stay within speed cap ({speed_txt}) and force limit {force_txt} inside zones",
                 description,
             )
-    t_rep = float(target_phys("repulsion_mag", _BASE_REPULSION_MAG))
-    b_rep = float(base_phys("repulsion_mag", _BASE_REPULSION_MAG))
-    if t_rep != b_rep:
-        pattern = r"(peak repulsion scale\*\* at each zone center is )(\d+\.?\d*)( N \(Newtons\); strength decreases linearly)"
-        if re.search(pattern, description):
-            description = re.sub(
-                pattern,
-                f"\\g<1>{_fmt_repulsion_peak(t_rep)} N (Newtons) (originally {_fmt_repulsion_peak(b_rep)} N in the source environment); strength decreases linearly",
-                description,
-            )
-    t_tan = float(target_phys("repulsion_tangential_mag", _BASE_REPULSION_TANGENTIAL_MAG))
-    b_tan = float(base_phys("repulsion_tangential_mag", _BASE_REPULSION_TANGENTIAL_MAG))
-    if t_tan != b_tan:
-        tan_pat = r"(is )(not disclosed)(; rely on observed dwell behavior)"
-        if re.search(tan_pat, description):
-            b_tan_label = "not disclosed" if b_tan == 0.0 else f"{_fmt_repulsion_peak(b_tan)} N"
-            description = re.sub(
-                tan_pat,
-                f"is {_fmt_repulsion_peak(t_tan)} N (originally {b_tan_label} in the source environment); rely on observed dwell behavior",
-                description,
-            )
-    t_rr = float(target_phys("repulsion_range", _BASE_REPULSION_RANGE))
-    b_rr = float(base_phys("repulsion_range", _BASE_REPULSION_RANGE))
-    if t_rr != b_rr:
-        rr_pat = r"(field extends to a radius of )(\d+\.?\d*)( m\.)"
-        if re.search(rr_pat, description):
-            description = re.sub(
-                rr_pat,
-                f"\\g<1>{_fmt_scalar_prompt(t_rr)} m (originally {_fmt_scalar_prompt(b_rr)} m in the source environment)\\g<3>",
-                description,
-            )
+    # Repulsion magnitude/range and tangential forcing are latent field
+    # parameters. Their values and source comparisons are intentionally absent.
     t_bx = _effective_terrain(target_terrain_config, base_terrain_config, "barrier_x", _BASE_BARRIER_X)
     b_bx = _base_terrain(base_terrain_config, "barrier_x", _BASE_BARRIER_X)
     if t_bx != b_bx:
@@ -432,67 +403,17 @@ def update_success_criteria_for_visible_changes(
                 criteria,
                 count=1,
             )
-    t_rr = float(target_phys("repulsion_range", _BASE_REPULSION_RANGE))
-    b_rr = float(base_phys("repulsion_range", _BASE_REPULSION_RANGE))
-    if t_rr != b_rr:
-        rr_crit_pat = r"(field radius )(\d+\.?\d*)( m \(linear falloff\))"
-        if re.search(rr_crit_pat, criteria):
-            criteria = re.sub(
-                rr_crit_pat,
-                f"field radius {_fmt_scalar_prompt(t_rr)} m (originally {_fmt_scalar_prompt(b_rr)} m in the source environment) (linear falloff)",
-                criteria,
-            )
-    t_rep = float(target_phys("repulsion_mag", _BASE_REPULSION_MAG))
-    b_rep = float(base_phys("repulsion_mag", _BASE_REPULSION_MAG))
-    if t_rep != b_rep:
-        pat_rep = r"(Peak scale \(radial component\) )(\d+\.?\d*)( N at zone centers)"
-        if re.search(pat_rep, criteria):
-            criteria = re.sub(
-                pat_rep,
-                f"Peak scale (radial component) {_fmt_repulsion_peak(t_rep)} N (originally {_fmt_repulsion_peak(b_rep)} N in the source environment) at zone centers",
-                criteria,
-            )
-    t_tan = float(target_phys("repulsion_tangential_mag", _BASE_REPULSION_TANGENTIAL_MAG))
-    b_tan = float(base_phys("repulsion_tangential_mag", _BASE_REPULSION_TANGENTIAL_MAG))
-    if t_tan != b_tan:
-        pat_tan = r"(scale )(not disclosed)( \(infer from behavior\))"
-        if re.search(pat_tan, criteria):
-            b_tan_label = "not disclosed" if b_tan == 0.0 else f"{_fmt_repulsion_peak(b_tan)} N"
-            criteria = re.sub(
-                pat_tan,
-                f"scale {_fmt_repulsion_peak(t_tan)} N (originally {b_tan_label} in the source environment) (infer from behavior)",
-                criteria,
-            )
+    # Latent repulsion-field coefficients never belong in success criteria.
     return criteria
 
 def get_c05_curriculum_stages() -> List[Dict[str, Any]]:
-    UNIFORM_SUFFIX = """
-
-Sensors indicate that this region exhibits non-standard physical properties.
-While the following variables **MIGHT** have changed from the initial environment, **NOT ALL** of them will necessarily be mutated in any given task. You must use active interaction and environmental feedback to deduce which specific conditions apply:
-- **Regional speed limits**: Constraints on the maximum velocity allowed within trigger zones to count progress.
-- **Repulsive field strength**: Alterations in the intensity of forces pushing the agent away from targets.
-- **Repulsive field geometry**: The spatial pattern of repulsive forces near targets may differ from the baseline. A tangential (swirling) component may also be present.
-- **Input sensitivity thresholds**: High in-zone forces may interact with the trigger mechanism in non-obvious ways; rely on observed dwell behavior rather than assumptions.
-- **Ground friction**: Surface grip on flat ground may differ from the baseline environment.
-- **Ramp friction**: Surface grip on ramps may differ from the baseline environment.
-- **Platform friction**: Surface grip on the elevated platform may differ from the baseline environment.
-- **Agent friction**: Contact grip of the agent body may differ from the baseline environment.
-- **Barrier friction**: Contact grip of the barrier gate may differ from the baseline environment.
-- **Environmental response timing**: Delays in barrier activation or system feedback after a trigger may vary.
-- **Activation duration**: The required continuous time to stay within a zone to successfully trigger it.
-- **Temporal sequencing windows**: Changes in the allowed time between sequential interactions (e.g., A to B or B to C).
-- **State persistence requirements**: Changes in how long prior motion history (e.g., elevated trajectory) is remembered for downstream triggers.
-- **Ambient wind / lateral forcing**: Time-varying lateral disturbances may or may not be present; magnitudes are not disclosed.
-
-**Discovery via feedback**: Your objective is to identify the underlying physical rules of this specific environment through trial and reasoning. Initial standard solutions may fail; use run feedback to infer effective constraints and adapt your strategy.
-"""
+    UNIFORM_SUFFIX = uniform_suffix_for_task("C_05")
     return [
         {
             "stage_id": "Stage-1",
             "title": "Extended trigger cooldown",
             "mutation_description": "The cooldown between successive zone triggers is extended from 55 steps to 300 steps — the agent must actively hold position inside the previously triggered zone while waiting, then complete the next trigger before temporal and altitude-history windows expire. All other physics parameters remain at baseline values.",
-            "task_description_suffix": UNIFORM_SUFFIX,
+            "task_description_suffix": uniform_suffix_for_task("C_05"),
             "terrain_config": {},
             "physics_config": {
                 "cooldown_steps": 300,
@@ -502,7 +423,7 @@ While the following variables **MIGHT** have changed from the initial environmen
             "stage_id": "Stage-2",
             "title": "Long dwell, strong repulsion, strict zone speed",
             "mutation_description": "Longer dwell requirement, stronger repulsion, low zone speed; temporal windows still widened.",
-            "task_description_suffix": UNIFORM_SUFFIX,
+            "task_description_suffix": uniform_suffix_for_task("C_05"),
             "terrain_config": {},
             "physics_config": {
                 "trigger_stay_steps": 300,
@@ -517,7 +438,7 @@ While the following variables **MIGHT** have changed from the initial environmen
             "stage_id": "Stage-3",
             "title": "Arctic Vortex — Ice Ramp, Extreme Dwell, Low Force Cap",
             "mutation_description": "Multi-variable extreme: ultra-tight speed cap (0.03 m/s), low force cap in zones (24 N), very long dwell (150 steps), intense repulsion (55 N radial + 38 N tangential), ice ramps (0.04 friction), and slippery ground (0.10 friction). The agent must precisely balance speed/force constraints while fighting repulsion and near-frictionless slopes.",
-            "task_description_suffix": UNIFORM_SUFFIX,
+            "task_description_suffix": uniform_suffix_for_task("C_05"),
             "terrain_config": {
                 "ramp_friction": 0.04,
                 "ground_friction": 0.10,
@@ -537,7 +458,7 @@ While the following variables **MIGHT** have changed from the initial environmen
             "stage_id": "Stage-4",
             "title": "Compound friction, barrier delay, repulsion",
             "mutation_description": "Lower ground and ramp friction, longer barrier delay after A, long dwell, stronger repulsion including tangential component.",
-            "task_description_suffix": UNIFORM_SUFFIX,
+            "task_description_suffix": uniform_suffix_for_task("C_05"),
             "terrain_config": {
                 "ramp_friction": 0.02,
                 "ground_friction": 0.2,

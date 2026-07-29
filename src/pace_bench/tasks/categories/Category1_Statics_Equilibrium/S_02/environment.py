@@ -36,6 +36,8 @@ class S02Sandbox:
         self._joint_failure_events = []
         self._max_body_velocity = 0.0
         self._num_steps = 0
+        self._joint_observation_error_count = 0
+        self._last_joint_observation_error = None
         self._setup_terrain()
     @property
     def world(self):
@@ -65,6 +67,8 @@ class S02Sandbox:
         j = self._world.CreateJoint(joint_def)
         self._springs.append(j)
         return j
+    def get_foundation(self):
+        return self._terrain_bodies["foundation"]
     def get_terrain_bounds(self):
         return (-50, 50, 0, 100)
     def get_vehicle_position(self): return (0.0, 100.0)
@@ -131,7 +135,9 @@ class S02Sandbox:
                         entry['peak_torque'] = float(torque)
                     if force > self._max_joint_force or torque > self._max_joint_torque:
                         to_destroy.append(j)
-                except Exception:
+                except Exception as exc:
+                    self._joint_observation_error_count += 1
+                    self._last_joint_observation_error = f"{type(exc).__name__}: {exc}"
                     continue
             for j in to_destroy:
                 if j in self._joints:

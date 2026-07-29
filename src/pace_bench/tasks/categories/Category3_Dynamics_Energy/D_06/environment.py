@@ -19,6 +19,7 @@ class Sandbox:
         physics_config = physics_config or {}
         self._terrain_config = dict(terrain_config)
         self._physics_config = dict(physics_config)
+        self._observation_errors: list[str] = []
         gravity = tuple(physics_config.get("gravity", (0, -10)))
         self._physics_gravity = (float(gravity[0]), float(gravity[1]))
         self._default_linear_damping = float(physics_config.get("linear_damping", 0.0))
@@ -146,8 +147,10 @@ class Sandbox:
         )
         try:
             bar.type = getattr(Box2D.b2, "kinematicBody", 1)
-        except Exception:
-            pass
+        except Exception as exc:
+            self._observation_errors.append(
+                f"deflector body type assignment unavailable: {type(exc).__name__}: {exc}"
+            )
         self._terrain_bodies["deflector"] = bar
     def _create_balls(self, terrain_config: dict):
         ball_radius = float(terrain_config.get("ball_radius", 0.35))
@@ -384,6 +387,7 @@ class Sandbox:
             if b is not None:
                 b.ApplyForceToCenter((wind_fx * b.mass * 0.08, 0.0), wake=True)
         self._world.Step(time_step, 20, 20)
+        self._apply_passive_absorber_drag(time_step)
         if not self._structure_smashed and time_step > 0:
             inv_dt = 1.0 / time_step
             to_remove = []
@@ -406,16 +410,57 @@ class Sandbox:
                     if peak_break or fatigue_break:
                         to_remove.append(joint)
                         self._structure_smashed = True
-                except Exception:
-                    to_remove.append(joint)
+                except Exception as exc:
+                    self._observation_errors.append(
+                        f"joint reaction force unavailable: {type(exc).__name__}: {exc}"
+                    )
             for joint in to_remove:
                 self._joint_force_last.pop(joint, None)
                 try:
                     self._world.DestroyJoint(joint)
                     if joint in self._joints:
                         self._joints.remove(joint)
-                except Exception:
-                    pass
+                except Exception as exc:
+                    self._observation_errors.append(
+                        f"joint removal failed: {type(exc).__name__}: {exc}"
+                    )
+    def _apply_passive_absorber_drag(self, time_step):
+        """Dissipate projectile velocity while touching a damped agent absorber.
+
+        ``set_damping`` configures only an agent-created body.  This contact law
+        gives that public material control a physically meaningful absorption
+        effect without granting reference code access to environment bodies.
+        """
+        if time_step <= 0:
+            return
+        ball_bodies = {
+            body for key, body in self._terrain_bodies.items()
+            if key.startswith("ball") and body is not None
+        }
+        agent_bodies = set(self._bodies)
+        damping_by_ball = {}
+        for contact in self._world.contacts:
+            if not contact.touching:
+                continue
+            body_a = contact.fixtureA.body
+            body_b = contact.fixtureB.body
+            if body_a in ball_bodies and body_b in agent_bodies:
+                ball, absorber = body_a, body_b
+            elif body_b in ball_bodies and body_a in agent_bodies:
+                ball, absorber = body_b, body_a
+            else:
+                continue
+            damping = max(0.0, float(absorber.linearDamping))
+            if damping > damping_by_ball.get(ball, 0.0):
+                damping_by_ball[ball] = damping
+        for ball, damping in damping_by_ball.items():
+            if damping <= 0.0:
+                continue
+            scale = math.exp(-min(damping, 300.0) * time_step)
+            ball.linearVelocity = (
+                ball.linearVelocity.x * scale,
+                ball.linearVelocity.y * scale,
+            )
     def get_terrain_bounds(self):
         return {
             "ground_y": self._ground_y,
@@ -538,8 +583,10 @@ class Sandbox:
                 else:
                     ax, ay = 0.0, 0.0
                 result.append((i, ax, ay, mag, mag / limit))
-            except Exception:
-                pass
+            except Exception as exc:
+                self._observation_errors.append(
+                    f"joint reaction force sample {i} unavailable: {type(exc).__name__}: {exc}"
+                )
         return result
     def get_peak_joint_force_seen(self):
         peak = self._peak_joint_force_seen
@@ -573,8 +620,10 @@ class Sandbox:
                     else:
                         ax, ay = 0.0, 0.0
                     result.append((i, ax, ay, mag, mag / fatigue))
-            except Exception:
-                pass
+            except Exception as exc:
+                self._observation_errors.append(
+                    f"joint fatigue sample {i} unavailable: {type(exc).__name__}: {exc}"
+                )
         return result
     def get_all_balls_masses(self):
         out = []
@@ -601,3 +650,5 @@ class Sandbox:
             "structure_angular_damping": self._default_angular_damping,
             "ball_velocity_scale": self._ball_velocity_scale,
         }
+    def get_observation_errors(self):
+        return list(self._observation_errors)

@@ -235,6 +235,7 @@ class SimulationMixin:
             skip_stuck = (
                 _matches_task(task_lower_raw, "e", 6, 3)
                 or _matches_task(task_lower_raw, "e", 6, 4)
+                or _matches_task(task_lower_raw, "e", 6, 5)
                 or _matches_task(task_lower_raw, "e", 6, 6)
                 or _matches_task(task_lower_raw, "e", 6, 1)
                 or _matches_task(task_lower_raw, "s", 1, 2)
@@ -415,7 +416,7 @@ class SimulationMixin:
                     should_stop, score, metrics = self._evaluate_with_penalty(
                         evaluator, None, step_count, self.max_steps
                     )
-                elif is_category5_c06:
+                elif is_category5_c06 or is_category5_c02:
                     should_stop, score, metrics = self._evaluate_with_penalty(
                         evaluator, None, step_count, self.max_steps
                     )
@@ -555,7 +556,12 @@ class SimulationMixin:
             is_e03_final = "e_03" in task_lower or "category_6_03" in task_lower
             is_e02_final = "e_02" in task_lower or "category_6_02" in task_lower
             is_category3_final = _matches_category(task_lower, 3)
-            if is_category1_final or is_e03_final or is_category5_c06:
+            if (
+                is_category1_final
+                or is_e03_final
+                or is_category5_c06
+                or is_category5_c02
+            ):
                 final_should_stop, final_score, final_metrics = (
                     self._evaluate_with_penalty(
                         evaluator, None, step_count, self.max_steps

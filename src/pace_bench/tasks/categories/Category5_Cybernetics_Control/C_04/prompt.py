@@ -2,10 +2,6 @@ import os
 
 import json
 
-import sys
-
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
-
 from pace_bench.tasks.primitives_api import API_INTRO
 
 from pace_bench.tasks.categories.Category5_Cybernetics_Control.C_04.environment import (
@@ -17,19 +13,10 @@ from pace_bench.tasks.categories.Category5_Cybernetics_Control.C_04.environment 
     EXIT_X_MIN,
     EXIT_Y_MAX,
     EXIT_Y_MIN,
-    FORCE_HISTORY_CAP,
     FPS,
     HOLD_STEPS,
-    LOCK_GATE_FX,
-    LOCK_GATE_X_MAX,
-    LOCK_GATE_X_MIN,
     MAX_STEPS,
-    ONEWAY_FORCE_RIGHT,
-    ONEWAY_X,
-    POS_ITERS,
-    STATE_HISTORY_CAP,
     STRUCTURAL_IMPULSE_SCALE_K,
-    VEL_ITERS,
     WHISKER_RANGE,
 
 )
@@ -54,27 +41,25 @@ TASK_PROMPT = {
     "task_description": f"""
 Design a controller for a whisker-equipped robot to unlock and escape a narrow maze.
 
-- **Agent**: Mass 5.0 kg, disk radius 0.2 m, initial position (2.0, 1.5) m.
+- **Agent**: Undisclosed mass, disk radius 0.2 m, initial position (2.0, 1.5) m.
 - **Agent dynamics**: Linear damping (`linearDamping`) applies to translation; the numeric value is **not stated in this document**—infer from coast-down or runtime inspection. **fixedRotation** is enabled (translation only).
-- **Contact dynamics**: Wall–agent friction and restitution are set on **Box2D** fixtures; numeric coefficients are **not stated in this document**—infer from motion and impacts (see **Environmental Anomalies Detected** when present on mutated runs).
-- **Simulation integrator**: Fixed timestep **1/{FPS}** s ({FPS} Hz), Box2D velocity iterations **{VEL_ITERS}**, position iterations **{POS_ITERS}** (matches the source environment configuration).
-- **Internal delay buffers**: Command-force history retains at most **{FORCE_HISTORY_CAP}** recent simulation steps; true pose and whisker histories retain at most **{STATE_HISTORY_CAP}** recent steps for delay simulation.
-- **Time-varying horizontal forcing (baseline source)**: In addition to other channels, the simulator may apply oscillatory or otherwise time-dependent horizontal forces (e.g. wind-like terms). **Exact amplitudes, frequencies, and phase rules are not stated in this document**—infer from motion and feedback (see **Environmental Anomalies Detected** when present on mutated runs).
-- **Environmental horizontal forcing**: Besides your commanded forces, the world can apply additional horizontal forces (constant back-current, height-dependent shear, and time-varying terms when active). **Except for the one-way assist parameters stated in their own bullet below**, remaining environmental horizontal effects are only partly enumerated—infer their net effect from motion and feedback.
+- **Contact dynamics**: Wall–agent friction and restitution are set on **Box2D** fixtures; numeric coefficients are **not stated in this document**—infer from motion and impacts (see **Possible Environment Variations** when present on mutated runs).
+- **Simulation timing**: `agent_action` runs once per fixed **1/{FPS} s** simulation step.
+- **Time-varying horizontal forcing (baseline source)**: In addition to other channels, the simulator may apply oscillatory or otherwise time-dependent horizontal forces (e.g. wind-like terms). **Exact amplitudes, frequencies, and phase rules are not stated in this document**—infer from motion and feedback (see **Possible Environment Variations** when present on mutated runs).
+- **Environmental horizontal forcing**: Besides your commanded forces, the world can apply additional horizontal forces (constant back-current, height-dependent shear, one-way assist, and time-varying terms when active). Their non-constraint numeric parameters are not stated; infer their net effect from motion and feedback.
 - **Height-dependent horizontal shear (if active)**: Uses vertical position relative to an internal reference height; neither that reference nor the shear gradient magnitude is numerically stated here—infer from motion and feedback.
 - **Whiskers**: Three sensors (forward +x, up +y, down -y), each range {WHISKER_RANGE} m.
-- **Whisker stream delay (simulation steps)**: 0.
-- **Position report delay (simulation steps)**: 0. **Reported vs physical pose**: When delay is 0, reported position matches physical position for exit, unlock, lock gate, and one-way bias. Other environmental effects may use **reported** pose, **physical** linear velocity, or **physical** height for participation rules depending on the active simulator configuration; those rules are **not** fully enumerated here (see **Environmental Anomalies Detected** when present on mutated runs). When delay is N>0, x-band memberships that rely on **reported** pose lag physical state by N simulation steps.
+- **State interfaces**: `get_agent_position()` returns the **reported** pose used for exit and unlock evaluation; `get_agent_velocity()` returns instantaneous physical velocity.
 - **Passage**: Maze bounds x in [0, 20] m, y in [0, 3] m.
 - **Maze outer shell (indices 0–3; lower-left x, y, width, height in m)**: floor (0.0, 0.0, 20.0, 0.5); ceiling (0.0, 2.5, 20.0, 0.5); left wall (0.0, 0.0, 0.5, 3.0); right wall (20.0, 0.0, 0.5, 3.0).
 - **Maze walls (indices 4-6; lower-left x, y, width, height in m)**: (5.0, 0.0, 0.2, 1.0); (9.0, 1.8, 0.2, 1.2); (14.0, 1.8, 0.2, 1.2).
-- **Whisker blind band along x (m)**: none (When active, suppression uses **physical** body x—whisker raycasts use true pose—not reported position.)
-- **Control lag (simulation steps before commanded force takes effect)**: 0.
-- **One-way rightward assist**: While **reported** x **>** **{ONEWAY_X:.1f}** m, an additional constant **+{ONEWAY_FORCE_RIGHT:.1f}** N horizontal force acts on the agent in +x (in addition to any other environmental horizontal forcing).
-- **Structural k (failure if collision normal impulse exceeds k * agent mass {AGENT_MASS:g} kg)**: k={STRUCTURAL_IMPULSE_SCALE_K} (impulse threshold {_structural_impulse_ns_str} N·s). Here the failure condition is **normal impulse > (k × {AGENT_MASS:g}) N·s** (k acts as an impulse-per-mass scale in N·s per kg).
+- **Whisker blind band along x**: Its numeric spatial extent is not stated; infer altered sensor behavior through interaction. Suppression, when present, follows **physical** body x because whisker raycasts use true pose.
+- **Control lag**: Its numeric duration is not stated; compare requested commands with the force currently evaluated by the unlock condition.
+- **One-way rightward assist**: An additional rightward force can become active beyond an undisclosed reported-x threshold; its magnitude and threshold are not stated.
+- **Structural impulse limit**: Failure occurs when collision normal impulse exceeds {_structural_impulse_ns_str} N·s.
 - **Goal**: Reach the exit zone at the end of the passage.
-- **Unlock condition**: Exit is locked by a force field while **reported** x is in [{LOCK_GATE_X_MIN:.1f}, {LOCK_GATE_X_MAX:.1f}] m (an additional repelling horizontal force of **{LOCK_GATE_FX:g}** N in −x applies on the body while locked and reported x remains in that band). To unlock: **reported** position x in [{ACTIVATION_X_MIN:.1f}, {ACTIVATION_X_MAX:.1f}] m with **commanded** horizontal Fx (after control lag) **strictly less than {BACKWARD_FX_THRESHOLD:.1f} N** (e.g. {_unlock_qual_fx_example} N qualifies; {BACKWARD_FX_THRESHOLD:.1f} N does not), and **true** linear speed from **physical** velocity **< {BACKWARD_SPEED_MAX:.1f} m/s**, for at least **{HOLD_STEPS}** consecutive steps.
-- **Exit zone**: x >= {EXIT_X_MIN:.1f} m, y in [{EXIT_Y_MIN:.1f}, {EXIT_Y_MAX:.1f}] m; after **unlock**, hold there for at least **{HOLD_STEPS}** consecutive steps using **reported** position (before unlock, time in the exit zone does **not** count toward this hold). When position report delay is enabled, the same reported pose applies.
+- **Unlock condition**: While locked, a repelling force field acts in an undisclosed reported-x band with an undisclosed magnitude. To unlock: **reported** position x in [{ACTIVATION_X_MIN:.1f}, {ACTIVATION_X_MAX:.1f}] m with **commanded** horizontal Fx (after control lag) **strictly less than {BACKWARD_FX_THRESHOLD:.1f} N** (e.g. {_unlock_qual_fx_example} N qualifies; {BACKWARD_FX_THRESHOLD:.1f} N does not), and **true** linear speed from **physical** velocity **< {BACKWARD_SPEED_MAX:.1f} m/s**, for at least **{HOLD_STEPS}** consecutive steps.
+- **Exit zone**: x >= {EXIT_X_MIN:.1f} m, y in [{EXIT_Y_MIN:.1f}, {EXIT_Y_MAX:.1f}] m; after **unlock**, hold there for at least **{HOLD_STEPS}** consecutive steps using **reported** position (before unlock, time in the exit zone does **not** count toward this hold).
 - **Time limit**: At most {MAX_STEPS:,} simulation steps.
 
 Design a control loop that:
@@ -86,7 +71,7 @@ Design a control loop that:
 
 1. **Unlock & Reach**: Unlock and reach x >= {EXIT_X_MIN:.1f} m, y in [{EXIT_Y_MIN:.1f}, {EXIT_Y_MAX:.1f}] m.
 2. **Hold**: After unlock, at least **{HOLD_STEPS}** consecutive steps in the exit zone using **reported** position; before unlock, exit-zone occupancy does **not** count toward this hold.
-3. **Survival**: Stay below the structural impulse limit: **{_structural_impulse_ns_str} N·s** at baseline (k={STRUCTURAL_IMPULSE_SCALE_K}); failure if normal impulse exceeds **k × ({AGENT_MASS:g} kg)** in N·s.
+3. **Survival**: Stay below the structural impulse limit: **{_structural_impulse_ns_str} N·s** at baseline.
 
 - **Unlock Speed**: True linear speed < {BACKWARD_SPEED_MAX:.1f} m/s.
 - **APIs**: Use only the primitives documented below.

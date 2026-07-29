@@ -5,6 +5,8 @@ from Box2D.b2 import (world, polygonShape, circleShape, staticBody, dynamicBody,
 import math
 
 class Sandbox:
+    AGENT_COLLISION_GROUP = -1
+
     def __init__(self, *, terrain_config=None, physics_config=None):
         terrain_config = terrain_config or {}
         physics_config = physics_config or {}
@@ -71,6 +73,15 @@ class Sandbox:
     BUILD_ZONE_Y_MAX = 10.0
     MAX_STRUCTURE_MASS = 100.0
     MAX_BODY_FRICTION = 1.0
+
+    def _configure_agent_body(self, body):
+        """Keep overlapping articulated parts from colliding with each other."""
+        for fixture in body.fixtures:
+            filter_data = fixture.filterData
+            filter_data.groupIndex = self.AGENT_COLLISION_GROUP
+            fixture.filterData = filter_data
+        return body
+
     def add_beam(self, x, y, width, height, angle=0, density=1.0):
         if not (self.BUILD_ZONE_X_MIN <= x <= self.BUILD_ZONE_X_MAX and self.BUILD_ZONE_Y_MIN <= y <= self.BUILD_ZONE_Y_MAX):
             raise ValueError(
@@ -88,6 +99,7 @@ class Sandbox:
         )
         body.linearDamping = self._default_linear_damping
         body.angularDamping = self._default_angular_damping
+        self._configure_agent_body(body)
         self._bodies.append(body)
         return body
     def add_wheel(self, x, y, radius=0.2, density=0.6):
@@ -105,6 +117,7 @@ class Sandbox:
         )
         body.linearDamping = self._default_linear_damping
         body.angularDamping = self._default_angular_damping
+        self._configure_agent_body(body)
         self._bodies.append(body)
         return body
     def add_joint(self, body_a, body_b, anchor_point, type='pivot', lower_limit=None, upper_limit=None):
@@ -145,7 +158,7 @@ class Sandbox:
     def set_motor(self, joint, motor_speed, max_torque=100.0):
         if not isinstance(joint, Box2D.b2RevoluteJoint):
             raise ValueError("set_motor: joint must be a pivot/revolute joint")
-        joint.enableMotor = True
+        joint.motorEnabled = True
         joint.motorSpeed = float(motor_speed)
         joint.maxMotorTorque = float(max_torque)
     def get_structure_mass(self):
@@ -263,7 +276,7 @@ class Sandbox:
                             ys = [v.y for v in vertices]
                             info['width'] = float(max(xs) - min(xs))
                             info['height'] = float(max(ys) - min(ys))
-                    except Exception:
+                    except (AttributeError, TypeError):
                         pass
             result.append(info)
         return result

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pace_bench.tasks.stage_prompt import uniform_suffix_for_task
+
 from typing import Any, Dict, List
 
 import re
@@ -78,7 +80,7 @@ def update_task_description_for_visible_changes(
     target_max_mass = target_terrain_config.get("max_structure_mass", DEFAULT_MAX_MASS)
     base_max_mass = base_terrain_config.get("max_structure_mass", DEFAULT_MAX_MASS)
     if target_max_mass != base_max_mass:
-        mass_desc_pattern = r"(- \*\*Mass Budget\*\*: Total structure mass must be less than )(\d+\.?\d*) kg\."
+        mass_desc_pattern = r"(- \*\*Mass Budget\*\*: Total structure mass must not exceed )(\d+\.?\d*) kg\."
         if re.search(mass_desc_pattern, description):
             description = re.sub(
                 mass_desc_pattern,
@@ -116,19 +118,31 @@ def update_task_description_for_visible_changes(
     base_joint_torque = float(base_terrain_config.get("max_joint_torque", DEFAULT_MAX_JOINT_TORQUE))
     _num = r"\d+(?:\.\d+)?(?:e[+-]?\d+)?"
     if target_joint_force != base_joint_force:
-        description = re.sub(
+        description, count = re.subn(
             rf"(maximum linear force capacity of ){_num} N( and a maximum torque capacity of )",
             f"\\g<1>{target_joint_force:.1e} N (originally {base_joint_force:.1e} N in the source environment)\\g<2>",
             description,
             count=1
         )
+        if count != 1:
+            raise ValueError(
+                f"S_05 expected one joint-force prompt target; found {count}"
+            )
     if target_joint_torque != base_joint_torque:
-        description = re.sub(
+        description, count = re.subn(
             rf"(maximum torque capacity of ){_num} Nm( in the nominal mission; these limits may be restricted in mission variants\.)\s*",
-            rf"\g<1>{target_joint_torque:.1e} Nm\g<2> (originally {base_joint_torque:.1e} Nm in the source environment).",
+            (
+                rf"\g<1>{target_joint_torque:.1e} Nm\g<2> "
+                rf"(originally {base_joint_torque:.1e} Nm in the source environment)."
+                "\n\n"
+            ),
             description,
             count=1
         )
+        if count != 1:
+            raise ValueError(
+                f"S_05 expected one joint-torque prompt target; found {count}"
+            )
     target_has_walls = bool(target_terrain_config.get("has_walls", DEFAULT_HAS_WALLS))
     base_has_walls = bool(base_terrain_config.get("has_walls", DEFAULT_HAS_WALLS))
     if target_has_walls != base_has_walls:
@@ -144,30 +158,8 @@ def update_task_description_for_visible_changes(
                 r"\g<1>The scene has no lateral containment walls; the build zone is open at the sides (originally enclosed by lateral walls in the source environment).",
                 description
             )
-    target_restitution = float(target_terrain_config.get("meteor_restitution", DEFAULT_METEOR_RESTITUTION))
-    base_restitution = float(base_terrain_config.get("meteor_restitution", DEFAULT_METEOR_RESTITUTION))
-    if target_restitution != base_restitution:
-        description = re.sub(
-            r"(Boulder elasticity \(restitution\): )(\d+\.\d+) \(low bounce",
-            lambda m: f"{m.group(1)}{target_restitution:.2f} (originally {base_restitution:.2f} in the source environment) (low bounce",
-            description,
-            count=1
-        )
-        description = re.sub(
-            r"(- \*\*Bombardment Parameters\*\*:.*?Boulder restitution: )(\d+\.\d+) \(low bounce",
-            lambda m: f"{m.group(1)}{target_restitution:.2f} (originally {base_restitution:.2f} in the source environment) (low bounce",
-            description,
-            count=1
-        )
-    target_density = float(target_terrain_config.get("meteor_density", DEFAULT_METEOR_DENSITY))
-    base_density = float(base_terrain_config.get("meteor_density", DEFAULT_METEOR_DENSITY))
-    if target_density != base_density:
-        description = re.sub(
-            r"(Boulder density: )(\d+\.?\d*) kg/m² \(affects mass and momentum\)\.",
-            f"\\g<1>{target_density:.1f} kg/m² (originally {base_density:.1f} kg/m² in the source environment) (affects mass and momentum).",
-            description,
-            count=1
-        )
+    # Restitution and density are latent material properties, not constraints or
+    # directly visible geometry. Their target/source values must remain hidden.
     return description
 
 def update_success_criteria_for_visible_changes(
@@ -182,7 +174,7 @@ def update_success_criteria_for_visible_changes(
     target_max_mass = target_terrain_config.get("max_structure_mass", DEFAULT_MAX_MASS)
     base_max_mass = base_terrain_config.get("max_structure_mass", DEFAULT_MAX_MASS)
     if target_max_mass != base_max_mass:
-        mass_pattern = r"(- \*\*Mass Budget\*\*: < )(\d+\.?\d*) kg\."
+        mass_pattern = r"(- \*\*Mass Budget\*\*: <= )(\d+\.?\d*) kg\."
         if re.search(mass_pattern, criteria):
             criteria = re.sub(
                 mass_pattern,
@@ -202,12 +194,12 @@ def update_success_criteria_for_visible_changes(
     base_core_force = base_terrain_config.get("max_core_force", DEFAULT_CORE_MAX_FORCE)
     if target_core_force != base_core_force:
         criteria = re.sub(
-            r"(peak impact force on the core must remain below )(\d+\.?\d*)( N\.)",
+            r"(peak impact force on the core must not exceed )(\d+\.?\d*)( N\.)",
             f"\\g<1>{target_core_force:.1f} N (originally {base_core_force:.1f} N in the source environment).",
             criteria
         )
         criteria = re.sub(
-            r"(Peak force on core < )(\d+\.?\d*)( N\.)",
+            r"(Peak force on core <= )(\d+\.?\d*)( N\.)",
             f"\\g<1>{target_core_force:.1f} N (originally {base_core_force:.1f} N in the source environment).",
             criteria
         )
@@ -228,22 +220,7 @@ def update_success_criteria_for_visible_changes(
             )
     return criteria
 
-UNIFORM_SUFFIX = """
-Environmental Anomalies Detected
-Sensors indicate that this region exhibits non-standard physical properties.
-While the following variables MIGHT have changed from the initial environment, NOT ALL of them will necessarily be mutated in any given task. You must use active interaction and environmental feedback to deduce which specific conditions apply:
- - **Joint Shear Strength (Fragile Anchor Points)**: The maximum linear force and torque that connections can withstand may differ from the nominal environment; joints may fail if limits are exceeded.
- - **Atmospheric Turbulence (Wind)**: Horizontal forces may act on all bodies, affecting structural stability; environmental conditions may differ from the nominal environment.
- - **Mass Budget**: The total allowed mass for construction may differ from the nominal environment.
- - **Meteor Elasticity (Restitution)**: Falling debris elasticity may differ from nominal, affecting ricochets and secondary impacts.
- - **Meteor Mass (Density)**: Falling debris mass density may differ from nominal, affecting impact force and momentum transfer.
- - **Lateral Boundaries (Containment)**: The scene may be enclosed by lateral walls, amplifying ricochets and horizontal debris paths.
- - **Gravitational Constant**: Downward acceleration may differ from nominal; structural loads and impact energy may be affected.
- - **Protected Core Position**: The protected object's location and associated keep-out zone may differ from nominal.
- - **Core Fragility**: The protected object's impact tolerance may differ from nominal.
-
-Discovery via feedback: Your objective is to identify the underlying physical rules of this specific environment through trial and reasoning. Initial standard solutions may fail; analyze the failure mode (e.g., where a joint breaks or how a body moves) to infer the hidden constraints and adapt your design.
-"""
+UNIFORM_SUFFIX = uniform_suffix_for_task("S_05")
 
 def get_s05_curriculum_stages() -> List[Dict[str, Any]]:
     return [
@@ -251,7 +228,7 @@ def get_s05_curriculum_stages() -> List[Dict[str, Any]]:
             "stage_id": "Stage-1",
             "title": "The Fragile Anchor",
             "mutation_description": "Joints and ground anchors have severely reduced shear and torque capacity. A standard heavy shelter concentrates impact loads into few weld joints; when any reaction force or torque exceeds the hidden limit, that joint fails and the structure collapses. The agent must discover the failure mode from feedback and redesign so loads are distributed (e.g. more joints, lighter members, or geometry that keeps no single connection above the threshold).",
-            "task_description_suffix": UNIFORM_SUFFIX,
+            "task_description_suffix": uniform_suffix_for_task("S_05"),
             "terrain_config": {
                 "max_joint_force": 5000.0,
                 "max_joint_torque": 1e12,
@@ -262,7 +239,7 @@ def get_s05_curriculum_stages() -> List[Dict[str, Any]]:
             "stage_id": "Stage-2",
             "title": "The Gale-Force Crucible",
             "mutation_description": "Extreme hurricane-force winds push everything violently leftward while joints are brittle and snap under even moderate loads. Boulders are much denser and more elastic than nominal, creating devastating high-momentum impacts that ricochet unpredictably. The core is extremely fragile — any direct contact is fatal. A standard shelter would have its joints shredded by wind forces or its roof punctured by heavy, bouncy boulders within seconds. The agent must discover the extreme wind, joint fragility, boulder density, boulder elasticity, and core fragility from catastrophic failure feedback and build an ultra-light, multi-anchor distributed-aerodynamic structure that can survive all of these interacting hazards simultaneously.",
-            "task_description_suffix": UNIFORM_SUFFIX,
+            "task_description_suffix": uniform_suffix_for_task("S_05"),
             "terrain_config": {
                 "core_x": 5.0,
                 "max_core_force": 30.0,
@@ -277,39 +254,42 @@ def get_s05_curriculum_stages() -> List[Dict[str, Any]]:
         },
         {
             "stage_id": "Stage-3",
-            "title": "The Ricochet Crucible",
-            "mutation_description": "Very tight mass budget, fragile joints, and very dense meteors with high elasticity create conflicting constraints: the structure must be lightweight yet withstand heavy impacts without joint failures. Lateral walls cause unpredictable ricochets.",
-            "task_description_suffix": UNIFORM_SUFFIX,
+            "title": "The Oblique Crossfire",
+            "mutation_description": "A broad hidden distribution of oblique boulder trajectories combines with stronger gravity, elastic shelter surfaces, lateral containment, a near-zero direct-impact tolerance, a severe mass budget, and restricted joints. Flat roofs collect concentrated impulses and return debris into the enclosure; survival requires a lightweight convex shell with closed side paths and distributed ground load paths.",
+            "task_description_suffix": uniform_suffix_for_task("S_05"),
             "terrain_config": {
-                "max_structure_mass": 2.0,
-                "max_joint_force": 7000.0,
-                "max_joint_torque": 7000.0,
-                "max_core_force": 250.0,
-                "meteor_restitution": 0.98,
-                "meteor_density": 6.0,
+                "max_structure_mass": 1.2,
+                "max_joint_force": 8000.0,
+                "max_core_force": 12.0,
+                "meteor_vx_range": [-14.0, 14.0],
+                "structure_restitution": 0.55,
                 "has_walls": True,
                 "seed": 123,
             },
-            "physics_config": {},
+            "physics_config": {
+                "gravity": (0, -16.0),
+            },
         },
         {
             "stage_id": "Stage-4",
-            "title": "The Impossible Asymmetry",
-            "mutation_description": "Ultra-extreme multi-variable catastrophe — second escalation. The core is pinned at the far-right build-zone boundary (x=14); symmetric sheltering is impossible — the KOZ blocks everything to the right, forcing a pure cantilever from the left. Joints are barely stronger than toothpicks (9200 N / 24200 Nm), the core ruptures at 6.5 N (over 23× more fragile than nominal), and 2.5× gravity amplifies every impact while keeping the structure perpetually unsettled. Wind screams rightward at 80 N/kg, actively driving falling debris INTO the core zone. Perfect-elasticity boulders (restitution 1.0) at 10.0 density ricochet endlessly inside walled boundaries, creating cascading multi-hit chaos. Mass budget is slashed to 1.0 kg. Every variable is pushed to near-breaking; surviving requires a counterintuitive, ultra-distributed, ultra-lightweight cantilever with many redundant anchors — a design no naive model would discover without systematic trial-and-error.",
-            "task_description_suffix": UNIFORM_SUFFIX,
+            "title": "The Eccentric Gauntlet",
+            "mutation_description": "A boundary-adjacent core, restrictive connection capacities, a reduced mass allowance, and lateral containment combine with non-standard gravity, wind, debris trajectories, collision properties, and impact tolerance. The shifted keep-out zone invalidates centered shells, while repeated oblique ricochets punish flat collectors and monolithic cantilevers. Survival requires an asymmetric, independently anchored deflection corridor that distributes its load path and rejects debris before secondary impacts reach the core.",
+            "task_description_suffix": uniform_suffix_for_task("S_05"),
             "terrain_config": {
-                "core_x": 14.0,
-                "max_core_force": 6.5,
-                "max_structure_mass": 1.0,
-                "max_joint_force": 9200.0,
-                "max_joint_torque": 24200.0,
-                "wind_force": 80.0,
+                "core_x": 13.5,
+                "max_core_force": 4.0,
+                "max_structure_mass": 0.8,
+                "max_joint_force": 10000.0,
+                "max_joint_torque": 27000.0,
+                "wind_force": 90.0,
                 "has_walls": True,
-                "meteor_restitution": 1.0,
-                "meteor_density": 10.0,
+                "meteor_restitution": 0.9,
+                "meteor_density": 8.0,
+                "meteor_vx_range": [-18.0, 18.0],
+                "structure_restitution": 0.65,
             },
             "physics_config": {
-                "gravity": (0, -25.0),
+                "gravity": (0, -22.0),
             },
         },
     ]

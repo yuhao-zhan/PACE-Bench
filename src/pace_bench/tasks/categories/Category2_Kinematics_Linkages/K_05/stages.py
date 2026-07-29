@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pace_bench.tasks.stage_prompt import uniform_suffix_for_task
+
 from typing import Any, Dict, List
 
 import re
@@ -22,10 +24,6 @@ def update_task_description_for_visible_changes(
         base_physics_config = {}
     target_y = target_terrain_config.get("target_object_y", 9.0)
     base_y = base_terrain_config.get("target_object_y", 9.0)
-    target_obj = target_terrain_config.get("object", {})
-    base_obj = base_terrain_config.get("object", {})
-    target_mass = float(target_obj.get("mass", 20.0))
-    base_mass = float(base_obj.get("mass", 20.0))
     default_sustain_s = 3.0
     default_max_structure_mass = 60.0
     target_sustain_s = float(target_terrain_config.get("min_sustain_s", default_sustain_s))
@@ -37,14 +35,6 @@ def update_task_description_for_visible_changes(
         description = re.sub(pattern, f"\\g<1>{target_y:.1f}m (originally y={base_y:.1f}m in the source environment)", description)
         pattern_y_ge = r"(reaches y >= )(\d+\.?\d*)m( \(originally [^)]+ in the source environment\))?"
         description = re.sub(pattern_y_ge, f"\\g<1>{target_y:.1f}m (originally y >= {base_y:.1f}m in the source environment)", description)
-    if target_mass != base_mass:
-        mass_pattern = r"(- \*\*Target Object\*\*: A )(\d+\.?\d*)( kg)(?: \(originally \d+ kg in the source environment\))?(.*?), resting at x="
-        if re.search(mass_pattern, description):
-            description = re.sub(
-                mass_pattern,
-                f"\\g<1>{target_mass:.0f} kg (originally {base_mass:.0f} kg in the source environment)\\g<4>, resting at x=",
-                description,
-            )
     if target_sustain_s != base_sustain_s:
         sustain_pattern = r"(for at least )(\d+\.?\d*)( seconds \()"
         if re.search(sustain_pattern, description):
@@ -142,10 +132,6 @@ def update_success_criteria_for_visible_changes(base_success_criteria: str, targ
     criteria = base_success_criteria
     target_y = target_terrain_config.get("target_object_y", 9.0)
     base_y = base_terrain_config.get("target_object_y", 9.0)
-    target_obj = target_terrain_config.get("object", {})
-    base_obj = base_terrain_config.get("object", {})
-    target_mass = float(target_obj.get("mass", 20.0))
-    base_mass = float(base_obj.get("mass", 20.0))
     default_sustain_s = 3.0
     default_max_structure_mass = 60.0
     target_sustain_s = float(target_terrain_config.get("min_sustain_s", default_sustain_s))
@@ -155,14 +141,6 @@ def update_success_criteria_for_visible_changes(base_success_criteria: str, targ
     if target_y != base_y:
         pattern = r"(reaches y >= )(\d+\.?\d*)m( \(originally [^)]+ in the source environment\))?"
         criteria = re.sub(pattern, f"\\g<1>{target_y:.1f}m (originally y >= {base_y:.1f}m in the source environment)", criteria, flags=re.IGNORECASE)
-    if target_mass != base_mass:
-        mass_obj_pattern = r"(- \*\*Target Object\*\*: A )(\d+\.?\d*)( kg)(?: \(originally \d+ kg in the source environment\))?(.*?), resting at x="
-        if re.search(mass_obj_pattern, criteria):
-            criteria = re.sub(
-                mass_obj_pattern,
-                f"\\g<1>{target_mass:.1f}\\g<3>\\g<4>, resting at x=",
-                criteria,
-            )
     if target_sustain_s != base_sustain_s:
         sustain_pattern = r"(for >= )(\d+\.?\d*)( seconds \()"
         if re.search(sustain_pattern, criteria):
@@ -182,24 +160,13 @@ def update_success_criteria_for_visible_changes(base_success_criteria: str, targ
     return criteria
 
 def get_k05_curriculum_stages() -> List[Dict[str, Any]]:
-    task_description_suffix = """
-
-The following variables **MIGHT** have changed from the initial environment, but **NOT ALL** of them will necessarily be mutated in any given task:
-- **Atmospheric Wind** properties may differ.
-- **Narrow Clearance Obstacles** may be present.
-- **Object Center of Mass** may differ.
-- **Joint Fragility** limits may differ.
-- **Surface Friction** may differ.
-- **Target Height & Object Mass** may differ.
-- **Gravitational Acceleration** may differ.
-- **Structure Mass Budget** may differ.
-"""
+    task_description_suffix = uniform_suffix_for_task("K_05")
     return [
         {
             "stage_id": "Stage-1",
             "title": "Severe Hurricane Wind",
             "mutation_description": "Powerful lateral wind blows everything away.",
-            "task_description_suffix": task_description_suffix,
+            "task_description_suffix": uniform_suffix_for_task("K_05"),
             "terrain_config": {},
             "physics_config": {"wind_force": (400.0, 0.0)},
         },
@@ -207,7 +174,7 @@ The following variables **MIGHT** have changed from the initial environment, but
             "stage_id": "Stage-2",
             "title": "Crushing Gravity",
             "mutation_description": "Gravitational acceleration massively increased — lifting requires extreme power-to-weight ratio as every gram exerts tremendous downward force.",
-            "task_description_suffix": task_description_suffix,
+            "task_description_suffix": uniform_suffix_for_task("K_05"),
             "terrain_config": {},
             "physics_config": {"gravity": (0.0, -150.0)},
         },
@@ -215,7 +182,7 @@ The following variables **MIGHT** have changed from the initial environment, but
             "stage_id": "Stage-3",
             "title": "The Tipping Gauntlet",
             "mutation_description": "Ultra-heavy, off-balance, near-frictionless object with strong crosswind and tight mass budget — every design choice trades off against another constraint.",
-            "task_description_suffix": task_description_suffix,
+            "task_description_suffix": uniform_suffix_for_task("K_05"),
             "terrain_config": {
                 "target_object_y": 12.0,
                 "max_structure_mass": 40.0,
@@ -233,7 +200,7 @@ The following variables **MIGHT** have changed from the initial environment, but
             "stage_id": "Stage-4",
             "title": "The Master's Gauntlet",
             "mutation_description": "Combined wind, narrow gap, heavy load, and fragile joints.",
-            "task_description_suffix": task_description_suffix,
+            "task_description_suffix": uniform_suffix_for_task("K_05"),
             "terrain_config": {
                 "ceiling_gap": {"x_min": 3.2, "x_max": 4.8, "y": 6.0},
                 "target_object_y": 10.0,

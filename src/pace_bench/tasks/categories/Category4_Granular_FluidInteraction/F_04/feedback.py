@@ -1,460 +1,284 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
-
 import math
 
-def _fm(x: float, decimals: int = 3) -> str:
-    if not math.isfinite(x):
-        return str(x)
-    s = f"{float(x):.{decimals}f}".rstrip("0").rstrip(".")
-    return s if s else "0"
+from typing import Any, Dict, List
 
-def _g(metrics: Dict[str, Any], key: str, default: Any = None) -> Any:
-    return metrics.get(key, default) if isinstance(metrics, dict) else default
 
-def _ratio_str(num, denom) -> str:
+def _dict(value: Any) -> Dict[str, Any]:
+    return value if isinstance(value, dict) else {}
+
+
+def _list(value: Any) -> List[Any]:
+    return value if isinstance(value, list) else []
+
+
+def _number(value: Any) -> float | None:
+    if isinstance(value, bool):
+        return None
     try:
-        n, d = float(num), float(denom)
-        if not math.isfinite(d) or d == 0:
-            return "—"
-        pct = 100.0 * n / d
-        return f"{n}/{d} ({pct:.1f}%)"
-    except (TypeError, ValueError):
-        return "—"
+        result = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    return result if math.isfinite(result) else None
 
-def _pct_str(num, denom) -> str:
-    try:
-        n, d = float(num), float(denom)
-        if not math.isfinite(d) or d == 0:
-            return "—"
-        return f"{100.0 * n / d:.1f}%"
-    except (TypeError, ValueError):
-        return "—"
 
-def _section_temporal(metrics: Dict[str, Any]) -> List[str]:
-    parts: List[str] = []
-    step = _g(metrics, "step_count", None)
-    max_steps_val = _g(metrics, "max_steps", None)
-    progress = _g(metrics, "progress_pct", None)
-    spawned = _g(metrics, "spawned_particle_count", None)
-    planned = _g(metrics, "planned_total_particle_count", None)
-    parts.append("### 1. Temporal Event Chronology")
-    line = f"- **Step**: {step}" if step is not None else "- **Step**: N/A"
-    if max_steps_val is not None:
-        line += f" / {max_steps_val}"
+def _fmt(value: Any, decimals: int = 2) -> str:
+    number = _number(value)
+    if number is None:
+        return "unavailable"
+    text = f"{number:.{decimals}f}".rstrip("0").rstrip(".")
+    return text if text else "0"
+
+
+def _count(value: Any) -> str:
+    number = _number(value)
+    return str(int(number)) if number is not None and number.is_integer() else _fmt(value)
+
+
+def _append_timeline(parts: List[str], metrics: Dict[str, Any]) -> None:
+    parts.append("### Timeline")
+    step = _number(metrics.get("step_count"))
+    maximum = _number(metrics.get("max_steps"))
+    progress = _number(metrics.get("progress_pct"))
+    line = f"- Snapshot: step {_count(step)}"
+    if maximum is not None:
+        line += f"/{_count(maximum)}"
     if progress is not None:
-        try:
-            line += f" ({float(progress):.1f}%)"
-        except (TypeError, ValueError):
-            pass
+        line += f" ({_fmt(progress, 1)}%)"
     parts.append(line)
-    physics = _g(metrics, "physics_summary", {}) or {}
-    sc = int(physics.get("step_count", step or 0))
-    sec_wave = int(_g(metrics, "second_wave_step",
-                 _g(physics, "second_wave_step", None)) or 0)
-    thr_wave = int(_g(metrics, "third_wave_step",
-                 _g(physics, "third_wave_step", None)) or 0)
-    wave_notes = []
-    if sec_wave:
-        wave_notes.append(
-            f"2nd-wave@{sec_wave}={'spawned' if sc >= sec_wave else 'pending'}"
-        )
-    if thr_wave:
-        wave_notes.append(
-            f"3rd-wave@{thr_wave}={'spawned' if sc >= thr_wave else 'pending'}"
-        )
-    if wave_notes:
-        parts.append(f"- **Wave triggers**: {', '.join(wave_notes)}")
-    if spawned is not None:
-        line = f"- **Active particles**: {spawned}"
-        if planned is not None and planned > 0:
-            line += f" / {planned} ({100.0 * spawned / planned:.0f}%)"
+
+    active = _number(metrics.get("spawned_particle_count"))
+    planned = _number(metrics.get("planned_total_particle_count"))
+    if active is not None:
+        line = f"- Active particles: {_count(active)}"
+        if planned is not None:
+            line += f"/{_count(planned)} planned"
         parts.append(line)
-    if _g(metrics, "failed"):
-        parts.append(f"- **Stopped**: {_g(metrics, 'failure_reason', '')}")
-    elif _g(metrics, "success"):
-        parts.append("- **Stopped**: success criteria met")
-    return parts
 
-def _section_spatial(metrics: Dict[str, Any]) -> List[str]:
-    parts: List[str] = []
-    y_stats = _g(metrics, "particle_y_stats", {}) or {}
-    zone = _g(metrics, "zone_boundaries", {}) or {}
-    beam_margins = _g(metrics, "beam_build_zone_margins", []) or []
-    parts.append("### 2. Spatial Diagnostics with Margins")
-    small_ceil = zone.get("small_zone_y_max", 1.92)
-    medium_floor = zone.get("medium_zone_y_min", 1.92)
-    medium_ceil = zone.get("medium_zone_y_max", 2.52)
-    large_floor = zone.get("large_zone_y_min", 2.52)
-    build_x0 = zone.get("build_zone_x_min", 5.20)
-    build_x1 = zone.get("build_zone_x_max", 6.90)
-    build_y0 = zone.get("build_zone_y_min", 1.72)
-    build_y1 = zone.get("build_zone_y_max", 2.45)
-    feed_y0 = zone.get("feed_y_min", 3.0)
-    parts.append(f"\n**Zones**: Small y<{small_ceil} | "
-                 f"Medium {medium_floor}≤y<{medium_ceil} | "
-                 f"Large y≥{large_floor} | "
-                 f"Build x∈[{build_x0},{build_x1}] y∈[{build_y0},{build_y1}] | "
-                 f"Feed y≥{feed_y0}")
-    parts.append("\n**Particle Y positions:**")
-    for label, target_lo, target_hi in [
-        ("small", None, small_ceil),
-        ("medium", medium_floor, medium_ceil),
-        ("large", large_floor, None),
-    ]:
-        stats = y_stats.get(label, {}) or {}
-        cnt = stats.get("count", 0)
-        if cnt == 0:
-            parts.append(f"- {label.capitalize()}: 0 active")
+    event_by_wave: Dict[int, Dict[str, Any]] = {}
+    for raw_event in _list(metrics.get("wave_events")):
+        event = _dict(raw_event)
+        wave = _number(event.get("wave"))
+        if wave is not None:
+            event_by_wave[int(wave)] = event
+    for wave, schedule_key in ((2, "second_wave_step"), (3, "third_wave_step")):
+        event = event_by_wave.get(wave)
+        if event:
+            line = f"- Wave {wave}: triggered at step {_count(event.get('step'))}"
+            spawned = _number(event.get("spawned_count"))
+            active_after = _number(event.get("active_count"))
+            if spawned is not None:
+                line += f", spawned {_count(spawned)}"
+            if active_after is not None:
+                line += f", active afterward {_count(active_after)}"
+            parts.append(line)
             continue
-        mn = stats.get("min")
-        mx = stats.get("max")
-        med = stats.get("median")
-        mean = stats.get("mean")
-        pos_str = (f"min={_fm(mn, 2)} med={_fm(med, 2)} "
-                   f"mean={_fm(mean, 2)} max={_fm(mx, 2)}")
-        margin_notes = []
-        if label == "small" and target_hi is not None and mx is not None:
-            m = target_hi - mx
-            if m < 0:
-                margin_notes.append(f"breached ceiling by {_fm(abs(m), 2)} m")
-            elif m < 0.3:
-                margin_notes.append(f"near ceiling ({_fm(m, 2)} m margin)")
-        elif label == "medium":
-            if target_lo is not None and mn is not None:
-                m_below = mn - target_lo
-                if m_below < 0:
-                    margin_notes.append(f"breached floor by {_fm(abs(m_below), 2)} m")
-                elif m_below < 0.3:
-                    margin_notes.append(f"near floor ({_fm(m_below, 2)} m)")
-            if target_hi is not None and mx is not None:
-                m_above = target_hi - mx
-                if m_above < 0:
-                    margin_notes.append(f"breached ceiling by {_fm(abs(m_above), 2)} m")
-                elif m_above < 0.3:
-                    margin_notes.append(f"near ceiling ({_fm(m_above, 2)} m)")
-        elif label == "large" and target_lo is not None and mn is not None:
-            m = mn - target_lo
-            if m < 0:
-                margin_notes.append(f"below floor by {_fm(abs(m), 2)} m")
-            elif m < 0.3:
-                margin_notes.append(f"near floor ({_fm(m, 2)} m)")
-        line = f"- {label.capitalize()} ({cnt}): {pos_str}"
-        if margin_notes:
-            line += f" [{', '.join(margin_notes)}]"
+        schedule = _number(metrics.get(schedule_key))
+        if schedule is not None:
+            state = "pending" if step is None or step < schedule else "not recorded"
+            parts.append(f"- Wave {wave}: {state} at scheduled step {_count(schedule)}")
+
+
+def _append_classification(parts: List[str], metrics: Dict[str, Any]) -> None:
+    parts.append("### Classification snapshot")
+    purity = _number(metrics.get("purity_percent"))
+    target = _number(metrics.get("min_purity_percent"))
+    if purity is not None:
+        line = f"- Purity: {_fmt(purity, 1)}%"
+        if target is not None:
+            margin = purity - target
+            line += f" against {_fmt(target, 1)}% target (margin {_fmt(margin, 1)} pp)"
         parts.append(line)
-    s_above = _g(metrics, "small_above_sieve")
-    s_band = _g(metrics, "small_in_sieve_band")
-    s_large = _g(metrics, "small_in_large_zone")
-    m_small = _g(metrics, "medium_in_small_zone")
-    m_ok = _g(metrics, "medium_in_medium_zone")
-    m_large = _g(metrics, "medium_in_large_zone")
-    l_small = _g(metrics, "large_in_small_zone")
-    l_band = _g(metrics, "large_in_sieve_band")
-    l_below = _g(metrics, "large_below_sieve")
-    have_sieve = any(v is not None for v in [s_above, s_band, s_large,
-                                              m_small, m_ok, m_large,
-                                              l_small, l_band, l_below])
-    if have_sieve:
-        parts.append("\n**Sieve transit (zone counts):**")
-        s_parts = []
-        if s_above is not None:
-            s_parts.append(f"above={s_above}")
-        if s_band is not None:
-            s_parts.append(f"band={s_band}")
-        if s_large is not None:
-            s_parts.append(f"large={s_large}")
-        if s_parts:
-            parts.append(f"- Small: {', '.join(s_parts)}")
-        m_parts = []
-        if m_small is not None:
-            m_parts.append(f"small={m_small}")
-        if m_ok is not None:
-            m_parts.append(f"target={m_ok}")
-        if m_large is not None:
-            m_parts.append(f"large={m_large}")
-        if m_parts:
-            parts.append(f"- Medium: {', '.join(m_parts)}")
-        l_parts = []
-        if l_small is not None:
-            l_parts.append(f"small={l_small}")
-        if l_band is not None:
-            l_parts.append(f"band={l_band}")
-        if l_below is not None:
-            l_parts.append(f"below={l_below}")
-        if l_parts:
-            parts.append(f"- Large: {', '.join(l_parts)}")
-    if beam_margins:
-        violated = sum(1 for bm in beam_margins
-                       if bm.get("vertex_x_margin", 0) < 0 or bm.get("vertex_y_margin", 0) < 0)
-        tight = sum(1 for bm in beam_margins
-                    if (0 <= bm.get("vertex_x_margin", 0) < 0.05 or
-                        0 <= bm.get("vertex_y_margin", 0) < 0.05)
-                    and not (bm.get("vertex_x_margin", 0) < 0 or bm.get("vertex_y_margin", 0) < 0))
-        total = len(beam_margins)
-        status_parts = [f"{total} beams"]
-        if violated:
-            status_parts.append(f"{violated} VIOLATED")
-        if tight:
-            status_parts.append(f"{tight} TIGHT")
-        parts.append(f"\n**Beam build-zone margins**: {', '.join(status_parts)}")
-    else:
-        parts.append("\n**Beam build-zone margins**: No beams placed.")
-    return parts
 
-def _section_load(metrics: Dict[str, Any]) -> List[str]:
-    parts: List[str] = []
-    force_est = _g(metrics, "env_force_estimates", {}) or {}
-    parts.append("### 3. Load & Stress Distribution")
-    if not force_est:
-        parts.append("- Not available")
-        return parts
-    parts.append("\n**Per-class environmental forces:**")
-    for label, display in [("small", "Small"), ("medium", "Medium"), ("large", "Large")]:
-        fe = force_est.get(label, {})
-        cnt = fe.get("count", 0)
-        if cnt == 0:
-            parts.append(f"- {display}: 0 active")
+    class_rows = (
+        ("Small", "small_in_small_zone", "small"),
+        ("Medium", "medium_in_medium_zone", "medium"),
+        ("Large", "large_in_large_zone", "large"),
+    )
+    y_stats = _dict(metrics.get("particle_y_stats"))
+    correct_values: List[float] = []
+    for display, correct_key, stats_key in class_rows:
+        correct = _number(metrics.get(correct_key))
+        stats = _dict(y_stats.get(stats_key))
+        class_total = _number(stats.get("count"))
+        if correct is not None:
+            correct_values.append(correct)
+            line = f"- {display}: {_count(correct)} correctly classified"
+            if class_total is not None:
+                line += f"/{_count(class_total)} active"
+            parts.append(line)
+
+    active = _number(metrics.get("spawned_particle_count"))
+    if active is not None and len(correct_values) == 3:
+        correct_total = sum(correct_values)
+        parts.append(
+            f"- Total: {_count(correct_total)}/{_count(active)} correct; "
+            f"{_count(max(0.0, active - correct_total))} misrouted"
+        )
+
+    contamination = metrics.get("contaminated")
+    if isinstance(contamination, bool):
+        feed_y = _number(metrics.get("feed_y_min"))
+        suffix = f" below feed y={_fmt(feed_y)} m" if feed_y is not None else ""
+        parts.append(
+            f"- Cross-zone contamination diagnostic{suffix}: "
+            f"{'detected' if contamination else 'none'} (not a separate score gate)"
+        )
+
+
+def _append_observations(parts: List[str], metrics: Dict[str, Any]) -> None:
+    parts.append("### Observable particle state")
+    zones = _dict(metrics.get("zone_boundaries"))
+    zone_values = [
+        _number(zones.get("small_zone_y_max")),
+        _number(zones.get("medium_zone_y_min")),
+        _number(zones.get("medium_zone_y_max")),
+        _number(zones.get("large_zone_y_min")),
+    ]
+    if all(value is not None for value in zone_values):
+        small_max, medium_min, medium_max, large_min = zone_values
+        parts.append(
+            f"- Zone boundaries: small y<{_fmt(small_max)}; "
+            f"medium {_fmt(medium_min)}≤y<{_fmt(medium_max)}; "
+            f"large y≥{_fmt(large_min)}"
+        )
+
+    y_stats = _dict(metrics.get("particle_y_stats"))
+    velocity_stats = _dict(metrics.get("particle_velocity_stats"))
+    emitted = False
+    for label in ("small", "medium", "large"):
+        ys = _dict(y_stats.get(label))
+        vs = _dict(velocity_stats.get(label))
+        count = _number(ys.get("count"))
+        if count is None:
+            count = _number(vs.get("count"))
+        if count is None:
             continue
-        fx = fe.get("fx_total", 0)
-        wind_x = fe.get("wind_x", 0)
-        avg_m = fe.get("avg_mass", 0)
-        parts.append(f"- {display} ({cnt}, avg {_fm(avg_m, 2)} kg): "
-                     f"fx_total={_fm(fx, 1)} N (wind_x={_fm(wind_x, 1)} N)")
-    return parts
+        emitted = True
+        line = f"- {label.capitalize()} ({_count(count)} active)"
+        if count > 0 and any(_number(ys.get(key)) is not None for key in ("min", "median", "max")):
+            line += (
+                f": y min/median/max={_fmt(ys.get('min'))}/"
+                f"{_fmt(ys.get('median'))}/{_fmt(ys.get('max'))} m"
+            )
+        if count > 0 and any(_number(vs.get(key)) is not None for key in ("median", "max")):
+            line += (
+                f"; speed median/max={_fmt(vs.get('median'))}/"
+                f"{_fmt(vs.get('max'))} m/s"
+            )
+        parts.append(line)
+    if not emitted:
+        parts.append("- Particle position and speed summaries unavailable")
 
-def _section_energy(metrics: Dict[str, Any]) -> List[str]:
-    parts: List[str] = []
-    ke = _g(metrics, "total_kinetic_energy", None)
-    physics = _g(metrics, "physics_summary", {}) or {}
-    parts.append("### 4. Energy & Power Flow")
-    if ke is not None:
-        parts.append(f"- **Total particle kinetic energy**: {_fm(ke, 2)} J")
-    else:
-        parts.append("- **Total particle kinetic energy**: not available")
-    beam_fric = physics.get("beam_friction", 0.4)
-    if beam_fric == 0:
-        parts.append(f"- **Beam friction**: 0.0 — zero passive holding")
-    return parts
 
-def _section_constraints(metrics: Dict[str, Any]) -> List[str]:
-    parts: List[str] = []
-    parts.append("### 5. Constraint Satisfaction Profile")
-    parts.append("\n**Build-time constraints:**")
-    mass = _g(metrics, "structure_mass")
-    max_mass = _g(metrics, "max_structure_mass")
+def _append_constraints(parts: List[str], metrics: Dict[str, Any]) -> None:
+    parts.append("### Construction and integrity")
+    mass = _number(metrics.get("structure_mass"))
+    max_mass = _number(metrics.get("max_structure_mass"))
     if mass is not None and max_mass is not None:
-        margin = max_mass - mass
-        if margin >= 0:
-            pct = 100.0 * mass / max_mass if max_mass > 0 else 0
-            status = "PASS"
-            if pct > 70:
-                status += f" (near-limit: {pct:.1f}% used)"
-            parts.append(f"- **Mass budget**: {_fm(mass, 2)} / {_fm(max_mass, 2)} kg "
-                         f"— margin {_fm(margin, 2)} kg [{status}]")
-        else:
-            parts.append(f"- **Mass budget**: {_fm(mass, 2)} / {_fm(max_mass, 2)} kg "
-                         f"— exceeded by {_fm(abs(margin), 2)} kg [FAIL]")
-    bc = _g(metrics, "beam_count")
-    max_b = _g(metrics, "max_beams")
-    if bc is not None and max_b is not None:
-        margin = int(max_b) - int(bc)
-        if margin >= 0:
-            pct = 100.0 * int(bc) / int(max_b) if int(max_b) > 0 else 0
-            status = "PASS"
-            if pct > 70:
-                status += f" (near-limit: {pct:.1f}% used)"
-            parts.append(f"- **Beam count**: {bc} / {max_b} — margin {margin} beam(s) [{status}]")
-        else:
-            parts.append(f"- **Beam count**: {bc} / {max_b} — exceeded by {abs(margin)} [FAIL]")
-    beam_margins = _g(metrics, "beam_build_zone_margins", []) or []
-    if beam_margins:
-        zone_ok = True
-        tight_beams = []
-        for bm in beam_margins:
-            x_m = bm.get("vertex_x_margin", 0)
-            y_m = bm.get("vertex_y_margin", 0)
-            if x_m < 0 or y_m < 0:
-                zone_ok = False
-            elif x_m < 0.05 or y_m < 0.05:
-                tight_beams.append((bm.get("beam_index", "?"), x_m, y_m))
-        if zone_ok:
-            parts.append(f"- **Build zone containment**: PASS — all {len(beam_margins)} beams within bounds")
-            if tight_beams:
-                for idx, xm, ym in tight_beams:
-                    parts.append(f"  - Beam {idx}: TIGHT — x-margin={_fm(xm, 4)} m, y-margin={_fm(ym, 4)} m")
-    else:
-        parts.append("- **Build zone containment**: N/A — no beams placed")
-    broken = _g(metrics, "structure_broken", False)
-    jc = _g(metrics, "joint_count", 0)
-    if broken:
-        parts.append(f"- **Structure integrity**: FAILED — ({jc} joints)")
-    else:
-        parts.append(f"- **Structure integrity**: PASS — {jc} joints intact")
-    parts.append("\n**Runtime constraints:**")
-    purity = _g(metrics, "purity_percent")
-    min_purity = _g(metrics, "min_purity_percent")
-    if purity is not None and min_purity is not None:
-        margin = purity - min_purity
-        if margin >= 0:
-            status = "PASS"
-            if margin < 10:
-                status += f" (near-limit: {purity:.1f}%, target ≥{min_purity:.1f}%)"
-            parts.append(f"- **Classification purity**: {purity:.1f}% — "
-                         f"margin +{_fm(margin, 1)} pp above {min_purity:.1f}% target [{status}]")
-        else:
-            parts.append(f"- **Classification purity**: {purity:.1f}% — "
-                         f"shortfall {_fm(abs(margin), 1)} pp below {min_purity:.1f}% target [FAIL]")
-    contaminated = _g(metrics, "contaminated", None)
-    if contaminated is not None:
-        parts.append(f"- **Cross-zone contamination below feed (y<{_g(metrics, 'feed_y_min', 3.0)} m)**: "
-                     f"{'DETECTED' if contaminated else 'NONE'}")
-    s_ok = _g(metrics, "small_in_small_zone", 0) or 0
-    m_ok = _g(metrics, "medium_in_medium_zone", 0) or 0
-    l_ok = _g(metrics, "large_in_large_zone", 0) or 0
-    correct = s_ok + m_ok + l_ok
-    spawned_c = _g(metrics, "spawned_particle_count", 0) or 0
-    if spawned_c > 0:
-        misrouted = spawned_c - correct
-        parts.append(f"- **Correct/total**: {correct}/{spawned_c} ({_pct_str(correct, spawned_c)}) "
-                     f"— {misrouted} misrouted")
-    return parts
+        parts.append(
+            f"- Structure mass: {_fmt(mass, 3)}/{_fmt(max_mass, 3)} kg "
+            f"(margin {_fmt(max_mass - mass, 3)} kg)"
+        )
+    beams = _number(metrics.get("beam_count"))
+    max_beams = _number(metrics.get("max_beams"))
+    if beams is not None and max_beams is not None:
+        parts.append(
+            f"- Beam count: {_count(beams)}/{_count(max_beams)} "
+            f"(margin {_count(max_beams - beams)})"
+        )
 
-def _section_numerical(metrics: Dict[str, Any]) -> List[str]:
-    parts: List[str] = []
-    nh = _g(metrics, "numerical_health", {}) or {}
-    parts.append("### 6. Numerical Health")
-    nan_flag = nh.get("nan_detected", False)
-    inf_flag = nh.get("inf_detected", False)
-    extreme = nh.get("extreme_velocity_events", []) or []
-    if not nan_flag and not inf_flag and not extreme:
-        parts.append("- All clean: no NaN, Inf, or extreme velocity events")
-        return parts
-    if nan_flag:
-        parts.append("- **NaN detected**: YES")
-    else:
-        parts.append("- **NaN detected**: No")
-    if inf_flag:
-        parts.append("- **Inf detected**: YES")
-    else:
-        parts.append("- **Inf detected**: No")
-    if extreme:
-        parts.append(f"\n**Extreme velocity events (>100 m/s):** {len(extreme)} detected")
-        for ev in extreme[:6]:
-            parts.append(f"- {ev.get('class', '?').capitalize()}: "
-                         f"speed={_fm(ev.get('speed', 0), 1)} m/s "
-                         f"v=({_fm(ev.get('vx', 0), 1)}, {_fm(ev.get('vy', 0), 1)})")
-        if len(extreme) > 6:
-            parts.append(f"  ... and {len(extreme) - 6} more")
-    else:
-        parts.append("- **Extreme velocity events (>100 m/s)**: None")
-    if nan_flag or inf_flag or extreme:
-        vel_stats = _g(metrics, "particle_velocity_stats", {}) or {}
-        parts.append("\n**Velocity statistics:**")
-        for label, display in [("small", "Small"), ("medium", "Medium"), ("large", "Large")]:
-            vs = vel_stats.get(label, {}) or {}
-            cnt = vs.get("count", 0)
-            if cnt == 0:
-                parts.append(f"- {display}: 0 active")
-            else:
-                extreme_count = sum(1 for ev in extreme if ev.get("class") == label)
-                flag = f" ({extreme_count} extreme)" if extreme_count > 0 else ""
-                parts.append(f"- {display} ({cnt}): "
-                             f"min={_fm(vs.get('min', 0), 2)} m/s, "
-                             f"median={_fm(vs.get('median', 0), 2)} m/s, "
-                             f"max={_fm(vs.get('max', 0), 2)} m/s{flag}")
-    return parts
+    margins: List[float] = []
+    violations = 0
+    for raw_margin in _list(metrics.get("beam_build_zone_margins")):
+        record = _dict(raw_margin)
+        for key in ("vertex_x_margin", "vertex_y_margin"):
+            margin = _number(record.get(key))
+            if margin is not None:
+                margins.append(margin)
+                if margin < 0:
+                    violations += 1
+    if margins:
+        parts.append(
+            f"- Build-zone footprint: worst vertex margin {_fmt(min(margins), 4)} m; "
+            f"{violations} negative margin(s)"
+        )
+    elif beams == 0:
+        parts.append("- Build-zone footprint: no beams placed")
 
-def _section_constraint_violations(metrics: Dict[str, Any]) -> List[str]:
-    parts: List[str] = []
-    violations = _g(metrics, "constraint_violations", []) or []
-    parts.append("### 1. Design Constraint Violations (Build Phase)")
-    parts.append(f"- Step: {_g(metrics, 'step_count', 'N/A')}")
-    for v in violations:
-        parts.append(f"- Violation: {v}")
-    if not violations:
-        parts.append("- No violations recorded")
-    return parts
+    broken = metrics.get("structure_broken")
+    joints = _number(metrics.get("joint_count"))
+    initial_joints = _number(metrics.get("initial_joint_count"))
+    if isinstance(broken, bool):
+        line = f"- Structure integrity: {'lost' if broken else 'intact'}"
+        if joints is not None:
+            line += f"; joints {_count(joints)}"
+            if initial_joints is not None:
+                line += f"/{_count(initial_joints)} initial"
+        break_step = _number(metrics.get("structure_break_step"))
+        if break_step is not None:
+            line += f"; first detected at step {_count(break_step)}"
+        parts.append(line)
+
+
+def _append_numerical(parts: List[str], metrics: Dict[str, Any]) -> None:
+    health = _dict(metrics.get("numerical_health"))
+    if not health:
+        return
+    parts.append("### Numerical snapshot")
+    nan_flag = health.get("nan_detected") is True
+    inf_flag = health.get("inf_detected") is True
+    extreme_count = _number(health.get("extreme_velocity_count"))
+    if extreme_count is None:
+        extreme_count = float(len(_list(health.get("extreme_velocity_events"))))
+    parts.append(
+        f"- Non-finite state flags: NaN={'yes' if nan_flag else 'no'}, "
+        f"Inf={'yes' if inf_flag else 'no'}"
+    )
+    parts.append(f"- Current active particles above 100 m/s: {_count(extreme_count)}")
+
 
 def format_task_metrics(metrics: Dict[str, Any]) -> List[str]:
+    """Format only observable outcomes and declared task constraints."""
     if not isinstance(metrics, dict):
-        return ["**Error**: metrics is not a dict"]
-    if _g(metrics, "constraint_violations"):
-        return _section_constraint_violations(metrics)
+        return ["**Evaluation error**: metrics must be a dictionary"]
     if "error" in metrics:
-        parts = ["### 1. Evaluation Error"]
-        parts.append(f"- Error: {metrics.get('error', 'Unknown')}")
-        parts.append(f"- Step: {_g(metrics, 'step_count', 'N/A')}")
+        return [
+            "## F_04 evaluation error",
+            f"- Error: {metrics.get('error')}",
+            f"- Step: {_count(metrics.get('step_count'))}",
+        ]
+
+    violations = _list(metrics.get("constraint_violations"))
+    if violations:
+        parts = [
+            "## F_04 build-phase result",
+            "- Status: failed before simulation",
+            f"- Step: {_count(metrics.get('step_count'))}",
+        ]
+        parts.extend(f"- Constraint violation: {violation}" for violation in violations)
         return parts
-    parts: List[str] = []
-    purity = _g(metrics, "purity_percent")
-    min_p = _g(metrics, "min_purity_percent")
-    parts.append("## Forensic Diagnostic Report — F_04 (Three-way Filter)")
-    if _g(metrics, "failed"):
-        parts.append(f"**Status**: FAILED — {_g(metrics, 'failure_reason', 'unknown reason')}")
-    elif _g(metrics, "success"):
-        parts.append("**Status**: SUCCESS")
+
+    parts: List[str] = ["## F_04 evaluation trace"]
+    if metrics.get("failed") is True:
+        parts.append(f"- Status: failed — {metrics.get('failure_reason') or 'reason unavailable'}")
+    elif metrics.get("success") is True:
+        parts.append("- Status: success")
     else:
-        parts.append("**Status**: INCOMPLETE (intermediate snapshot)")
-    if purity is not None:
-        parts.append(f"**Purity**: {purity:.1f}% / {min_p:.1f}% target "
-                     f"({'ABOVE' if purity >= (min_p or 0) else 'BELOW'} threshold)")
-    try:
-        temporal = _section_temporal(metrics)
-        if temporal:
-            parts.append("")
-            parts.extend(temporal)
-    except Exception:
+        parts.append("- Status: simulation in progress")
+
+    for appender in (
+        _append_timeline,
+        _append_classification,
+        _append_observations,
+        _append_constraints,
+        _append_numerical,
+    ):
         parts.append("")
-        parts.append("### 1. Temporal Event Chronology")
-        parts.append("- Error generating temporal section")
-    try:
-        spatial = _section_spatial(metrics)
-        if spatial:
-            parts.append("")
-            parts.extend(spatial)
-    except Exception:
-        parts.append("")
-        parts.append("### 2. Spatial Diagnostics with Margins")
-        parts.append("- Error generating spatial section")
-    try:
-        load = _section_load(metrics)
-        if load:
-            parts.append("")
-            parts.extend(load)
-    except Exception:
-        parts.append("")
-        parts.append("### 3. Load & Stress Distribution")
-        parts.append("- Error generating load section")
-    try:
-        energy = _section_energy(metrics)
-        if energy:
-            parts.append("")
-            parts.extend(energy)
-    except Exception:
-        parts.append("")
-        parts.append("### 4. Energy & Power Flow")
-        parts.append("- Error generating energy section")
-    try:
-        constraints = _section_constraints(metrics)
-        if constraints:
-            parts.append("")
-            parts.extend(constraints)
-    except Exception:
-        parts.append("")
-        parts.append("### 5. Constraint Satisfaction Profile")
-        parts.append("- Error generating constraints section")
-    try:
-        numerical = _section_numerical(metrics)
-        if numerical:
-            parts.append("")
-            parts.extend(numerical)
-    except Exception:
-        parts.append("")
-        parts.append("### 6. Numerical Health")
-        parts.append("- Error generating numerical-health section")
+        appender(parts, metrics)
     return parts
+
 
 def get_improvement_suggestions(
     metrics: Dict[str, Any],
@@ -465,30 +289,6 @@ def get_improvement_suggestions(
     error: str = None,
 
 ) -> List[str]:
-    suggestions: List[str] = []
     if error:
-        error_lower = str(error).lower()
-        if "unexpected keyword argument" in error_lower:
-            suggestions.append("- A function was called with an unsupported keyword argument. "
-                               "Check the API documentation for allowed parameters.")
-        if "prohibited" in error_lower or "attribute" in error_lower:
-            suggestions.append("- An operation was blocked or an attribute was accessed that is not "
-                               "exposed by the sandbox API. Only use the documented primitives.")
-        if "build zone" in error_lower or "footprint extends" in error_lower:
-            suggestions.append("- One or more beams extend outside the build zone. "
-                               "Stay within the allowed region.")
-    if failed and failure_reason:
-        fr = str(failure_reason).lower()
-        if "build zone" in fr:
-            suggestions.append("- Beams must be fully contained in the build zone. "
-                               "Check beam widths, heights, and placement.")
-        if "constraint violat" in fr or "exceeds maximum" in fr:
-            suggestions.append("- A design constraint was breached (mass, beam count, or build zone). "
-                               "Reduce structure size or rebalance the design.")
-        if "structure integrity" in fr or "structure broken" in fr:
-            suggestions.append("- The structure collapsed or shifted. Use only static beams "
-                               "and ensure rigid connections.")
-        if "purity" in fr:
-            suggestions.append("- Classification purity is below the required threshold. "
-                               "Review per-zone counts and particle height distributions in the diagnostic report.")
-    return suggestions
+        return [f"- Resolve the reported execution error: {error}"]
+    return []

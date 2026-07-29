@@ -1,8 +1,8 @@
+from pace_bench.tasks.stage_prompt import uniform_suffix_for_task
+
 from typing import Any, Dict, List, Optional, Tuple
 
 import re
-
-import warnings
 
 from pace_bench.tasks.categories.Category5_Cybernetics_Control.C_04 import environment as c04_env
 
@@ -104,13 +104,6 @@ def _fmt_impulse_ns(v: float) -> str:
         return f"{iv} N·s"
     return f"{v:.1f} N·s"
 
-_WHISKER_BLIND_NOTE = ""
-
-def _position_delay_reported_tail(delay_steps: int) -> str:
-    if delay_steps <= 0:
-        return ""
-    return "Reported position lags physical state by the configured number of steps."
-
 def _configs_differ_from_base(
     tt: Optional[Dict[str, Any]],
     tp_raw: Optional[Dict[str, Any]],
@@ -188,34 +181,20 @@ def _configs_differ_from_base(
 
 _UNIFORM_SUFFIX_GRAVITY_BULLET = ""
 
-_UNIFORM_SUFFIX_BULLETS_REST = """ - **Control Lag**: May have changed from the nominal environment.
- - **Whisker Blindness**: May have changed from the nominal environment (proximity sensing in certain spatial zones).
- - **Viscous Fluid Drag**: May have changed from the nominal environment.
- - **Stochastic forcing / turbulence**: Random lateral disturbances may differ from the nominal environment.
- - **Control Reversal Zone**: May have changed from the nominal environment.
- - **Magnetic Floor Anomaly**: May have changed from the nominal environment (low-altitude zone).
- - **Structural Fragility**: The collision impulse threshold above which structural failure occurs may have changed; use feedback to infer the current limit and avoid high-speed impacts.
- - **Dynamic Terrain Obstruction**: Wall configurations may have changed from the standard layout.
-
-**Discovery via feedback**: Your objective is to identify the underlying physical rules of this specific environment through trial and reasoning. Initial standard solutions may fail; analyze the failure mode to infer hidden constraints and adapt your design.
-"""
+_UNIFORM_SUFFIX_BULLETS_REST = uniform_suffix_for_task("C_04")
 
 def _uniform_suffix(include_gravity_mutation: bool) -> str:
-    header = """## Environmental Anomalies Detected
-Sensors indicate that this region exhibits non-standard physical properties.
-While the following variables **MIGHT** have changed from the initial environment, **NOT ALL** of them will necessarily be mutated in any given task. You must use active interaction and environmental feedback to deduce which specific conditions apply:
-"""
-    g = _UNIFORM_SUFFIX_GRAVITY_BULLET if include_gravity_mutation else ""
-    return header + g + _UNIFORM_SUFFIX_BULLETS_REST
+    del include_gravity_mutation
+    return uniform_suffix_for_task("C_04")
 
 def _build_environmental_anomalies_suffix_curriculum_union() -> str:
     return _uniform_suffix(include_gravity_mutation=False).strip()
 
-UNIFORM_SUFFIX = _build_environmental_anomalies_suffix_curriculum_union()
+UNIFORM_SUFFIX = uniform_suffix_for_task("C_04")
 
 MUTATED_SUCCESS_CRITERIA_POINTER = """
 ---
-**Mutated environment:** The **Environmental Anomalies Detected** section at the end of the Task Environment above lists physical channels that may differ from the source environment; apply that notice when solving this stage.
+**Mutated environment:** The **Possible Environment Variations** section at the end of the Task Environment lists physical channels that may differ from the source environment; apply that notice when solving this stage.
 """
 
 def update_task_description_for_visible_changes(
@@ -238,20 +217,17 @@ def update_task_description_for_visible_changes(
         labels = ["floor", "ceiling", "left wall", "right wall"]
         base_parts = ws_base_03.split("; ")
         tgt_parts = ws_tgt_03.split("; ")
-        base_labeled = "; ".join(f"{l} {p}" for l, p in zip(labels, base_parts))
-        tgt_labeled = "; ".join(f"{l} {p}" for l, p in zip(labels, tgt_parts))
-        if re.search(pat, description):
-            description = re.sub(
-                pat,
-                lambda m: f"{m.group(1)}{tgt_labeled} (originally {base_labeled} in the source environment){m.group(3)}",
-                description,
-                count=1,
-            )
-        else:
-            warnings.warn(
-                "C_04 stages: maze outer shell mutation but outer-shell regex did not match.",
-                RuntimeWarning,
-                stacklevel=2,
+        base_labeled = "; ".join(f"{label} {part}" for label, part in zip(labels, base_parts))
+        tgt_labeled = "; ".join(f"{label} {part}" for label, part in zip(labels, tgt_parts))
+        description, match_count = re.subn(
+            pat,
+            lambda m: f"{m.group(1)}{tgt_labeled} (originally {base_labeled} in the source environment){m.group(3)}",
+            description,
+            count=1,
+        )
+        if match_count != 1:
+            raise ValueError(
+                "C_04 stages: maze outer-shell prompt replacement count was not one"
             )
     ws_base_46 = _effective_walls_subset(bt, [4, 5, 6])
     ws_tgt_46 = _effective_walls_subset(tt, [4, 5, 6])
@@ -259,222 +235,32 @@ def update_task_description_for_visible_changes(
         pat = r"(- \*\*Maze walls \(indices 4-6; lower-left x, y, width, height in m\)\*\*: )(.*?)(\.\n|$)"
         tgt_labeled_46 = _labeled_inner_walls_subset(tt, [4, 5, 6])
         base_labeled_46 = _labeled_inner_walls_subset(bt, [4, 5, 6])
-        if re.search(pat, description):
-            description = re.sub(
-                pat,
-                lambda m: f"{m.group(1)}{tgt_labeled_46} (originally {base_labeled_46} in the source environment){m.group(3)}",
-                description,
-                count=1,
-            )
-        else:
-            warnings.warn(
-                "C_04 stages: maze wall mutation but wall line regex did not match.", RuntimeWarning, stacklevel=2
-            )
-    blo, bhi = float(bt.get("whisker_blind_front_x_lo", -999.0)), float(bt.get("whisker_blind_front_x_hi", -999.0))
-    tlo, thi = float(tt.get("whisker_blind_front_x_lo", -999.0)), float(tt.get("whisker_blind_front_x_hi", -999.0))
-    base_blind = "none" if not _blind_active(blo, bhi) else f"x in [{blo:.1f}, {bhi:.1f}] m"
-    tgt_blind = "none" if not _blind_active(tlo, thi) else f"x in [{tlo:.1f}, {thi:.1f}] m"
-    if tgt_blind != base_blind or (tgt_blind != "none" and base_blind == "none"):
-        if _blind_active(tlo, thi) and not _blind_active(blo, bhi):
-            new_val = f"x in [{tlo:.1f}, {thi:.1f}] m (originally none in the source environment)"
-        elif not _blind_active(tlo, thi) and _blind_active(blo, bhi):
-            new_val = f"none (originally x in [{blo:.1f}, {bhi:.1f}] m in the source environment)"
-        elif _blind_active(tlo, thi) and _blind_active(blo, bhi) and (tlo != blo or thi != bhi):
-            new_val = f"x in [{tlo:.1f}, {thi:.1f}] m (originally x in [{blo:.1f}, {bhi:.1f}] m in the source environment)"
-        else:
-            new_val = None
-        if new_val:
-            pat = r"(- \*\*Whisker blind band along x \(m\)\*\*: )(.*?)(?=\s\()"
-            if re.search(pat, description):
-                description = re.sub(pat, lambda m: f"{m.group(1)}{new_val}", description, count=1)
-            else:
-                warnings.warn(
-                    "C_04 stages: whisker blind mutation but blind-band regex did not match.", RuntimeWarning, stacklevel=2
-                )
-    if int(tp["control_lag_steps"]) != int(bp["control_lag_steps"]):
-        pat = r"(- \*\*Control lag \(simulation steps before commanded force takes effect\)\*\*: )(.*?)(\.\n|$)"
-        if re.search(pat, description):
-            new_val = tp["control_lag_steps"]
-            old_val = bp["control_lag_steps"]
-            description = re.sub(
-                pat,
-                lambda m: f"{m.group(1)}{new_val} (originally {old_val} in the source environment){m.group(3)}",
-                description,
-                count=1,
-            )
-        else:
-            warnings.warn(
-                "C_04 stages: control_lag mutation but control lag regex did not match.", RuntimeWarning, stacklevel=2
-            )
-    oxb = float(bt.get("oneway_x", _DEFAULT_TERRAIN_DELAY["oneway_x"]))
-    oxt = float(tt.get("oneway_x", _DEFAULT_TERRAIN_DELAY["oneway_x"]))
-    ofb = float(bp.get("oneway_force_right", _DEFAULT_PHYSICS["oneway_force_right"]))
-    oft = float(tp.get("oneway_force_right", _DEFAULT_PHYSICS["oneway_force_right"]))
-    if oxt != oxb or oft != ofb:
-        pat = r"(- \*\*One-way rightward assist\*\*: )(.*?)(\.\n|$)"
-        if re.search(pat, description):
-            new_one = f"While reported x > {oxt:.1f} m, an additional constant +{oft:.1f} N horizontal force acts on the agent in +x (originally While reported x > {oxb:.1f} m, an additional constant +{ofb:.1f} N horizontal force)"
-            description = re.sub(pat, lambda m: f"{m.group(1)}{new_one}{m.group(3)}", description, count=1)
-        else:
-            warnings.warn(
-                "C_04 stages: one-way assist mutation but one-way regex did not match.", RuntimeWarning, stacklevel=2
-            )
-    lkb = float(bp["lock_gate_fx"])
-    lkt = float(tp["lock_gate_fx"])
-    if lkt != lkb:
-        pat = r"(- \*\*Unlock condition.*?additional repelling horizontal force of \*\*)(.*?)(\*\* N in −x)"
-        if re.search(pat, description):
-            description = re.sub(
-                pat,
-                lambda m: f"{m.group(1)}{lkt:.1f} N (originally {lkb:.1f} N in the source environment){m.group(3)}",
-                description,
-                count=1,
-            )
-        else:
-            warnings.warn(
-                "C_04 stages: lock_gate_fx mutation but lock-force regex did not match.",
-                RuntimeWarning,
-                stacklevel=2,
-            )
-    lkb_lo, lkb_hi = float(bp["lock_gate_x_min"]), float(bp["lock_gate_x_max"])
-    lkt_lo, lkt_hi = float(tp["lock_gate_x_min"]), float(tp["lock_gate_x_max"])
-    if (lkt_lo, lkt_hi) != (lkb_lo, lkb_hi):
-        pat = r"(- \*\*Unlock condition:.*?x is in \[)(.*?)(\] m \(an additional)"
-        if re.search(pat, description):
-            description = re.sub(
-                pat,
-                lambda m: f"{m.group(1)}{lkt_lo:.1f}, {lkt_hi:.1f}] m (originally [{lkb_lo:.1f}, {lkb_hi:.1f}] m in the source environment){m.group(3)}",
-                description,
-                count=1,
-            )
-        else:
-            warnings.warn(
-                "C_04 stages: lock_gate_x mutation but lock-band regex did not match.",
-                RuntimeWarning,
-                stacklevel=2,
-            )
-    axb_lo, axb_hi = float(bp["activation_x_min"]), float(bp["activation_x_max"])
-    axt_lo, axt_hi = float(tp["activation_x_min"]), float(tp["activation_x_max"])
-    if (axt_lo, axt_hi) != (axb_lo, axb_hi):
-        pat = r"(- \*\*Unlock condition:.*?position x in \[)(.*?)(\] m with)"
-        if re.search(pat, description):
-            description = re.sub(
-                pat,
-                lambda m: f"{m.group(1)}{axt_lo:.1f}, {axt_hi:.1f}] m (originally [{axb_lo:.1f}, {axb_hi:.1f}] m in the source environment){m.group(3)}",
-                description,
-                count=1,
-            )
-        else:
-            warnings.warn(
-                "C_04 stages: activation_x mutation but activation-band regex did not match.",
-                RuntimeWarning,
-                stacklevel=2,
-            )
-    fxt, fxb = float(tp["backward_fx_threshold"]), float(bp["backward_fx_threshold"])
-    st, sb = float(tp["backward_speed_max"]), float(bp["backward_speed_max"])
-    nt, nb = int(tp["backward_steps_required"]), int(bp["backward_steps_required"])
-    if fxt != fxb:
-        fx_pat = r"(- \*\*Unlock condition:.*?commanded horizontal Fx \(after control lag\) \*\*)(.*?)( N \(e\.g\.)"
-        qual = int(round(fxt - 1.0))
-        qual_b = int(round(fxb - 1.0))
-        rep = f"{m.group(1)}{fxt:.1f} N (originally {fxb:.1f} N in the source environment) (e.g. {qual} N qualifies; {fxt:.1f} N does not)"
-        if re.search(fx_pat, description):
-            description = re.sub(fx_pat, lambda m: f"{m.group(1)}{fxt:.1f} N (originally {fxb:.1f} N in the source environment) (e.g. {qual} N qualifies; {fxt:.1f} N does not){m.group(3)}", description, count=1)
-        else:
-            warnings.warn(
-                "C_04 stages: backward_fx_threshold mutation but unlock Fx regex did not match.",
-                RuntimeWarning,
-                stacklevel=2,
-            )
-    if st != sb:
-        sp_pat = r"(- \*\*Unlock condition:.*?\*\*)(.*?)( m/s, and)"
-        if re.search(sp_pat, description):
-            description = re.sub(
-                sp_pat,
-                lambda m: f"{m.group(1)}< {st:.1f} m/s (originally < {sb:.1f} m/s in the source environment){m.group(3)}",
-                description,
-                count=1,
-            )
-        else:
-            warnings.warn(
-                "C_04 stages: backward_speed_max mutation but unlock speed regex did not match.",
-                RuntimeWarning,
-                stacklevel=2,
-            )
-    if nt != nb:
-        hold_rx = re.compile(
-            rf"for at least \*\*{re.escape(str(nb))}\*\* consecutive steps(?!\s+\(originally)",
+        description, match_count = re.subn(
+            pat,
+            lambda m: f"{m.group(1)}{tgt_labeled_46} (originally {base_labeled_46} in the source environment){m.group(3)}",
+            description,
+            count=1,
         )
-        new_steps = f"at least **{nt}** consecutive steps (originally **{nb}** steps in the source environment)"
-        description, n_hold = hold_rx.subn(new_steps, description, count=3)
-        if n_hold < 3:
-            warnings.warn(
-                "C_04 stages: backward_steps_required mutation but fewer than 3 consecutive-steps phrases matched.",
-                RuntimeWarning,
-                stacklevel=2,
+        if match_count != 1:
+            raise ValueError(
+                "C_04 stages: inner-wall prompt replacement count was not one"
             )
     tk, bk = float(tp["structural_impulse_scale_k"]), float(bp["structural_impulse_scale_k"])
     if tk != bk:
         am = float(c04_env.AGENT_MASS)
         imp_t, imp_b = tk * am, bk * am
-        pat = r"(- \*\*Structural k \(failure if collision normal impulse exceeds k \* agent mass)(.*?)(\*\*: k=)(.*?)( \(impulse threshold )"
-        if re.search(pat, description):
-            description = re.sub(
-                pat,
-                lambda m: f"{m.group(1)}{m.group(2)}{m.group(3)}{tk:.1f}{m.group(5)}{_fmt_impulse_ns(imp_t)} (originally k={bk:.1f}, impulse threshold {_fmt_impulse_ns(imp_b)} in the source environment)",
-                description,
-                count=1,
-            )
-        else:
-            warnings.warn(
-                "C_04 stages: structural k mutation but structural k regex did not match.", RuntimeWarning, stacklevel=2
-            )
-    wdb, pdb = _terrain_delays(bt)
-    wdt, pdt = _terrain_delays(tt)
-    if wdb != wdt:
-        pat = r"(- \*\*Whisker stream delay \(simulation steps\)\*\*: )(.*?)(\.\n|$)"
-        if re.search(pat, description):
-            description = re.sub(
-                pat,
-                lambda m: f"{m.group(1)}{wdt} (originally {wdb} simulation steps in the source environment).{m.group(3)}",
-                description,
-                count=1,
-            )
-        else:
-            warnings.warn(
-                "C_04 stages: whisker delay mutation but regex did not match.", RuntimeWarning, stacklevel=2
-            )
-    if pdb != pdt:
-        pat = r"(- \*\*Position report delay \(simulation steps\)\*\*: )(.*?)(\.\n|$)"
-        if re.search(pat, description):
-            new_tail = _position_delay_reported_tail(pdt)
-            description = re.sub(
-                pat,
-                lambda m: f"{m.group(1)}{pdt} (originally {pdb} simulation steps in the source environment). {new_tail}\n",
-                description,
-                count=1,
-            )
-        else:
-            warnings.warn(
-                "C_04 stages: position_delay_steps mutation but position delay regex did not match.",
-                RuntimeWarning,
-                stacklevel=2,
-            )
-    if int(tp["max_steps"]) != int(bp["max_steps"]):
-        pat = r"(- \*\*Time limit\*\*: At most )([\d,]+)( simulation steps)(\.)"
-        if re.search(pat, description):
-            description = re.sub(
-                pat,
-                lambda m: f"{m.group(1)}{tp['max_steps']:,} simulation steps (originally {bp['max_steps']:,} steps in the source environment){m.group(4)}",
-                description,
-                count=1,
-            )
-        else:
-            warnings.warn(
-                "C_04 stages: max_steps mutation but time limit regex did not match.",
-                RuntimeWarning,
-                stacklevel=2,
-            )
+        pat = r"(- \*\*Structural impulse limit\*\*: )(.*?)(\.\n|$)"
+        replacement = (
+            "Failure occurs when collision normal impulse exceeds "
+            f"{_fmt_impulse_ns(imp_t)} (originally "
+            f"{_fmt_impulse_ns(imp_b)} in the source environment)"
+        )
+        description, match_count = re.subn(
+            pat, lambda m: f"{m.group(1)}{replacement}{m.group(3)}",
+            description, count=1,
+        )
+        if match_count != 1:
+            raise ValueError("C_04 stages: structural-limit prompt replacement count was not one")
     return description.strip()
 
 def update_success_criteria_for_visible_changes(
@@ -497,27 +283,17 @@ def update_success_criteria_for_visible_changes(
     if tk != bk:
         imp_t, imp_b = tk * am, bk * am
         pat = r"(3\. \*\*Survival\*\*: )([^\n]+)"
-        if re.search(pat, criteria):
-            new_survival = f"Stay below the structural impulse limit: **{_fmt_impulse_ns(imp_t)}** at this stage (k={tk:.1f}); originally **{_fmt_impulse_ns(imp_b)}** (k={bk:.1f}) in the source environment."
-            criteria = re.sub(pat, lambda m: f"{m.group(1)}{new_survival}", criteria, count=1)
-        else:
-            warnings.warn(
-                "C_04 stages: structural k mutation but success criteria Survival regex did not match.",
-                RuntimeWarning,
-                stacklevel=2,
-            )
-    nb_hold, nt_hold = int(bp["backward_steps_required"]), int(tp["backward_steps_required"])
-    if nt_hold != nb_hold:
-        hold_crit_rx = re.compile(
-            rf"at least \*\*{re.escape(str(nb_hold))}\*\* consecutive steps(?!\s+\(originally)",
+        new_survival = (
+            "Stay below the structural impulse limit: "
+            f"**{_fmt_impulse_ns(imp_t)}** at this stage; originally "
+            f"**{_fmt_impulse_ns(imp_b)}** in the source environment."
         )
-        new_hold = f"at least **{nt_hold}** consecutive steps (originally **{nb_hold}** steps in the source environment)"
-        criteria, nhc = hold_crit_rx.subn(new_hold, criteria, count=1)
-        if nhc < 1:
-            warnings.warn(
-                "C_04 stages: backward_steps_required mutation but success criteria Hold line not updated.",
-                RuntimeWarning,
-                stacklevel=2,
+        criteria, match_count = re.subn(
+            pat, lambda m: f"{m.group(1)}{new_survival}", criteria, count=1
+        )
+        if match_count != 1:
+            raise ValueError(
+                "C_04 stages: structural success-criteria replacement count was not one"
             )
     if _configs_differ_from_base(tt, tp_raw, bt, bp, bp_raw):
         criteria = criteria.rstrip() + "\n" + MUTATED_SUCCESS_CRITERIA_POINTER.strip()
@@ -533,8 +309,8 @@ def get_c04_curriculum_stages() -> List[Dict[str, Any]]:
     return [
         {
             "stage_id": "Stage-1",
-            "title": "Inertial Fragility",
-            "mutation_description": "Longer actuation latency and a much lower collision impulse tolerance than nominal.",
+            "title": "Controller Adaptation I",
+            "mutation_description": "One or more listed environmental properties differ from the source environment.",
             "terrain_config": {},
             "physics_config": {
                 "control_lag_steps": 25,
@@ -542,12 +318,12 @@ def get_c04_curriculum_stages() -> List[Dict[str, Any]]:
                 "magnetic_floor_y_max": 1.6,
                 "magnetic_floor_force": -60.0,
             },
-            "task_description_suffix": UNIFORM_SUFFIX,
+            "task_description_suffix": uniform_suffix_for_task("C_04"),
         },
         {
             "stage_id": "Stage-2",
-            "title": "Blind Altitude Shift",
-            "mutation_description": "Whisker dropout over a forward x-band; interior walls lowered to the floor, removing crawl gaps.",
+            "title": "Altered Passage Geometry",
+            "mutation_description": "The visible inner-wall geometry differs; other listed properties may also differ.",
             "terrain_config": {
                 "whisker_blind_front_x_lo": 5.0,
                 "whisker_blind_front_x_hi": 13.0,
@@ -557,12 +333,12 @@ def get_c04_curriculum_stages() -> List[Dict[str, Any]]:
                 },
             },
             "physics_config": {},
-            "task_description_suffix": UNIFORM_SUFFIX,
+            "task_description_suffix": uniform_suffix_for_task("C_04"),
         },
         {
             "stage_id": "Stage-3",
-            "title": "Turbulent Narrowway",
-            "mutation_description": "Taller internal wall segment near x=5 m, adjusted obstacle geometry near x=9 m, viscous drag and random forcing in a mid-maze band, higher collision impulse ceiling.",
+            "title": "Altered Passage Adaptation",
+            "mutation_description": "The visible inner-wall geometry and exposed constraints differ; other listed properties may also differ.",
             "terrain_config": {
                 "wall_overrides": {
                     "4": (5.0, 0.0, 0.2, 1.7),
@@ -576,12 +352,12 @@ def get_c04_curriculum_stages() -> List[Dict[str, Any]]:
                 "turbulence_intensity": 80.0,
                 "structural_impulse_scale_k": 50.0,
             },
-            "task_description_suffix": UNIFORM_SUFFIX,
+            "task_description_suffix": uniform_suffix_for_task("C_04"),
         },
         {
             "stage_id": "Stage-4",
-            "title": "The Magnetic Reversal Storm",
-            "mutation_description": "Horizontal control inversion throughout the maze, strong downward bias near the floor, high turbulence; control lag matches the source environment (0 steps).",
+            "title": "Controller Adaptation IV",
+            "mutation_description": "One or more listed environmental properties and exposed constraints differ from the source environment.",
             "terrain_config": {},
             "physics_config": {
                 "control_reversal_x_min": 0.0,
@@ -592,6 +368,6 @@ def get_c04_curriculum_stages() -> List[Dict[str, Any]]:
                 "control_lag_steps": 0,
                 "structural_impulse_scale_k": 50.0,
             },
-            "task_description_suffix": UNIFORM_SUFFIX,
+            "task_description_suffix": uniform_suffix_for_task("C_04"),
         },
     ]

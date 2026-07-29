@@ -1,11 +1,7 @@
-import sys
-import os
 import pygame
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../..'))
-
 from pace_bench.renderer import Renderer
-from Box2D.b2 import dynamicBody, staticBody
+from Box2D.b2 import staticBody
 
 # ── Academic palette ──────────────────────────────────────────────
 COLOR_BG          = (254, 252, 248)  # near-white background
@@ -98,18 +94,19 @@ class E03Renderer(Renderer):
 
             # ── Target zone ────────────────────────────────────────
             tz = bounds.get("target_zone", {})
-            tx_min = tz.get("x_min", 28.0)
-            tx_max = tz.get("x_max", 32.0)
-            ty_min = tz.get("y_min", 2.2)
-            ty_max = tz.get("y_max", 2.8)
-            self.draw_line(tx_min, ty_min, tx_max, ty_min,
-                           COLOR_TARGET, 2)
-            self.draw_line(tx_max, ty_min, tx_max, ty_max,
-                           COLOR_TARGET, 2)
-            self.draw_line(tx_max, ty_max, tx_min, ty_max,
-                           COLOR_TARGET, 2)
-            self.draw_line(tx_min, ty_max, tx_min, ty_min,
-                           COLOR_TARGET, 2)
+            if all(key in tz for key in ("x_min", "x_max", "y_min", "y_max")):
+                tx_min = tz["x_min"]
+                tx_max = tz["x_max"]
+                ty_min = tz["y_min"]
+                ty_max = tz["y_max"]
+                self.draw_line(tx_min, ty_min, tx_max, ty_min,
+                               COLOR_TARGET, 2)
+                self.draw_line(tx_max, ty_min, tx_max, ty_max,
+                               COLOR_TARGET, 2)
+                self.draw_line(tx_max, ty_max, tx_min, ty_max,
+                               COLOR_TARGET, 2)
+                self.draw_line(tx_min, ty_max, tx_min, ty_min,
+                               COLOR_TARGET, 2)
 
         # ── Annotations ────────────────────────────────────────────
         if self.simulator.can_display:

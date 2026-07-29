@@ -165,12 +165,13 @@ def agent_action_stage_3(sandbox, agent_body, step_count):
     if step_count > 0 and step_count % gust_period == 0:
         gust_sign = 1.0 if (step_count // gust_period) % 2 == 0 else -1.0
         wx += gust_amp * gust_sign
+    small_mass = 340.0
+    medium_mass = 542.0
     for p in sandbox.get_particles_small():
         if not p.active:
             continue
-        m = p.mass
-        fx = -(m * gx + wx)
-        fy_base = -m * (osc_y + gy_net_up)
+        fx = -(small_mass * gx + wx)
+        fy_base = -small_mass * (osc_y + gy_net_up)
         y = p.position.y
         if y > 2.05:
             fy = fy_base - 15000.0
@@ -184,9 +185,8 @@ def agent_action_stage_3(sandbox, agent_body, step_count):
     for p in sandbox.get_particles_medium():
         if not p.active:
             continue
-        m = p.mass
-        fx = -(m * gx + wx)
-        fy_base = -m * (osc_y + gy_net_up)
+        fx = -(medium_mass * gx + wx)
+        fy_base = -medium_mass * (osc_y + gy_net_up)
         y = p.position.y
         if y > 2.55:
             fy = fy_base - 27500.0
@@ -229,12 +229,13 @@ def agent_action_stage_4(sandbox, agent_body, step_count):
     if step_count > 0 and step_count % gust_period == 0:
         gust_sign = 1.0 if (step_count // gust_period) % 2 == 0 else -1.0
         wx += gust_amp * gust_sign
+    small_mass = 350.0
+    medium_mass = 556.0
     for p in sandbox.get_particles_small():
         if not p.active:
             continue
-        m = p.mass
-        fx = -(m * gx + wx)
-        fy_base = -m * (osc_y + gy_net_up)
+        fx = -(small_mass * gx + wx)
+        fy_base = -small_mass * (osc_y + gy_net_up)
         y = p.position.y
         if y > 2.05:
             fy = fy_base - 6000.0
@@ -248,9 +249,8 @@ def agent_action_stage_4(sandbox, agent_body, step_count):
     for p in sandbox.get_particles_medium():
         if not p.active:
             continue
-        m = p.mass
-        fx = -(m * gx + wx)
-        fy_base = -m * (osc_y + gy_net_up)
+        fx = -(medium_mass * gx + wx)
+        fy_base = -medium_mass * (osc_y + gy_net_up)
         y = p.position.y
         if y > 2.55:
             fy = fy_base - 18000.0

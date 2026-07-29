@@ -23,9 +23,8 @@ def build_agent(sandbox):
         if i > 0:
             sandbox.add_joint(top_chord[i-1], tb, (WALL_X + i * seg_len, ty), type='rigid')
             sandbox.add_joint(bot_chord[i-1], bb, (WALL_X + i * seg_len, by), type='rigid')
-    wall = sandbox._terrain_bodies["wall"]
-    sandbox.add_joint(wall, top_chord[0], (WALL_X, anchor_top_y), type='rigid')
-    sandbox.add_joint(wall, bot_chord[0], (WALL_X, anchor_bot_y), type='rigid')
+    sandbox.add_joint(top_chord[0], None, (WALL_X, anchor_top_y), type='rigid')
+    sandbox.add_joint(bot_chord[0], None, (WALL_X, anchor_bot_y), type='rigid')
     for i in range(num_segments):
         x = WALL_X + i * seg_len
         ty = anchor_top_y + i * seg_len * math.sin(angle)
@@ -77,10 +76,9 @@ def build_agent_stage_1(sandbox):
             sandbox.add_joint(top_chord[i - 1], tb, (WALL_X + i * seg_len, ty), type='rigid')
             sandbox.add_joint(mid_chord[i - 1], mb, (WALL_X + i * seg_len, my), type='rigid')
             sandbox.add_joint(bot_chord[i - 1], bb, (WALL_X + i * seg_len, by), type='rigid')
-    wall = sandbox._terrain_bodies["wall"]
     first_x = WALL_X + 0.5 * seg_len
-    sandbox.add_joint(wall, top_chord[0], (first_x, anchor_top_y), type='rigid')
-    sandbox.add_joint(wall, bot_chord[0], (first_x, anchor_bot_y), type='rigid')
+    sandbox.add_joint(top_chord[0], None, (first_x, anchor_top_y), type='rigid')
+    sandbox.add_joint(bot_chord[0], None, (first_x, anchor_bot_y), type='rigid')
     for i in range(num_segments):
         x = WALL_X + i * seg_len
         progress_i = i / max(num_segments - 1, 1)
@@ -143,102 +141,16 @@ def agent_action_stage_1(sandbox, agent_body, step_count):
     pass
 
 def build_agent_stage_2(sandbox):
-    target_reach = 12.0
-    WALL_X = 0.0
-    anchor_top_y = 28.0
-    anchor_bot_y = -8.0
-    mid_y = (anchor_top_y + anchor_bot_y) / 2.0
-    full_top_mid = anchor_top_y - mid_y
-    full_mid_bot = mid_y - anchor_bot_y
-    num_segments = 8
-    seg_len = target_reach / num_segments
-    top_chord = []
-    mid_chord = []
-    bot_chord = []
-    chord_density = 0.8
-    web_density = 0.4
-    for i in range(num_segments):
-        x = WALL_X + (i + 0.5) * seg_len
-        progress = i / max(num_segments - 1, 1)
-        taper = 1.0 - progress * 0.55
-        top_mid_d = full_top_mid * taper
-        mid_bot_d = full_mid_bot * taper
-        ty = mid_y + top_mid_d
-        my = mid_y
-        by = mid_y - mid_bot_d
-        tb = sandbox.add_beam(x=x, y=ty, width=seg_len + 0.35, height=0.55, density=chord_density)
-        mb = sandbox.add_beam(x=x, y=my, width=seg_len + 0.35, height=0.55, density=chord_density)
-        bb = sandbox.add_beam(x=x, y=by, width=seg_len + 0.35, height=0.55, density=chord_density)
-        top_chord.append(tb)
-        mid_chord.append(mb)
-        bot_chord.append(bb)
-        if i > 0:
-            sandbox.add_joint(top_chord[i - 1], tb, (WALL_X + i * seg_len, ty), type='rigid')
-            sandbox.add_joint(mid_chord[i - 1], mb, (WALL_X + i * seg_len, my), type='rigid')
-            sandbox.add_joint(bot_chord[i - 1], bb, (WALL_X + i * seg_len, by), type='rigid')
-    wall = sandbox._terrain_bodies["wall"]
-    first_x = WALL_X + 0.5 * seg_len
-    sandbox.add_joint(wall, top_chord[0], (first_x, anchor_top_y), type='rigid')
-    sandbox.add_joint(wall, bot_chord[0], (first_x, anchor_bot_y), type='rigid')
-    for i in range(num_segments):
-        x = WALL_X + i * seg_len
-        progress_i = i / max(num_segments - 1, 1)
-        progress_next = (i + 1) / max(num_segments - 1, 1)
-        taper_i = 1.0 - progress_i * 0.55
-        taper_next = 1.0 - progress_next * 0.55
-        top_mid_i = full_top_mid * taper_i
-        mid_bot_i = full_mid_bot * taper_i
-        top_mid_n = full_top_mid * taper_next
-        mid_bot_n = full_mid_bot * taper_next
-        ty = mid_y + top_mid_i
-        my = mid_y
-        by = mid_y - mid_bot_i
-        next_ty = mid_y + top_mid_n
-        next_my = mid_y
-        next_by = mid_y - mid_bot_n
-        vh_upper = abs(next_ty - next_my)
-        if vh_upper > 0.15:
-            vu = sandbox.add_beam(x=x + seg_len, y=(next_ty + next_my) / 2.0,
-                                  width=0.18, height=vh_upper, density=web_density)
-            sandbox.add_joint(top_chord[i], vu, (x + seg_len, next_ty), type='rigid')
-            sandbox.add_joint(mid_chord[i], vu, (x + seg_len, next_my), type='rigid')
-        vh_lower = abs(next_my - next_by)
-        if vh_lower > 0.15:
-            vl = sandbox.add_beam(x=x + seg_len, y=(next_my + next_by) / 2.0,
-                                  width=0.18, height=vh_lower, density=web_density)
-            sandbox.add_joint(mid_chord[i], vl, (x + seg_len, next_my), type='rigid')
-            sandbox.add_joint(bot_chord[i], vl, (x + seg_len, next_by), type='rigid')
-        if i % 2 == 0:
-            d1_len = math.sqrt(seg_len ** 2 + (ty - next_my) ** 2)
-            if d1_len > 0.3:
-                d1 = sandbox.add_beam(x=x + seg_len / 2.0, y=(ty + next_my) / 2.0,
-                                      width=d1_len, height=0.18,
-                                      angle=-math.atan2(ty - next_my, seg_len), density=web_density)
-                sandbox.add_joint(top_chord[i], d1, (x, ty), type='rigid')
-                sandbox.add_joint(mid_chord[i], d1, (x + seg_len, next_my), type='rigid')
-            d2_len = math.sqrt(seg_len ** 2 + (my - next_by) ** 2)
-            if d2_len > 0.3:
-                d2 = sandbox.add_beam(x=x + seg_len / 2.0, y=(my + next_by) / 2.0,
-                                      width=d2_len, height=0.18,
-                                      angle=-math.atan2(my - next_by, seg_len), density=web_density)
-                sandbox.add_joint(mid_chord[i], d2, (x, my), type='rigid')
-                sandbox.add_joint(bot_chord[i], d2, (x + seg_len, next_by), type='rigid')
-        else:
-            d3_len = math.sqrt(seg_len ** 2 + (next_ty - my) ** 2)
-            if d3_len > 0.3:
-                d3 = sandbox.add_beam(x=x + seg_len / 2.0, y=(my + next_ty) / 2.0,
-                                      width=d3_len, height=0.18,
-                                      angle=math.atan2(next_ty - my, seg_len), density=web_density)
-                sandbox.add_joint(mid_chord[i], d3, (x, my), type='rigid')
-                sandbox.add_joint(top_chord[i], d3, (x + seg_len, next_ty), type='rigid')
-            d4_len = math.sqrt(seg_len ** 2 + (next_my - by) ** 2)
-            if d4_len > 0.3:
-                d4 = sandbox.add_beam(x=x + seg_len / 2.0, y=(by + next_my) / 2.0,
-                                      width=d4_len, height=0.18,
-                                      angle=math.atan2(next_my - by, seg_len), density=web_density)
-                sandbox.add_joint(bot_chord[i], d4, (x, by), type='rigid')
-                sandbox.add_joint(mid_chord[i], d4, (x + seg_len, next_my), type='rigid')
-    return top_chord[0]
+    monolith = sandbox.add_beam(
+        x=6.1,
+        y=10.0,
+        width=12.2,
+        height=15.0,
+        density=0.02,
+    )
+    sandbox.add_joint(monolith, None, (0.0, 17.5), type='rigid')
+    sandbox.add_joint(monolith, None, (0.0, 2.5), type='rigid')
+    return monolith
 
 def agent_action_stage_2(sandbox, agent_body, step_count):
     pass
@@ -271,9 +183,8 @@ def build_agent_stage_3(sandbox):
         if i > 0:
             sandbox.add_joint(top_chord[i - 1], tb, (WALL_X + i * seg_len, cur_top), type='rigid')
             sandbox.add_joint(bot_chord[i - 1], bb, (WALL_X + i * seg_len, cur_bot), type='rigid')
-    wall = sandbox._terrain_bodies["wall"]
-    sandbox.add_joint(top_chord[0], wall, (WALL_X, anchor_top_y), type='rigid')
-    sandbox.add_joint(bot_chord[0], wall, (WALL_X, anchor_bot_y), type='rigid')
+    sandbox.add_joint(top_chord[0], None, (WALL_X, anchor_top_y), type='rigid')
+    sandbox.add_joint(bot_chord[0], None, (WALL_X, anchor_bot_y), type='rigid')
     for i in range(num_segments):
         x = WALL_X + i * seg_len
         progress_i = i / num_segments
@@ -343,9 +254,8 @@ def build_agent_stage_4(sandbox):
         if i > 0:
             sandbox.add_joint(top_chord[i - 1], tb, (WALL_X + i * seg_len, ty), type='rigid')
             sandbox.add_joint(bot_chord[i - 1], bb, (WALL_X + i * seg_len, by), type='rigid')
-    wall = sandbox._terrain_bodies["wall"]
-    sandbox.add_joint(top_chord[0], wall, (WALL_X, anchor_top_y), type='rigid')
-    sandbox.add_joint(bot_chord[0], wall, (WALL_X, anchor_bot_y), type='rigid')
+    sandbox.add_joint(top_chord[0], None, (WALL_X, anchor_top_y), type='rigid')
+    sandbox.add_joint(bot_chord[0], None, (WALL_X, anchor_bot_y), type='rigid')
     for i in range(num_segments):
         x = WALL_X + i * seg_len
         progress_i = i / max(num_segments - 1, 1)

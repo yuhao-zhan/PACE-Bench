@@ -1,8 +1,9 @@
 import math
+import random
 
 import Box2D
 
-from Box2D import b2World, b2PolygonShape, b2CircleShape, b2FixtureDef, b2BodyDef, b2_dynamicBody, b2_staticBody
+from Box2D import b2World, b2PolygonShape, b2CircleShape, b2FixtureDef, b2BodyDef, b2_dynamicBody
 
 FPS = 60
 
@@ -75,10 +76,19 @@ EXIT_Y_MAX = 2.5
 
 class Sandbox:
     def __init__(self, terrain_config: dict = None, physics_config: dict = None):
-        if physics_config is None: physics_config = {}
-        if terrain_config is None: terrain_config = {}
-        self.physics_config = physics_config
-        self.terrain_config = terrain_config
+        if physics_config is None:
+            physics_config = {}
+        if terrain_config is None:
+            terrain_config = {}
+        self.physics_config = dict(physics_config)
+        self.terrain_config = dict(terrain_config)
+        simulation_seed = int(
+            physics_config.get(
+                "random_seed",
+                terrain_config.get("target_rng_seed", 123),
+            )
+        )
+        self._rng = random.Random(simulation_seed)
         g_val = physics_config.get("gravity", -9.8)
         if isinstance(g_val, (list, tuple)):
             g_y = float(g_val[1])
@@ -131,10 +141,32 @@ class Sandbox:
             physics_config.get("backward_steps_required", BACKWARD_STEPS_REQUIRED)
         )
         self._force_history = []
+        self._last_requested_force_x = 0.0
+        self._last_requested_force_y = 0.0
         self._behavioral_unlock = False
         self._backward_steps = 0
+        self._max_backward_steps = 0
         self._is_destroyed = False
         self._destruction_reason = None
+        self._destruction_step = None
+        self._peak_collision_impulse = 0.0
+        self._peak_collision_impulse_step = None
+        self._first_activation_entry_step = None
+        self._first_unlock_step = None
+        self._first_exit_entry_step = None
+        self._first_qualified_exit_step = None
+        self._exit_hold_completion_step = None
+        self._consecutive_exit_steps = 0
+        self._max_consecutive_exit_steps = 0
+        self._first_all_whiskers_max_step = None
+        self._max_reported_x = 2.0
+        self._max_reported_x_step = 0
+        self._closest_exit_distance = max(0.0, EXIT_X_MIN - 2.0)
+        self._closest_exit_distance_step = 0
+        self._max_speed = 0.0
+        self._max_speed_step = 0
+        self._peak_requested_force_magnitude = 0.0
+        self._peak_requested_force_step = 0
         self._create_maze(terrain_config)
         self._create_agent(terrain_config)
         p_init = (self._terrain_bodies["agent"].position.x, self._terrain_bodies["agent"].position.y)
@@ -181,9 +213,15 @@ class Sandbox:
                 self.sandbox = sandbox
             def PostSolve(self, contact, impulse):
                 for i in range(contact.manifold.pointCount):
-                    if impulse.normalImpulses[i] > self.sandbox._structural_impulse_scale_k * AGENT_MASS:
+                    impulse_value = float(impulse.normalImpulses[i])
+                    if impulse_value > self.sandbox._peak_collision_impulse:
+                        self.sandbox._peak_collision_impulse = impulse_value
+                        self.sandbox._peak_collision_impulse_step = self.sandbox._current_step + 1
+                    if impulse_value > self.sandbox._structural_impulse_scale_k * AGENT_MASS:
                         self.sandbox._is_destroyed = True
-                        self.sandbox._destruction_reason = f"Structural Failure: Collision impulse {impulse.normalImpulses[i]:.1f} exceeded limit."
+                        if self.sandbox._destruction_step is None:
+                            self.sandbox._destruction_step = self.sandbox._current_step + 1
+                        self.sandbox._destruction_reason = f"Structural Failure: Collision impulse {impulse_value:.1f} exceeded limit."
         self._world.contactListener = MyContactListener(self)
     def _raycast(self, p1, p2, ignore_body):
         class RayCastCallback(Box2D.b2RayCastCallback):
@@ -201,7 +239,8 @@ class Sandbox:
         return callback.hit_fraction
     def get_agent_position(self):
         agent = self._terrain_bodies.get("agent")
-        if agent is None: return (0.0, 0.0)
+        if agent is None:
+            return (0.0, 0.0)
         p = (agent.position.x, agent.position.y)
         delay = max(0, self._position_delay_steps)
         if delay > 0:
@@ -211,11 +250,13 @@ class Sandbox:
         return p
     def get_agent_velocity(self):
         agent = self._terrain_bodies.get("agent")
-        if agent is None: return (0.0, 0.0)
+        if agent is None:
+            return (0.0, 0.0)
         return (agent.linearVelocity.x, agent.linearVelocity.y)
     def get_whisker_readings(self):
         agent = self._terrain_bodies.get("agent")
-        if agent is None: return [WHISKER_RANGE] * 3
+        if agent is None:
+            return [WHISKER_RANGE] * 3
         x, y = agent.position.x, agent.position.y
         if self._whisker_blind_front_x_lo <= x <= self._whisker_blind_front_x_hi:
             return [WHISKER_RANGE] * 3
@@ -233,20 +274,78 @@ class Sandbox:
             out.append(frac * r)
         return out
     def apply_agent_force(self, force_x, force_y):
-        self._force_history.append((float(force_x), float(force_y)))
+        requested_fx = float(force_x)
+        requested_fy = float(force_y)
+        self._last_requested_force_x = requested_fx
+        self._last_requested_force_y = requested_fy
+        requested_magnitude = math.hypot(requested_fx, requested_fy)
+        if requested_magnitude > self._peak_requested_force_magnitude:
+            self._peak_requested_force_magnitude = requested_magnitude
+            self._peak_requested_force_step = self._current_step
+        self._force_history.append((requested_fx, requested_fy))
         if len(self._force_history) > FORCE_HISTORY_CAP:
             self._force_history.pop(0)
         delay = max(0, self._control_lag_steps)
         if delay > 0 and len(self._force_history) > delay:
             fx, fy = self._force_history[-(delay + 1)]
         else:
-            fx, fy = float(force_x), float(force_y)
+            fx, fy = requested_fx, requested_fy
         self._force_x, self._force_y = fx, fy
+    def _update_diagnostics(self):
+        agent = self._terrain_bodies.get("agent")
+        if agent is None:
+            return
+        reported_x, reported_y = self.get_agent_position()
+        speed = math.hypot(float(agent.linearVelocity.x), float(agent.linearVelocity.y))
+        if self._activation_x_min <= reported_x <= self._activation_x_max:
+            if self._first_activation_entry_step is None:
+                self._first_activation_entry_step = self._current_step
+        if self._behavioral_unlock and self._first_unlock_step is None:
+            self._first_unlock_step = self._current_step
+        if self.has_reached_exit() and self._first_exit_entry_step is None:
+            self._first_exit_entry_step = self._current_step
+        if self._behavioral_unlock and self.has_reached_exit():
+            self._consecutive_exit_steps += 1
+            self._max_consecutive_exit_steps = max(
+                self._max_consecutive_exit_steps, self._consecutive_exit_steps
+            )
+            if self._first_qualified_exit_step is None:
+                self._first_qualified_exit_step = self._current_step
+            if (
+                self._exit_hold_completion_step is None
+                and self._consecutive_exit_steps >= self._backward_steps_required
+            ):
+                self._exit_hold_completion_step = self._current_step
+        else:
+            self._consecutive_exit_steps = 0
+        if reported_x > self._max_reported_x:
+            self._max_reported_x = reported_x
+            self._max_reported_x_step = self._current_step
+        exit_dx = max(0.0, EXIT_X_MIN - reported_x)
+        exit_dy = 0.0
+        if reported_y < EXIT_Y_MIN:
+            exit_dy = EXIT_Y_MIN - reported_y
+        elif reported_y > EXIT_Y_MAX:
+            exit_dy = reported_y - EXIT_Y_MAX
+        exit_distance = math.hypot(exit_dx, exit_dy)
+        if exit_distance < self._closest_exit_distance:
+            self._closest_exit_distance = exit_distance
+            self._closest_exit_distance_step = self._current_step
+        if speed > self._max_speed:
+            self._max_speed = speed
+            self._max_speed_step = self._current_step
+        whiskers = self.get_whisker_readings()
+        if (
+            self._first_all_whiskers_max_step is None
+            and whiskers
+            and all(abs(float(value) - WHISKER_RANGE) <= 1e-6 for value in whiskers)
+        ):
+            self._first_all_whiskers_max_step = self._current_step
     def step(self, time_step):
-        import random
         if self._is_destroyed:
             self._world.Step(time_step, VEL_ITERS, POS_ITERS)
             self._current_step += 1
+            self._update_diagnostics()
             return
         agent = self._terrain_bodies.get("agent")
         if agent is not None:
@@ -273,6 +372,9 @@ class Sandbox:
                 and speed < self._backward_speed_max
             ):
                 self._backward_steps += 1
+                self._max_backward_steps = max(
+                    self._max_backward_steps, self._backward_steps
+                )
                 if self._backward_steps >= self._backward_steps_required:
                     self._behavioral_unlock = True
             else:
@@ -289,8 +391,8 @@ class Sandbox:
             if y < self._magnetic_floor_y_max:
                 agent.ApplyForceToCenter((0.0, self._magnetic_floor_force), True)
             if self._turbulence_intensity > 0:
-                tx = (random.random() - 0.5) * self._turbulence_intensity
-                ty_turb = (random.random() - 0.5) * self._turbulence_intensity
+                tx = (self._rng.random() - 0.5) * self._turbulence_intensity
+                ty_turb = (self._rng.random() - 0.5) * self._turbulence_intensity
                 agent.ApplyForceToCenter((tx, ty_turb), True)
                 self._last_turbulence_x = tx
                 self._last_turbulence_y = ty_turb
@@ -310,6 +412,7 @@ class Sandbox:
                 agent.ApplyForceToCenter((self._lock_gate_fx, 0.0), True)
         self._world.Step(time_step, VEL_ITERS, POS_ITERS)
         self._current_step += 1
+        self._update_diagnostics()
     def get_metrics(self):
         agent = self._terrain_bodies.get("agent")
         if agent is None:
@@ -344,122 +447,25 @@ class Sandbox:
     def get_whisker_max_range(self): return WHISKER_RANGE
     def is_destroyed(self): return self._is_destroyed
     def get_force_ledger(self):
-        import math as _m
         agent = self._terrain_bodies.get("agent")
         if agent is None:
             return {}
-        x, y = agent.position.x, agent.position.y
-        px, py = self.get_agent_position()
-        vx, vy = agent.linearVelocity.x, agent.linearVelocity.y
-        ledger = {
-            "agent_physical_x": x,
-            "agent_physical_y": y,
-            "agent_reported_x": px,
-            "agent_reported_y": py,
-            "agent_velocity_x": vx,
-            "agent_velocity_y": vy,
-            "channels": {},
+        return {
+            "requested_force": {
+                "fx": self._last_requested_force_x,
+                "fy": self._last_requested_force_y,
+            },
+            "unlock_evaluated_force": {
+                "fx": float(self._force_x),
+                "fy": float(self._force_y),
+            },
+            "agent_destroyed": self._is_destroyed,
+            "destruction_reason": self._destruction_reason,
         }
-        cmd_fx = float(self._force_x)
-        cmd_fy = float(self._force_y)
-        ledger["commanded_force"] = {"fx": cmd_fx, "fy": cmd_fy}
-        ch = ledger["channels"]
-        ch["commanded"] = {
-            "fx": cmd_fx,
-            "fy": cmd_fy,
-            "description": "Effective commanded force after control lag",
-        }
-        reversal_active = self._control_reversal_x_min <= px <= self._control_reversal_x_max
-        effective_fx_cmd = -cmd_fx if reversal_active else cmd_fx
-        ch["control_reversal"] = {
-            "active": reversal_active,
-            "zone_x": [self._control_reversal_x_min, self._control_reversal_x_max],
-            "description": "Control reversal flips sign of commanded Fx" if reversal_active else "Control reversal inactive",
-            "effective_commanded_fx_after_reversal": effective_fx_cmd,
-        }
-        osc = self._wind_oscillation_amp * _m.sin(self._wind_oscillation_omega * self._current_step)
-        wind_x = (-self._current_force_back
-                  + self._shear_wind_gradient * (y - self._shear_wind_reference_y)
-                  + osc)
-        ch["wind"] = {
-            "fx_total": wind_x,
-            "constant_back": -self._current_force_back,
-            "shear_component": self._shear_wind_gradient * (y - self._shear_wind_reference_y),
-            "oscillation_component": osc,
-            "oscillation_amplitude": self._wind_oscillation_amp,
-            "oscillation_omega": self._wind_oscillation_omega,
-            "shear_gradient": self._shear_wind_gradient,
-            "shear_reference_y": self._shear_wind_reference_y,
-            "description": "Environmental horizontal wind forcing",
-        }
-        drag_active = self._fluid_drag_x_min <= px <= self._fluid_drag_x_max
-        drag_x = -self._fluid_drag_coeff * vx * abs(vx) if drag_active else 0.0
-        drag_y = -self._fluid_drag_coeff * vy * abs(vy) if drag_active else 0.0
-        ch["fluid_drag"] = {
-            "active": drag_active,
-            "zone_x": [self._fluid_drag_x_min, self._fluid_drag_x_max],
-            "coefficient": self._fluid_drag_coeff,
-            "drag_fx": drag_x,
-            "drag_fy": drag_y,
-            "description": "Quadratic fluid drag: F = -c * v * |v|" if drag_active else "Fluid drag inactive",
-        }
-        mag_active = y < self._magnetic_floor_y_max
-        mag_fy = self._magnetic_floor_force if mag_active else 0.0
-        ch["magnetic_floor"] = {
-            "active": mag_active,
-            "y_threshold": self._magnetic_floor_y_max,
-            "force_fy": mag_fy,
-            "description": f"Magnetic floor: {mag_fy:.1f} N downward bias when y < {self._magnetic_floor_y_max:.1f} m" if mag_active else "Magnetic floor inactive",
-        }
-        turb_active = self._turbulence_intensity > 0.0
-        ch["turbulence"] = {
-            "active": turb_active,
-            "intensity": self._turbulence_intensity,
-            "last_fx": self._last_turbulence_x,
-            "last_fy": self._last_turbulence_y,
-            "description": f"Random turbulence: force ∈ [{-0.5 * self._turbulence_intensity:.1f}, {0.5 * self._turbulence_intensity:.1f}] N per axis" if turb_active else "Turbulence inactive",
-        }
-        oneway_active = px > self._oneway_x
-        ch["oneway_assist"] = {
-            "active": oneway_active,
-            "threshold_x": self._oneway_x,
-            "force_fx": self._oneway_force_right if oneway_active else 0.0,
-            "description": f"Oneway rightward assist: +{self._oneway_force_right:.1f} N when reported x > {self._oneway_x:.1f} m" if oneway_active else "Oneway assist inactive (reported x not past threshold)",
-        }
-        lock_active = (not self._behavioral_unlock) and self._lock_gate_x_min <= px <= self._lock_gate_x_max
-        ch["lock_gate"] = {
-            "active": lock_active,
-            "zone_x": [self._lock_gate_x_min, self._lock_gate_x_max],
-            "force_fx": self._lock_gate_fx if lock_active else 0.0,
-            "description": f"Lock gate repulsion: {self._lock_gate_fx:.1f} N in -x" if lock_active else "Lock gate inactive (unlocked or outside zone)",
-        }
-        net_non_cmd_fx = (
-            wind_x + drag_x + (self._oneway_force_right if oneway_active else 0.0)
-            + (self._lock_gate_fx if lock_active else 0.0)
-            + self._last_turbulence_x
-        )
-        net_non_cmd_fy = (
-            drag_y + mag_fy + self._last_turbulence_y
-        )
-        net_applied_fx = effective_fx_cmd + net_non_cmd_fx
-        net_applied_fy = cmd_fy + net_non_cmd_fy
-        ledger["net_forces"] = {
-            "commanded_effective_fx": effective_fx_cmd,
-            "commanded_effective_fy": cmd_fy,
-            "environmental_fx": net_non_cmd_fx,
-            "environmental_fy": net_non_cmd_fy,
-            "net_total_fx": net_applied_fx,
-            "net_total_fy": net_applied_fy,
-        }
-        if self._is_destroyed:
-            ledger["agent_destroyed"] = True
-            ledger["destruction_reason"] = self._destruction_reason
-        return ledger
     def get_unlock_condition_status(self):
         agent = self._terrain_bodies.get("agent")
         if agent is None:
             return {"error": "No agent"}
-        x, y = agent.position.x, agent.position.y
         px, py = self.get_agent_position()
         vx, vy = agent.linearVelocity.x, agent.linearVelocity.y
         speed = (vx * vx + vy * vy) ** 0.5
@@ -504,40 +510,39 @@ class Sandbox:
             "all_conditions_met": all_ok,
         }
     def get_whisker_health(self):
-        agent = self._terrain_bodies.get("agent")
-        if agent is None:
+        if self._terrain_bodies.get("agent") is None:
             return {"error": "No agent"}
-        x, y = agent.position.x, agent.position.y
-        px, py = self.get_agent_position()
-        in_blind_zone = self._whisker_blind_front_x_lo <= x <= self._whisker_blind_front_x_hi
-        blind_zone_active = self._whisker_blind_front_x_lo > -500.0 and self._whisker_blind_front_x_hi > -500.0
-        has_delay = self._whisker_delay_steps > 0
-        has_pos_delay = self._position_delay_steps > 0
+        readings = [float(value) for value in self.get_whisker_readings()]
         return {
-            "physical_x": x,
-            "physical_y": y,
-            "reported_x": px,
-            "reported_y": py,
-            "blind_zone_active": blind_zone_active,
-            "blind_zone_x_range": [self._whisker_blind_front_x_lo, self._whisker_blind_front_x_hi] if blind_zone_active else None,
-            "agent_in_blind_zone": in_blind_zone,
-            "whisker_delay_steps": self._whisker_delay_steps,
-            "position_delay_steps": self._position_delay_steps,
-            "status_front": "BLIND (all whiskers return max range regardless of obstacles)" if in_blind_zone else "NOMINAL",
-            "status_up": "BLIND" if in_blind_zone else "NOMINAL",
-            "status_down": "BLIND" if in_blind_zone else "NOMINAL",
-            "description": (
-                f"Agent physical x={x:.2f} m in whisker blind zone [{self._whisker_blind_front_x_lo:.1f}, {self._whisker_blind_front_x_hi:.1f}] m. "
-                f"All whisker readings show max range ({WHISKER_RANGE:.1f} m) regardless of actual obstacles. "
-                f"Use last known position and internal model for navigation."
-            ) if in_blind_zone else "Whisker sensors nominal.",
+            "readings": readings,
+            "max_range_m": WHISKER_RANGE,
+            "all_readings_at_max": all(
+                abs(value - WHISKER_RANGE) <= 1e-6 for value in readings
+            ),
         }
     def get_wall_clearance_map(self):
-        import math as _m
         agent = self._terrain_bodies.get("agent")
         if agent is None:
             return {"error": "No agent"}
-        x, y = agent.position.x, agent.position.y
+        x, y = self.get_agent_position()
+        floor = self._terrain_bodies.get("wall_0")
+        ceiling = self._terrain_bodies.get("wall_1")
+        arena_y_min = 0.5
+        arena_y_max = 2.5
+        if floor is not None and floor.fixtures:
+            floor_vertices = getattr(floor.fixtures[0].shape, "vertices", ())
+            if floor_vertices:
+                arena_y_min = max(
+                    float(floor.position.y + vertex[1])
+                    for vertex in floor_vertices
+                )
+        if ceiling is not None and ceiling.fixtures:
+            ceiling_vertices = getattr(ceiling.fixtures[0].shape, "vertices", ())
+            if ceiling_vertices:
+                arena_y_max = min(
+                    float(ceiling.position.y + vertex[1])
+                    for vertex in ceiling_vertices
+                )
         walls = []
         for idx in [4, 5, 6]:
             body = self._terrain_bodies.get(f"wall_{idx}")
@@ -545,30 +550,17 @@ class Sandbox:
                 continue
             wx = float(body.position.x)
             wy = float(body.position.y)
-            for fixture in body.fixtures:
-                shape = fixture.shape
-                if hasattr(shape, "vertices"):
-                    verts = shape.vertices
-                    xs = [v[0] + wx for v in verts]
-                    ys = [v[1] + wy for v in verts]
-                    w_half_w = (max(xs) - min(xs)) / 2.0
-                    w_half_h = (max(ys) - min(ys)) / 2.0
-                elif hasattr(shape, "m_centroid"):
-                    w_half_w = float(getattr(shape, "m_vertices", [(0,0)])) if hasattr(shape, "m_vertices") else 0.0
-                    continue
-                else:
-                    continue
-                wall_x_min = wx - w_half_w
-                wall_x_max = wx + w_half_w
-                wall_y_min = wy - w_half_h
-                wall_y_max = wy + w_half_h
-                break
-            else:
+            vertices = [
+                vertex
+                for fixture in body.fixtures
+                for vertex in getattr(fixture.shape, "vertices", ())
+            ]
+            if not vertices:
                 continue
-            y_range = [wall_y_min, wall_y_max]
-            x_range = [wall_x_min, wall_x_max]
-            arena_y_max = 3.0
-            arena_y_min = 0.0
+            wall_x_min = min(float(vertex[0] + wx) for vertex in vertices)
+            wall_x_max = max(float(vertex[0] + wx) for vertex in vertices)
+            wall_y_min = min(float(vertex[1] + wy) for vertex in vertices)
+            wall_y_max = max(float(vertex[1] + wy) for vertex in vertices)
             gap_above_y = [wall_y_max, arena_y_max]
             gap_above_exists = gap_above_y[1] > gap_above_y[0]
             gap_above_size = gap_above_y[1] - gap_above_y[0] if gap_above_exists else 0.0
@@ -580,8 +572,8 @@ class Sandbox:
             agent_at_wall_x = wall_x_min <= x <= wall_x_max
             agent_above_wall = y > wall_y_max
             agent_below_wall = y < wall_y_min
-            clearance_above = wall_y_max - y if y < wall_y_max else 0.0
-            clearance_below = y - wall_y_min if y > wall_y_min else 0.0
+            clearance_above = max(0.0, wall_y_max + self._agent_radius - y)
+            clearance_below = max(0.0, y - (wall_y_min - self._agent_radius))
             dist_to_wall_x = wall_x_min - x if x < wall_x_min else 0.0
             walls.append({
                 "wall_index": idx,
@@ -606,32 +598,54 @@ class Sandbox:
             })
         return {
             "agent_y": y,
-            "arena_limits": {"y_min": 0.0, "y_max": 3.0},
+            "arena_limits": {"y_min": arena_y_min, "y_max": arena_y_max},
             "walls": walls,
         }
     def get_control_lag_info(self):
         return {
-            "control_lag_steps": self._control_lag_steps,
-            "command_history_length": len(self._force_history),
-            "command_history_cap": FORCE_HISTORY_CAP,
-            "current_effective_force": (float(self._force_x), float(self._force_y)),
-            "description": (
-                f"Control lag: {self._control_lag_steps} step(s). "
-                f"Commanded force at step T takes effect at step T+{self._control_lag_steps}. "
-                f"Current effective force ({self._force_x:.2f}, {self._force_y:.2f}) N was commanded "
-                f"{self._control_lag_steps} step(s) ago."
-            ) if self._control_lag_steps > 0 else (
+            "requested_force": [
+                self._last_requested_force_x, self._last_requested_force_y
+            ],
+            "unlock_evaluated_force": [float(self._force_x), float(self._force_y)],
+            "requested_matches_evaluated": (
+                abs(self._last_requested_force_x - self._force_x) <= 1e-9
+                and abs(self._last_requested_force_y - self._force_y) <= 1e-9
             ),
+        }
+    def get_exit_dwell_status(self):
+        return {
+            "consecutive_steps": self._consecutive_exit_steps,
+            "max_consecutive_steps": self._max_consecutive_exit_steps,
+            "first_qualified_step": self._first_qualified_exit_step,
+            "completion_step": self._exit_hold_completion_step,
+            "required_steps": self._backward_steps_required,
         }
     def get_wind_params(self):
         return {
-            "current_force_back": self._current_force_back,
-            "shear_wind_gradient": self._shear_wind_gradient,
-            "shear_reference_y": self._shear_wind_reference_y,
-            "oscillation_amplitude": self._wind_oscillation_amp,
-            "oscillation_omega": self._wind_oscillation_omega,
             "current_step": self._current_step,
+            "parameters_exposed": False,
         }
+    def get_diagnostic_timeline(self):
+        return {
+            "first_activation_entry_step": self._first_activation_entry_step,
+            "first_unlock_step": self._first_unlock_step,
+            "max_unlock_condition_streak": self._max_backward_steps,
+            "first_exit_entry_step": self._first_exit_entry_step,
+            "first_all_whiskers_max_step": self._first_all_whiskers_max_step,
+            "destruction_step": self._destruction_step,
+            "max_reported_x_m": self._max_reported_x,
+            "max_reported_x_step": self._max_reported_x_step,
+            "closest_exit_distance_m": self._closest_exit_distance,
+            "closest_exit_distance_step": self._closest_exit_distance_step,
+            "max_speed_mps": self._max_speed,
+            "max_speed_step": self._max_speed_step,
+            "peak_requested_force_n": self._peak_requested_force_magnitude,
+            "peak_requested_force_step": self._peak_requested_force_step,
+            "peak_collision_impulse_ns": self._peak_collision_impulse,
+            "peak_collision_impulse_step": self._peak_collision_impulse_step,
+        }
+    def get_structural_impulse_limit(self):
+        return self._structural_impulse_scale_k * AGENT_MASS
     def get_destruction_reason(self): return self._destruction_reason
     @property
     def world(self): return self._world

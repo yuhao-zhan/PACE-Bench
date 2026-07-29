@@ -1,11 +1,7 @@
-import sys
-import os
 import pygame
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../..'))
-
 from pace_bench.renderer import Renderer
-from Box2D.b2 import dynamicBody, staticBody
+from Box2D.b2 import staticBody
 
 # ── Academic palette ──────────────────────────────────────────────
 COLOR_BG          = (254, 252, 248)
@@ -52,10 +48,6 @@ class E02Renderer(Renderer):
         self.clear(COLOR_BG)
 
         # ── Draw bodies ────────────────────────────────────────────
-        craft_body = None
-        if hasattr(sandbox, '_terrain_bodies'):
-            craft_body = sandbox._terrain_bodies.get("craft")
-
         agent_bodies = set()
         if hasattr(sandbox, 'bodies'):
             agent_bodies = set(sandbox.bodies)
@@ -68,9 +60,10 @@ class E02Renderer(Renderer):
                                outline_color=COLOR_OUTLINE,
                                outline_width=1)
             else:
-                is_craft = (craft_body is not None and body == craft_body)
                 is_agent = body in agent_bodies
-                color = COLOR_AGENT if (is_craft or is_agent) else COLOR_ENV
+                # The environment has one dynamic craft; agent-owned dynamic
+                # bodies, if any, use the same accent without private-state reads.
+                color = COLOR_AGENT if (is_agent or body.type != staticBody) else COLOR_ENV
                 self.draw_body(body,
                                dynamic_color=color,
                                static_color=color,

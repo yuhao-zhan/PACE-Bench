@@ -15,8 +15,8 @@ def build_agent(sandbox):
 def agent_action(sandbox, agent_body, step_count):
     pass
 
-def _apply_climb_action(sandbox, step_count):
-    c = getattr(sandbox, '_climber_joints', {})
+def _apply_climb_action(sandbox, agent_body, step_count):
+    c = agent_body.get("control", {}) if isinstance(agent_body, dict) else {}
     if not c: return
     cycle = c['cycle']
     phase = step_count % (2 * cycle)
@@ -52,7 +52,7 @@ def build_agent_stage_1(sandbox):
     sandbox.add_joint(arm, p3, (x_pos + 0.1, base_y + 0.9), type='rigid')
     sandbox.add_joint(arm, p4, (x_pos + 0.1, base_y + 1.0), type='rigid')
     joint = sandbox.add_joint(torso, arm, (x_pos, base_y + 0.2), type='pivot', lower_limit=-0.05, upper_limit=2.0)
-    sandbox._climber_joints = {
+    control = {
         'p_torso': [p1, p2],
         'p_arm': [p3, p4],
         'joint': joint,
@@ -61,10 +61,10 @@ def build_agent_stage_1(sandbox):
         'torque': 2.0,
         'overlap': 15
     }
-    return torso
+    return {"body": torso, "control": control}
 
 def agent_action_stage_1(sandbox, agent_body, step_count):
-    _apply_climb_action(sandbox, step_count)
+    _apply_climb_action(sandbox, agent_body, step_count)
 
 def build_agent_stage_2(sandbox):
     x_pos = 4.85
@@ -80,7 +80,7 @@ def build_agent_stage_2(sandbox):
     sandbox.add_joint(arm, p3, (x_pos + 0.1, 7.8), type='rigid')
     sandbox.add_joint(arm, p4, (x_pos + 0.1, 8.0), type='rigid')
     joint = sandbox.add_joint(torso, arm, (x_pos, 1.3), type='pivot', lower_limit=-0.1, upper_limit=5.0)
-    sandbox._climber_joints = {
+    control = {
         'p_torso': [p1, p2],
         'p_arm': [p3, p4],
         'joint': joint,
@@ -89,34 +89,40 @@ def build_agent_stage_2(sandbox):
         'torque': 100000.0,
         'overlap': 50
     }
-    return torso
+    return {"body": torso, "control": control}
 
 def agent_action_stage_2(sandbox, agent_body, step_count):
-    _apply_climb_action(sandbox, step_count)
+    _apply_climb_action(sandbox, agent_body, step_count)
 
 def build_agent_stage_3(sandbox):
-    wall_x = 5.0
-    base_y = 1.0
-    torso = sandbox.add_beam(wall_x - 0.15, base_y, 0.16, 0.8, density=290.0)
-    p_torso = sandbox.add_pad(wall_x, base_y, radius=0.10, density=48.0)
-    sandbox.add_joint(torso, p_torso, (wall_x, base_y), type='rigid')
-    arm = sandbox.add_beam(wall_x - 0.15, base_y + 0.8, 0.05, 0.4, density=215.0)
-    p_arm = sandbox.add_pad(wall_x, base_y + 1.0, radius=0.06, density=22.0)
-    sandbox.add_joint(arm, p_arm, (wall_x, base_y + 1.0), type='rigid')
-    joint = sandbox.add_joint(torso, arm, (wall_x - 0.15, base_y + 0.4), type='pivot', lower_limit=-0.1, upper_limit=4.0)
-    sandbox._climber_joints = {
-        'p_torso': [p_torso],
-        'p_arm': [p_arm],
-        'joint': joint,
-        'cycle': 60,
-        'speed': 3.5,
-        'torque': 500.0,
-        'overlap': 25
+    spine_x = 4.85
+    lower = sandbox.add_beam(spine_x, 2.0, 0.25, 1.7, density=48.92)
+    upper = sandbox.add_beam(spine_x, 3.5, 0.25, 1.7, density=48.92)
+    lower_pad = sandbox.add_pad(5.0, 1.1, radius=0.11, density=0.1)
+    upper_pad = sandbox.add_pad(5.0, 4.4, radius=0.11, density=0.1)
+    sandbox.add_joint(lower, lower_pad, (5.0, 1.1), type='rigid')
+    sandbox.add_joint(upper, upper_pad, (5.0, 4.4), type='rigid')
+    centering_joint = sandbox.add_joint(
+        lower,
+        upper,
+        (spine_x, 2.75),
+        type='pivot',
+        lower_limit=-0.02,
+        upper_limit=0.02,
+    )
+    control = {
+        'pads': [lower_pad, upper_pad],
+        'joint': centering_joint,
     }
-    return torso
+    return {"body": lower, "control": control}
 
 def agent_action_stage_3(sandbox, agent_body, step_count):
-    _apply_climb_action(sandbox, step_count)
+    bridge = agent_body.get("control", {}) if isinstance(agent_body, dict) else {}
+    for pad in bridge.get('pads', []):
+        sandbox.set_pad_active(pad, True)
+    joint = bridge.get('joint')
+    if joint is not None:
+        sandbox.set_motor(joint, 0.0, 60.0)
 
 def build_agent_stage_4(sandbox):
     x_pos = 4.8
@@ -132,7 +138,7 @@ def build_agent_stage_4(sandbox):
     sandbox.add_joint(arm, p3, (x_pos + 0.1, base_y + 1.8), type='rigid')
     sandbox.add_joint(arm, p4, (x_pos + 0.1, base_y + 2.0), type='rigid')
     joint = sandbox.add_joint(torso, arm, (x_pos, base_y + 0.4), type='pivot', lower_limit=-0.1, upper_limit=3.5)
-    sandbox._climber_joints = {
+    control = {
         'p_torso': [p1, p2],
         'p_arm': [p3, p4],
         'joint': joint,
@@ -141,7 +147,7 @@ def build_agent_stage_4(sandbox):
         'torque': 150000.0,
         'overlap': 40
     }
-    return torso
+    return {"body": torso, "control": control}
 
 def agent_action_stage_4(sandbox, agent_body, step_count):
-    _apply_climb_action(sandbox, step_count)
+    _apply_climb_action(sandbox, agent_body, step_count)

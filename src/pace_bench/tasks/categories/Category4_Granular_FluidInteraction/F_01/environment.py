@@ -12,6 +12,7 @@ class Sandbox:
         physics_config = physics_config or {}
         self._terrain_config = dict(terrain_config)
         self._physics_config = dict(physics_config)
+        self._observation_errors = []
         gravity = tuple(physics_config.get("gravity", (0, -10)))
         self._default_linear_damping = float(physics_config.get("linear_damping", 0.1))
         self._default_angular_damping = float(physics_config.get("angular_damping", 0.05))
@@ -111,11 +112,7 @@ class Sandbox:
                 friction=0.5,
             ),
         )
-        try:
-            kinematicBody = getattr(Box2D.b2, 'kinematicBody', 1)
-            downstream_wall.type = kinematicBody
-        except Exception:
-            pass
+        downstream_wall.type = Box2D.b2.kinematicBody
         self._terrain_bodies["downstream_wall"] = downstream_wall
         self._debris_spawn_steps = [2000, 5000, 8000]
         self._debris_spawned = []
@@ -146,15 +143,15 @@ class Sandbox:
             particle_restitution = float(pr_override)
         else:
             particle_restitution = float(fluid_config.get("particle_restitution", 0.05))
-        random.seed(seed)
+        rng = random.Random(seed)
         reservoir_x_min = 1.0
         reservoir_x_max = 11.0
         reservoir_y_min = particle_radius + 0.1
         reservoir_y_max = self.RESERVOIR_FILL_HEIGHT
         self.RESERVOIR_X_MIN = reservoir_x_min
         for _ in range(num_particles):
-            x = random.uniform(reservoir_x_min, reservoir_x_max)
-            y = random.uniform(reservoir_y_min, reservoir_y_max)
+            x = rng.uniform(reservoir_x_min, reservoir_x_max)
+            y = rng.uniform(reservoir_y_min, reservoir_y_max)
             mass = fluid_density * (math.pi * particle_radius ** 2)
             density = mass / (math.pi * particle_radius ** 2)
             particle = self._world.CreateDynamicBody(
@@ -255,10 +252,8 @@ class Sandbox:
             amp = getattr(self, "_downstream_wall_amplitude", 0.4)
             ph = getattr(self, "_downstream_wall_phase_divisor", 100.0)
             new_x = 13.85 + amp * math.sin(self._step_count / ph)
-            try:
-                wall.SetTransform((new_x, self._downstream_wall_y), 0)
-            except Exception:
-                pass
+            wall.position = (new_x, self._downstream_wall_y)
+            wall.angle = 0.0
         for t in self._debris_spawn_steps:
             if self._step_count == t and t not in self._debris_spawned:
                 debris = self._world.CreateDynamicBody(
@@ -293,65 +288,63 @@ class Sandbox:
             for joint in list(self._joints):
                 if joint.bodyB == floor_body:
                     continue
-                try:
-                    force = joint.GetReactionForce(inv_dt)
-                    mag = math.sqrt(force.x ** 2 + force.y ** 2)
-                    hist = self._joint_force_history.setdefault(joint, [])
-                    hist.append(mag)
-                    if len(hist) > self._joint_force_history_len:
-                        hist.pop(0)
-                    threshold = getattr(self, 'JOINT_BREAK_FORCE', 50000.0)
-                    jid = id(joint)
-                    prev = self._joint_peak_forces.get(jid)
-                    if prev is None:
-                        try:
-                            anchor = joint.anchorB
-                            ax, ay = float(anchor.x), float(anchor.y)
-                            apos = (float(joint.bodyA.position.x), float(joint.bodyA.position.y))
-                            bpos = (float(joint.bodyB.position.x), float(joint.bodyB.position.y))
-                            self._joint_peak_forces[jid] = {
-                                'anchor': (ax, ay),
-                                'body_a_pos': apos,
-                                'body_b_pos': bpos,
-                                'peak_force': mag,
-                                'first_seen_step': self._step_count,
-                            }
-                        except Exception:
-                            self._joint_peak_forces[jid] = {'peak_force': mag}
-                    else:
-                        if mag > prev.get('peak_force', 0.0):
-                            prev['peak_force'] = mag
-                    if len(hist) >= self._joint_force_history_len and all(h >= threshold for h in hist):
-                        to_remove.append(joint)
-                        try:
-                            anchor = joint.anchorB
-                            ax, ay = float(anchor.x), float(anchor.y)
-                            amass = float(joint.bodyA.mass) if hasattr(joint.bodyA, 'mass') else 0.0
-                            bmass = float(joint.bodyB.mass) if hasattr(joint.bodyB, 'mass') else 0.0
-                            apos = (float(joint.bodyA.position.x), float(joint.bodyA.position.y))
-                            bpos = (float(joint.bodyB.position.x), float(joint.bodyB.position.y))
-                            self._joint_break_events.append({
-                                'step': self._step_count,
-                                'anchor': (ax, ay),
-                                'body_a_pos': apos,
-                                'body_b_pos': bpos,
-                                'body_a_mass': amass,
-                                'body_b_mass': bmass,
-                                'force': mag,
-                                'threshold': threshold,
-                            })
-                        except Exception:
-                            pass
-                except Exception:
-                    pass
+                force = joint.GetReactionForce(inv_dt)
+                mag = math.sqrt(force.x ** 2 + force.y ** 2)
+                hist = self._joint_force_history.setdefault(joint, [])
+                hist.append(mag)
+                if len(hist) > self._joint_force_history_len:
+                    hist.pop(0)
+                threshold = getattr(self, 'JOINT_BREAK_FORCE', 50000.0)
+                jid = id(joint)
+                prev = self._joint_peak_forces.get(jid)
+                if prev is None:
+                    try:
+                        anchor = joint.anchorB
+                        ax, ay = float(anchor.x), float(anchor.y)
+                        apos = (float(joint.bodyA.position.x), float(joint.bodyA.position.y))
+                        bpos = (float(joint.bodyB.position.x), float(joint.bodyB.position.y))
+                        self._joint_peak_forces[jid] = {
+                            'anchor': (ax, ay),
+                            'body_a_pos': apos,
+                            'body_b_pos': bpos,
+                            'peak_force': mag,
+                            'first_seen_step': self._step_count,
+                        }
+                    except (AttributeError, TypeError, ValueError) as exc:
+                        self._observation_errors.append(
+                            f"joint peak metadata unavailable at step {self._step_count}: {exc}"
+                        )
+                        self._joint_peak_forces[jid] = {'peak_force': mag}
+                elif mag > prev.get('peak_force', 0.0):
+                    prev['peak_force'] = mag
+                if len(hist) >= self._joint_force_history_len and all(h >= threshold for h in hist):
+                    to_remove.append(joint)
+                    try:
+                        anchor = joint.anchorB
+                        ax, ay = float(anchor.x), float(anchor.y)
+                        amass = float(joint.bodyA.mass) if hasattr(joint.bodyA, 'mass') else 0.0
+                        bmass = float(joint.bodyB.mass) if hasattr(joint.bodyB, 'mass') else 0.0
+                        apos = (float(joint.bodyA.position.x), float(joint.bodyA.position.y))
+                        bpos = (float(joint.bodyB.position.x), float(joint.bodyB.position.y))
+                        self._joint_break_events.append({
+                            'step': self._step_count,
+                            'anchor': (ax, ay),
+                            'body_a_pos': apos,
+                            'body_b_pos': bpos,
+                            'body_a_mass': amass,
+                            'body_b_mass': bmass,
+                            'force': mag,
+                            'threshold': threshold,
+                        })
+                    except (AttributeError, TypeError, ValueError) as exc:
+                        self._observation_errors.append(
+                            f"joint break metadata unavailable at step {self._step_count}: {exc}"
+                        )
             for joint in to_remove:
                 self._joint_force_history.pop(joint, None)
-                try:
-                    self._world.DestroyJoint(joint)
-                    if joint in self._joints:
-                        self._joints.remove(joint)
-                except Exception:
-                    pass
+                self._world.DestroyJoint(joint)
+                if joint in self._joints:
+                    self._joints.remove(joint)
         if self._surge_steps_applied < len(self._surge_steps) and self._step_count >= self._surge_steps[self._surge_steps_applied]:
             impulse = self._surge_impulses[self._surge_steps_applied]
             self._surge_steps_applied += 1
@@ -446,11 +439,10 @@ class Sandbox:
             timeline.append({'step': s, 'events': events})
         return timeline
     def get_leak_height_distribution(self):
-        wall = self._terrain_bodies.get("downstream_wall")
-        if wall is not None:
-            leak_x = wall.position.x - getattr(self, '_downstream_wall_half_w', 0.25)
-        else:
-            leak_x = 14.0
+        # Leakage is measured at the fixed downstream flood boundary.  Using the
+        # oscillating wall's instantaneous upstream face would relabel contained
+        # reservoir particles as leaked whenever the wall moved left.
+        leak_x = self.DOWNSTREAM_X_START
         min_bottom = getattr(self, 'MIN_BEAM_BOTTOM_Y', 0.5)
         fill_height = getattr(self, 'RESERVOIR_FILL_HEIGHT', 7.0)
         bins = [
@@ -563,17 +555,15 @@ class Sandbox:
             elif vmag > 100.0:
                 warnings.append({'type': 'extreme_debris_velocity', 'body_pos': (debris.position.x, debris.position.y), 'speed': vmag})
         return warnings
+    def get_observation_errors(self):
+        return list(self._observation_errors)
     def get_initial_particle_count(self):
         return self._initial_particle_count
     def get_particle_count(self):
         return len([p for p in self._water_particles if p is not None and p.active])
     def get_leaked_particle_count(self):
         count = 0.0
-        wall = self._terrain_bodies.get("downstream_wall")
-        if wall is not None:
-            leak_x = wall.position.x - getattr(self, '_downstream_wall_half_w', 0.25)
-        else:
-            leak_x = 14.0
+        leak_x = self.DOWNSTREAM_X_START
         seepage_start = leak_x - 0.5
         for p in self._water_particles:
             if p is not None and p.active:

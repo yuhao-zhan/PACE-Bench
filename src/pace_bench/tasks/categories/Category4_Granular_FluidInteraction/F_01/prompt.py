@@ -2,10 +2,6 @@ import os
 
 import json
 
-import sys
-
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
-
 from pace_bench.tasks.primitives_api import API_INTRO
 
 with open(os.path.join(os.path.dirname(__file__), '..', '..', 'primitives_api.json'), 'r') as f:
@@ -22,7 +18,7 @@ Design a free-standing dam to block water particles in an extreme environment.
 - **Reservoir fill height**: 7.0 m.
 - **Reservoir-side forcing**: Time-varying fluid impulses apply only to water particles whose center is on the reservoir side (x < 12.0 m).
 - **Dynamic disturbances**: The run includes forward/backward slosh, vertical fluid kicks, periodic debris impacts, and horizontal shaking of dam beams. Exact timing and magnitudes are intentionally not disclosed and must be inferred from interaction feedback.
-- **Debris launch**: Periodic debris impacts use default initial velocity **(2.2, 0.0)** m/s unless the configuration overrides the debris velocity.
+- **Debris launch**: Periodic debris impacts occur during the run; their exact timing and launch velocity are intentionally undisclosed and must be inferred from observed behavior.
 - **Build zone**: Three disjoint narrow vertical strips: x=[12.4, 12.6], [12.9, 13.1], and [13.4, 13.6], with y in [0, 7.5] m. **Each beam’s center (x, y) must lie in one of these strips** (x within that strip’s interval, y within [0, 7.5]); design validation checks centers, consistent with the span and vertical-band rules below.
 - **Constraint**: Mandatory underflow gap; no beams allowed below y=0.5m.
 - **Constraint**: ZERO floor anchors; the dam must be free-standing.
@@ -34,7 +30,7 @@ Design a free-standing dam to block water particles in an extreme environment.
 - **Constraint**: All beams must form one connected structure: every beam must be reachable from every other via beam-to-beam joints (no isolated beams or separate sub-structures).
 - **Constraint**: At least 3 beam centers must lie in each vertical band: y=[0.5, 2.5], [2.5, 5], and [5, 7.5].
 - **Moving downstream wall**: The downstream wall (0.5 m wide) oscillates laterally over time with amplitude and phase parameters, where the wall center follows a sinusoidal trajectory each step. The instantaneous leak line is the wall's left edge.
-- **Leakage definition**: Particles with x greater than the current leak line count as full leak. Particles in a 0.5 m band immediately upstream of that leak line count as half-leak toward the leakage rate. If moving-wall state is unavailable, scoring may fall back to a fixed reference leak line at x=14.0 m (same half-leak band rule).
+- **Leakage definition**: The fixed downstream flood boundary is x=14.0 m. Particles with x greater than this boundary count as full leak; particles in the 0.5 m band immediately upstream, x in (13.5, 14.0], count as half-leak. The oscillating wall affects the physics but does not move the scoring boundary.
 
 Design a structure that:
 1. Blocks water particles such that the leakage rate does not exceed 0.10%.

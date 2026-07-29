@@ -2,8 +2,6 @@ from typing import Dict, Any, List
 
 import math
 
-import sys
-
 def _is_finite_number(x: Any) -> bool:
     if x is None:
         return False
@@ -29,31 +27,6 @@ def _fmt_abs(x: Any, dp: int = 2) -> str:
         return f"{float(x):.{dp}f}"
     except (TypeError, ValueError):
         return str(x)
-
-_SESSION_KEY = "_task_fb_s04_session"
-
-_prev = sys.modules.get(_SESSION_KEY)
-
-if _prev is not None:
-    _SESSION = _prev
-
-else:
-    _SESSION = {"prev_step": -1, "prev_metrics": None}
-    sys.modules[_SESSION_KEY] = _SESSION
-
-def _reset_if_new_session(step_count: Any) -> None:
-    if step_count is None:
-        return
-    try:
-        sc = int(step_count)
-    except (TypeError, ValueError):
-        return
-    if _SESSION["prev_step"] >= 0 and sc <= _SESSION["prev_step"]:
-        _SESSION["prev_metrics"] = None
-    _SESSION["prev_step"] = sc
-
-def _is_first_moment() -> bool:
-    return _SESSION["prev_metrics"] is None
 
 def _section_temporal_chronology(metrics: Dict[str, Any],
                                  prev_metrics: Dict[str, Any] = None) -> List[str]:
@@ -366,7 +339,10 @@ def _section_numerical_health(metrics: Dict[str, Any],
     parts: List[str] = []
     parts.append("## 6. Numerical")
     health = metrics.get("numerical_health")
-    if health is None or not isinstance(health, list) or len(health) == 0:
+    if health is None or not isinstance(health, list):
+        parts.append("Numerical health data unavailable.")
+        return parts
+    if len(health) == 0:
         parts.append("HEALTHY — no NaN, Inf, or extreme values.")
         return parts
     critical_flags = [f for f in health if isinstance(f, dict) and f.get("severity") == "CRITICAL"]
@@ -419,11 +395,13 @@ def _section_environment_summary(metrics: Dict[str, Any]) -> List[str]:
     else:
         parts.append("Pivot: NON-FRAGILE")
     drop = metrics.get("drop_load_active", False)
-    catch_r = metrics.get("catch_radius", 0.5)
-    if drop:
+    catch_r = metrics.get("catch_radius")
+    if drop and _is_finite_number(catch_r):
         parts.append(f"Load: DROPPED (catch radius {_fmt_abs(catch_r)} m)")
-    else:
+    elif not drop and _is_finite_number(catch_r):
         parts.append(f"Load: STATIC (auto-attach < {_fmt_abs(catch_r)} m)")
+    else:
+        parts.append("Load mode/radius: unavailable")
     load_mass = metrics.get("load_mass")
     if _is_finite_number(load_mass):
         parts.append(f"Load mass: {_fmt_abs(load_mass)} kg")
@@ -441,18 +419,32 @@ def _section_environment_summary(metrics: Dict[str, Any]) -> List[str]:
         parts.append(f"Obstacles ({len(obstacles)}):")
         for i, r in enumerate(obstacles):
             if isinstance(r, dict):
-                parts.append(f"  #{i}: x=[{_fmt_abs(r.get('xmin',0))}, {_fmt_abs(r.get('xmax',0))}], "
-                             f"y=[{_fmt_abs(r.get('ymin',0))}, {_fmt_abs(r.get('ymax',0))}]")
+                parts.append(f"  #{i}: x=[{_fmt_abs(r.get('xmin'))}, {_fmt_abs(r.get('xmax'))}], "
+                             f"y=[{_fmt_abs(r.get('ymin'))}, {_fmt_abs(r.get('ymax'))}]")
     return parts
 
 def format_task_metrics(metrics: Dict[str, Any]) -> List[str]:
     if not isinstance(metrics, dict):
         return ["**Error**: metrics is not a dictionary."]
+    if not metrics:
+        return ["**No task metrics available.**"]
     step_count = metrics.get("step_count")
-    _reset_if_new_session(step_count)
-    is_first = _is_first_moment()
-    prev_metrics = _SESSION["prev_metrics"]
+    is_first = True
+    prev_metrics = None
     parts: List[str] = []
+    parts.append("## Outcome")
+    success = metrics.get("success", False)
+    failed = metrics.get("failed", False)
+    failure_reason = metrics.get("failure_reason")
+    if success:
+        parts.append("Result: SUCCESS")
+    elif failed:
+        parts.append("Result: FAILED")
+        if failure_reason:
+            parts.append(f"Reason: {failure_reason}")
+    else:
+        parts.append("Result: INCOMPLETE")
+    parts.append("")
     critical_keys = [
         "beam_angle_deg", "net_torque_about_pivot", "structure_mass",
         "balance_duration", "max_angle_seen_deg",
@@ -511,21 +503,6 @@ def format_task_metrics(metrics: Dict[str, Any]) -> List[str]:
     parts.extend(_section_constraint_profile(metrics, prev_metrics))
     parts.append("")
     parts.extend(_section_numerical_health(metrics, is_first))
-    parts.append("")
-    parts.append("## Outcome")
-    success = metrics.get("success", False)
-    failed = metrics.get("failed", False)
-    failure_reason = metrics.get("failure_reason")
-    if success:
-        parts.append("Result: SUCCESS")
-    elif failed:
-        parts.append(f"Result: FAILED")
-        if failure_reason:
-            parts.append(f"Reason: {failure_reason}")
-    else:
-        parts.append("Result: INCOMPLETE")
-    _SESSION["prev_metrics"] = {k: v for k, v in metrics.items()}
-    _SESSION["prev_step"] = step_count if step_count is not None else -1
     return parts
 
 def get_improvement_suggestions(
@@ -547,17 +524,4 @@ def get_improvement_suggestions(
         else:
             suggestions.append("- Review error details to identify and fix the issue")
         return suggestions
-    if success:
-        suggestions.append("- Design successfully balanced the load — consider robustness to parameter variation")
-        return suggestions
-    if failed:
-        fr = failure_reason or ""
-        if "Pivot joint snapped" in fr:
-            suggestions.append("- Net torque exceeded pivot limit — reduce imbalance or increase lever arm on counterweight side")
-        if "touched ground" in fr:
-            suggestions.append("- Structure fell below ground threshold — verify all bodies remain above failure y-level")
-        if "Beam angle" in fr and "exceeds" in fr:
-            suggestions.append("- Angle deviation exceeded tolerance — improve mass distribution symmetry")
-        if "Failed to catch" in fr:
-            suggestions.append("- Load was not caught — ensure structure reaches within catch radius of load position")
     return suggestions

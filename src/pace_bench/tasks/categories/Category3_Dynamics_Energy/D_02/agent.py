@@ -17,6 +17,8 @@ def _base_build_agent(sandbox):
     total_mass = sandbox.get_structure_mass()
     if total_mass > sandbox.MAX_STRUCTURE_MASS:
         raise ValueError(
+            f"Structure mass {total_mass:.2f} kg exceeds the "
+            f"{sandbox.MAX_STRUCTURE_MASS:.2f} kg limit"
         )
     return jumper
 
@@ -39,12 +41,29 @@ def agent_action_stage_1(sandbox, agent_body, step_count):
     sandbox.set_jumper_velocity(vx, vy)
 
 def build_agent_stage_2(sandbox):
-    return _base_build_agent(sandbox)
+    jumper = sandbox.get_jumper()
+    if jumper is None:
+        raise ValueError("Jumper not found in environment")
+    return jumper
 
 def agent_action_stage_2(sandbox, agent_body, step_count):
-    if step_count != 0:
-        return
-    vx, vy = 90.0, 35.0
+    x, y = sandbox.get_body_position()
+    if x < 17.92:
+        vx = 8.0
+        target_y = 5.25
+    elif x < 18.15:
+        vx = 0.08
+        target_y = 15.45
+    elif x < 19.92:
+        vx = 8.0
+        target_y = 15.45
+    elif x < 20.15:
+        vx = 0.08
+        target_y = 4.85
+    else:
+        vx = 8.0
+        target_y = 4.85
+    vy = max(-12.0, min(12.0, 10.0 * (target_y - y)))
     sandbox.set_jumper_velocity(vx, vy)
 
 def build_agent_stage_3(sandbox):

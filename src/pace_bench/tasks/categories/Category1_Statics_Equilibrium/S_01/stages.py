@@ -1,8 +1,27 @@
 from __future__ import annotations
 
+from pace_bench.tasks.stage_prompt import uniform_suffix_for_task
+
 from typing import Any, Dict, List
 
 import re
+
+
+def _replace_once(
+    text: str,
+    pattern: str,
+    replacement: Any,
+    *,
+    field: str,
+    flags: int = 0,
+) -> str:
+    updated, count = re.subn(pattern, replacement, text, flags=flags)
+    if count != 1:
+        raise ValueError(
+            f"S_01 prompt update for {field} expected exactly one match, got {count}"
+        )
+    return updated
+
 
 def update_task_description_for_visible_changes(
     base_description: str,
@@ -34,35 +53,35 @@ def update_task_description_for_visible_changes(
     target_x = target_right_cliff_start + 5.0
     if target_gap_width != base_gap_width:
         right_cliff_pattern = r"(- \*\*Right Cliff\*\*: Starts at x=)(\d+\.?\d*)(m.*)$"
-        if re.search(right_cliff_pattern, description, re.MULTILINE):
-            description = re.sub(
-                right_cliff_pattern,
-                lambda m: f"{m.group(1)}{target_right_cliff_start:.1f}m (originally {base_right_cliff_start:.1f}m in the source environment).",
-                description,
-                flags=re.MULTILINE,
-            )
+        description = _replace_once(
+            description,
+            right_cliff_pattern,
+            lambda m: f"{m.group(1)}{target_right_cliff_start:.1f}m (originally {base_right_cliff_start:.1f}m in the source environment){m.group(3)[1:]}",
+            field="right cliff",
+            flags=re.MULTILINE,
+        )
         build_zone_pattern = r"(- \*\*Build Zone\*\*: Structure must be built within x=\[10, )(\d+\.?\d*)(\], y=\[5, 15\] \([^)]+\)\.)"
-        if re.search(build_zone_pattern, description):
-            description = re.sub(
-                build_zone_pattern,
-                lambda m: f"{m.group(1)}{target_x:.1f}] (originally [10, {base_target_x:.1f}] in the source environment), y=[5, 15] (the upper x-bound is the target position so the deck can reach the goal).",
-                description
-            )
+        description = _replace_once(
+            description,
+            build_zone_pattern,
+            lambda m: f"{m.group(1)}{target_x:.1f}] (originally [10, {base_target_x:.1f}] in the source environment), y=[5, 15] (the upper x-bound is the target position so the deck can reach the goal).",
+            field="build zone",
+        )
         target_desc_pattern = r"(- \*\*Target\*\*: The vehicle must fully cross the gap and reach at least x=)(\d+\.?\d*)m( on the right side.)"
-        if re.search(target_desc_pattern, description):
-            description = re.sub(
-                target_desc_pattern,
-                lambda m: f"{m.group(1)}{target_x:.1f}m (originally {base_target_x:.1f}m in the source environment){m.group(3)}",
-                description
-            )
+        description = _replace_once(
+            description,
+            target_desc_pattern,
+            lambda m: f"{m.group(1)}{target_x:.1f}m (originally {base_target_x:.1f}m in the source environment){m.group(3)}",
+            field="target",
+        )
     if target_max_mass != base_max_mass:
-        mass_desc_pattern = r"(- \*\*Mass Budget\*\*: Total structure mass must be less than )(\d+\.?\d*) kg\."
-        if re.search(mass_desc_pattern, description):
-            description = re.sub(
-                mass_desc_pattern,
-                f"\\g<1>{target_max_mass:.0f} kg (originally {base_max_mass:.0f} kg in the source environment).",
-                description
-            )
+        mass_desc_pattern = r"(- \*\*Mass Budget\*\*: Total structure mass must be at most )(\d+\.?\d*) kg\."
+        description = _replace_once(
+            description,
+            mass_desc_pattern,
+            f"\\g<1>{target_max_mass:.0f} kg (originally {base_max_mass:.0f} kg in the source environment).",
+            field="mass budget",
+        )
     for key, label, default in [
         ("joint_max_force", "Joint Strength", 80.0),
         ("joint_max_torque", "Joint Strength", 300.0),
@@ -78,8 +97,13 @@ def update_task_description_for_visible_changes(
             else:
                 pattern = rf"(- \*\*{label}\*\*: .*? maximum torque is )(\d+\.?\d*)([;.] ?)"
                 replacement = f"\\g<1>{target_val:.1f} (originally {base_val:.1f} in the source environment)\\g<3>"
-            if re.search(pattern, description, re.IGNORECASE):
-                description = re.sub(pattern, replacement, description, flags=re.IGNORECASE)
+            description = _replace_once(
+                description,
+                pattern,
+                replacement,
+                field=key,
+                flags=re.IGNORECASE,
+            )
     return description
 
 def update_success_criteria_for_visible_changes(
@@ -112,20 +136,20 @@ def update_success_criteria_for_visible_changes(
         base_target_x = base_right_cliff_start + 5.0
         target_x = target_right_cliff_start + 5.0
         target_pattern = r"(1\. \*\*Passage\*\*: Vehicle reaches x >= )(\d+\.?\d*)m\."
-        if re.search(target_pattern, criteria):
-            criteria = re.sub(
-                target_pattern,
-                f"\\g<1>{target_x:.1f}m (originally {base_target_x:.1f}m in the source environment).",
-                criteria
-            )
+        criteria = _replace_once(
+            criteria,
+            target_pattern,
+            f"\\g<1>{target_x:.1f}m (originally {base_target_x:.1f}m in the source environment).",
+            field="passage target",
+        )
     if target_max_mass != base_max_mass:
-        mass_pattern = r"(- \*\*Mass Budget\*\*: < )(\d+\.?\d*) kg\."
-        if re.search(mass_pattern, criteria):
-            criteria = re.sub(
-                mass_pattern,
-                f"\\g<1>{target_max_mass:.0f} kg (originally {base_max_mass:.0f} kg in the source environment).",
-                criteria
-            )
+        mass_pattern = r"(- \*\*Mass Budget\*\*: <= )(\d+\.?\d*) kg\."
+        criteria = _replace_once(
+            criteria,
+            mass_pattern,
+            f"\\g<1>{target_max_mass:.0f} kg (originally {base_max_mass:.0f} kg in the source environment).",
+            field="success mass budget",
+        )
     for key, label, default in [
         ("joint_max_force", "Joint Strength", 80.0),
         ("joint_max_torque", "Joint Strength", 300.0),
@@ -141,34 +165,29 @@ def update_success_criteria_for_visible_changes(
             else:
                 pattern = rf"(- \*\*{label}\*\*: .*? maximum torque is )(\d+\.?\d*)([;.] ?)"
                 replacement = f"\\g<1>{target_val:.1f} (originally {base_val:.1f} in the source environment)\\g<3>"
-            if re.search(pattern, criteria, re.IGNORECASE):
-                criteria = re.sub(pattern, replacement, criteria, flags=re.IGNORECASE)
+            criteria = _replace_once(
+                criteria,
+                pattern,
+                replacement,
+                field=f"success {key}",
+                flags=re.IGNORECASE,
+            )
     return criteria
 
 def get_s01_curriculum_stages() -> List[Dict[str, Any]]:
-    UNIFORM_SUFFIX = """
-
-Sensors indicate that this region exhibits non-standard physical properties.
-While the following variables **MIGHT** have changed from the initial environment, **NOT ALL** of them will necessarily be mutated in any given task. You must use active interaction and environmental feedback to deduce which specific conditions apply:
- - **Joint torque resilience**: The maximum torque structural joints can withstand before failing.
- - **Anchor torque resilience**: The maximum torque cliff anchors can withstand before breaking.
- - **Joint force resilience**: The maximum linear force structural joints can withstand before failing.
- - **Anchor force resilience**: The maximum linear force cliff anchors can withstand before breaking.
- - **Mass limit**: The total allowed mass budget for your structure.
- - **Gravitational acceleration**: The strength and direction of the vertical gravitational force.
- - **Atmospheric wind**: Constant lateral and vertical forces acting on all bodies in the environment.
- - **Terrain gap width**: The horizontal distance between the starting cliff and the destination cliff.
-
-**Discovery via feedback**: Your objective is to identify the underlying physical rules of this specific environment through trial and reasoning. Initial standard solutions may fail; analyze the failure mode (e.g., where a joint breaks or how a body moves) to infer the hidden constraints and adapt your design.
-"""
+    UNIFORM_SUFFIX = uniform_suffix_for_task("S_01")
     return [
         {
             "stage_id": "Stage-1",
             "title": "Brittle Material",
-            "mutation_description": "Joints cannot withstand torque and must act purely as pivots.",
-            "task_description_suffix": UNIFORM_SUFFIX,
-            "terrain_config": {},
+            "mutation_description": "Low torque limits require pivot joints while the mass and force limits exclude the prior pinned reference.",
+            "task_description_suffix": uniform_suffix_for_task("S_01"),
+            "terrain_config": {
+                "max_structure_mass": 492.0,
+            },
             "physics_config": {
+                "joint_max_force": 40.0,
+                "anchor_max_force": 50.0,
                 "joint_max_torque": 0.1,
                 "anchor_max_torque": 0.1,
             },
@@ -176,46 +195,48 @@ While the following variables **MIGHT** have changed from the initial environmen
         {
             "stage_id": "Stage-2",
             "title": "Paper Joints",
-            "mutation_description": "Catastrophically weakened structural joints — the maximum linear force joints can withstand is reduced by 13.3x. Standard truss designs immediately suffer cascading joint failures when the vehicle crosses. Only a high-resolution truss with much finer panel spacing can distribute the concentrated vehicle load across enough joints to keep individual joint forces below the critical threshold.",
-            "task_description_suffix": UNIFORM_SUFFIX,
-            "terrain_config": {},
+            "mutation_description": "A low joint-force threshold and limited anchor capacity require finer load distribution and multiple anchoring levels.",
+            "task_description_suffix": uniform_suffix_for_task("S_01"),
+            "terrain_config": {
+                "max_structure_mass": 1000.0,
+            },
             "physics_config": {
-                "joint_max_force": 6.0,
+                "joint_max_force": 5.5,
+                "anchor_max_force": 15.0,
             },
         },
         {
             "stage_id": "Stage-3",
             "title": "The Vortex Gorge",
-            "mutation_description": "Severe multi-factor stress: heightened gravity, intensified crosswind, wider chasm, tightened mass budget, and critically weakened structural joints and cliff anchors.",
-            "task_description_suffix": UNIFORM_SUFFIX,
+            "mutation_description": "A wider span combines a lower mass allowance, altered gravity and wind, and low torque limits.",
+            "task_description_suffix": uniform_suffix_for_task("S_01"),
             "terrain_config": {
-                "gap_width": 22.0,
-                "max_structure_mass": 950.0,
+                "gap_width": 20.0,
+                "max_structure_mass": 550.0,
             },
             "physics_config": {
-                "gravity": (0, -24.0),
-                "wind_force": (-28.0, -8.0),
-                "joint_max_force": 20.0,
-                "anchor_max_force": 22.0,
-                "joint_max_torque": 40.0,
-                "anchor_max_torque": 30.0,
+                "gravity": (0, -20.0),
+                "wind_force": (-20.0, -4.0),
+                "joint_max_torque": 0.2,
+                "anchor_max_torque": 0.2,
             },
         },
         {
             "stage_id": "Stage-4",
             "title": "Abyssal Crossing",
-            "mutation_description": "Wider gap, stronger gravity, significant wind, and adjusted mass budget.",
-            "task_description_suffix": UNIFORM_SUFFIX,
+            "mutation_description": "A long span combines a low mass allowance, altered gravity and wind, and bounded joint and anchor loads.",
+            "task_description_suffix": uniform_suffix_for_task("S_01"),
             "terrain_config": {
-                "gap_width": 25.0,
-                "max_structure_mass": 1500.0,
+                "gap_width": 26.0,
+                "max_structure_mass": 330.0,
             },
             "physics_config": {
-                "gravity": (0, -25.0),
-                "wind_force": (-35.0, -10.0),
+                "gravity": (0, -28.0),
+                "wind_force": (-45.0, -8.0),
                 "joint_max_force": 40.0,
                 "anchor_max_force": 60.0,
-                "joint_max_torque": 50.0,
+                "joint_max_torque": 80.0,
+                "anchor_max_torque": 120.0,
             },
         },
     ]

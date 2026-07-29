@@ -1,9 +1,3 @@
-import sys
-
-import os
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../..'))
-
 from pace_bench.primitives import compute_constraint_penalty
 
 class Evaluator:
@@ -39,8 +33,15 @@ class Evaluator:
         self.MAX_JOINT_COUNT = getattr(environment, 'MAX_JOINT_COUNT', getattr(env_class, 'MAX_JOINT_COUNT', 15))
     def evaluate(self, agent_body, step_count, max_steps):
         if not self.environment:
-            return True, 0.0, {"error": "Environment not available"}
-        if not self.design_constraints_checked and step_count == 0:
+            return True, 0.0, {
+                "success": False,
+                "failed": True,
+                "failure_reason": "Environment not available",
+                "error": "Environment not available",
+                "step_count": step_count,
+            }
+        self._current_max_steps = int(max_steps)
+        if not self.design_constraints_checked:
             violations = self._check_design_constraints()
             if violations:
                 self.design_constraints_checked = True
@@ -110,11 +111,11 @@ class Evaluator:
         joint_peak_forces = self.environment.get_joint_peak_forces() if hasattr(self.environment, 'get_joint_peak_forces') else []
         joint_force_limit = self.environment.get_joint_force_limit() if hasattr(self.environment, 'get_joint_force_limit') else 50000.0
         joint_break_steps = self.environment.get_joint_break_consecutive_steps() if hasattr(self.environment, 'get_joint_break_consecutive_steps') else 3
-        disturbance_timeline = self.environment.get_disturbance_timeline() if hasattr(self.environment, 'get_disturbance_timeline') else []
         beam_coverage = self.environment.get_beam_coverage_envelope() if hasattr(self.environment, 'get_beam_coverage_envelope') else {}
         leak_height = self.environment.get_leak_height_distribution() if hasattr(self.environment, 'get_leak_height_distribution') else {}
         numerical_warnings = self.environment.get_numerical_health_warnings() if hasattr(self.environment, 'get_numerical_health_warnings') else []
-        max_steps = self.environment.get_max_steps() if hasattr(self.environment, 'get_max_steps') else 10000
+        observation_errors = self.environment.get_observation_errors() if hasattr(self.environment, 'get_observation_errors') else []
+        max_steps = getattr(self, '_current_max_steps', 10000)
         progress_pct = (float(step_count) / float(max(max_steps, 1))) * 100.0
         structure_mass = self.environment.get_structure_mass()
         max_structure_mass = self.MAX_STRUCTURE_MASS
@@ -153,10 +154,10 @@ class Evaluator:
             "joint_peak_forces": joint_peak_forces,
             "joint_force_limit": joint_force_limit,
             "joint_break_consecutive_steps": joint_break_steps,
-            "disturbance_timeline": disturbance_timeline,
             "beam_coverage_envelope": beam_coverage,
             "leak_height_distribution": leak_height,
             "numerical_health_warnings": numerical_warnings,
+            "observation_errors": observation_errors,
             "build_zone_left_x_min": self.BUILD_ZONE_LEFT_X_MIN,
             "build_zone_left_x_max": self.BUILD_ZONE_LEFT_X_MAX,
             "build_zone_middle_x_min": self.BUILD_ZONE_MIDDLE_X_MIN,
@@ -269,8 +270,8 @@ class Evaluator:
                             mins.append(float(wv[1]))
                 if mins:
                     return min(mins)
-            except Exception:
-                pass
+            except (AttributeError, TypeError, ValueError) as exc:
+                violations.append(f"Unable to inspect beam geometry: {exc}")
             return None
         for body in self.environment._bodies:
             x, y = body.position.x, body.position.y
@@ -289,8 +290,8 @@ class Evaluator:
                     try:
                         if hasattr(shape, 'box'):
                             hx, hy = shape.box
-                    except Exception:
-                        pass
+                    except (AttributeError, TypeError, ValueError):
+                        hx, hy = None, None
                     if hx is None and getattr(shape, 'vertices', None):
                         verts = shape.vertices
                         if len(verts) >= 2:
@@ -314,8 +315,10 @@ class Evaluator:
                             violations.append(
                                 f"Beam width {beam_width:.2f} m exceeds maximum {self.MAX_BEAM_WIDTH} m"
                             )
-            except (IndexError, TypeError, AttributeError):
-                pass
+            except (IndexError, TypeError, AttributeError, ValueError) as exc:
+                violations.append(
+                    f"Unable to validate beam geometry at ({x:.2f}, {y:.2f}): {exc}"
+                )
         return violations
     def get_constraint_info(self):
         return {

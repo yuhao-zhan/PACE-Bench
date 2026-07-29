@@ -118,27 +118,80 @@ def agent_action(sandbox, agent_body, step_count):
         fy *= scale
     sandbox.apply_thrust(fx, fy)
 
-def build_agent_stage_1(sandbox): return None
+def build_agent_stage_1(sandbox):
+    pos = sandbox.get_craft_position()
+    x, y = pos if pos is not None else (8.0, 2.0)
+    return {
+        "prev_x": x,
+        "prev_y": y,
+        "velocity_x": 0.0,
+        "velocity_y": 0.0,
+        "bias_x": 0.0,
+        "inside_target_steps": 0,
+        "finished": False,
+    }
 
 def agent_action_stage_1(sandbox, agent_body, step_count):
-    if sandbox.is_overheated(): return
-    pos = sandbox.get_craft_position()
-    if pos is None: return
-    x, y = pos
-    if TX_MIN <= x <= TX_MAX and TY_MIN <= y <= TY_MAX:
-        sandbox.apply_thrust(0.0, 75.0)
+    if sandbox.is_overheated():
         return
-    thrust_mag = 200.0
-    wx, wy = _waypoint(x, y)
-    wy = 3.5 if x > 20.0 else wy
-    dx, dy = wx - x, wy - y
-    dist = math.sqrt(dx*dx + dy*dy)
-    if dist < 1e-6: return
-    fx = (thrust_mag * (dx/dist)) + 80.0
-    fy = (thrust_mag * (dy/dist))
-    if y < 2.2: fy += 180.0
-    if 21.0 <= x <= 24.5 and y < 2.8: fy += 200.0
-    if x > 27.0 and y < 2.5: fy += 100.0
+    pos = sandbox.get_craft_position()
+    if pos is None:
+        return
+    x, y = pos
+    if agent_body["finished"]:
+        sandbox.apply_thrust(0.0, 0.0)
+        return
+
+    if TX_MIN <= x <= TX_MAX and TY_MIN <= y <= TY_MAX:
+        agent_body["inside_target_steps"] += 1
+    else:
+        agent_body["inside_target_steps"] = 0
+    if agent_body["inside_target_steps"] >= 240:
+        agent_body["finished"] = True
+        sandbox.apply_thrust(0.0, 0.0)
+        return
+
+    raw_vx = (x - agent_body["prev_x"]) * 60.0
+    raw_vy = (y - agent_body["prev_y"]) * 60.0
+    vx = 0.65 * agent_body["velocity_x"] + 0.35 * raw_vx
+    vy = 0.65 * agent_body["velocity_y"] + 0.35 * raw_vy
+    agent_body["prev_x"] = x
+    agent_body["prev_y"] = y
+    agent_body["velocity_x"] = vx
+    agent_body["velocity_y"] = vy
+
+    if x < 11.2:
+        desired_vx, desired_y = 1.6, 2.0
+    elif x < 14.4:
+        desired_vx, desired_y = 0.85, 2.0
+    elif x < 17.2:
+        desired_vx, desired_y = 2.2, 2.15
+    elif x < 20.4:
+        desired_vx, desired_y = 1.5, 2.2
+    elif x < 21.5:
+        desired_vx, desired_y = 1.0, 2.35
+    elif x < 24.5:
+        desired_vx, desired_y = 0.75, 2.4
+    elif x < 27.0:
+        desired_vx, desired_y = 1.35, 3.2
+    else:
+        desired_vx = max(-1.5, min(1.5, 0.8 * (30.0 - x)))
+        desired_y = 3.5
+
+    velocity_error = desired_vx - vx
+    if not (DRAIN_LO <= x <= DRAIN_HI):
+        agent_body["bias_x"] += 1.6 * velocity_error
+        agent_body["bias_x"] = max(-50.0, min(400.0, agent_body["bias_x"]))
+
+    if DRAIN_LO <= x <= DRAIN_HI:
+        fx = agent_body["bias_x"] + 900.0 * velocity_error
+        fx = max(-500.0, min(3600.0, fx))
+    else:
+        fx = agent_body["bias_x"] + 220.0 * velocity_error
+        fx = max(-500.0, min(900.0, fx))
+
+    fy = 75.0 + 210.0 * (desired_y - y) - 170.0 * vy
+    fy = max(-500.0, min(500.0, fy))
     sandbox.apply_thrust(fx, fy)
 
 def build_agent_stage_2(sandbox):
@@ -227,70 +280,85 @@ def agent_action_stage_2(sandbox, agent_body, step_count):
         fx *= scale; fy *= scale
     sandbox.apply_thrust(fx, fy)
 
-def build_agent_stage_3(sandbox): return {"target_reached": False}
+def build_agent_stage_3(sandbox):
+    pos = sandbox.get_craft_position()
+    x, y = pos if pos is not None else (8.0, 2.0)
+    return {
+        "prev_x": x,
+        "prev_y": y,
+        "velocity_x": 0.0,
+        "velocity_y": 0.0,
+        "inside_target_steps": 0,
+        "finished": False,
+    }
 
 def agent_action_stage_3(sandbox, agent_body, step_count):
-    if sandbox.is_overheated(): return
+    if sandbox.is_overheated():
+        return
     pos = sandbox.get_craft_position()
-    if pos is None: return
+    if pos is None:
+        return
     x, y = pos
-    step_idx = sandbox.get_step_count() if hasattr(sandbox, "get_step_count") else step_count
+
     if TX_MIN <= x <= TX_MAX and TY_MIN <= y <= TY_MAX:
-        agent_body["target_reached"] = True
-    if agent_body.get("target_reached"):
+        agent_body["inside_target_steps"] += 1
+    else:
+        agent_body["inside_target_steps"] = 0
+    if agent_body["inside_target_steps"] >= 120:
+        agent_body["finished"] = True
+    if agent_body["finished"]:
         sandbox.apply_thrust(0.0, 0.0)
         return
-    heat_limit = sandbox.get_overheat_limit()
-    heat_used = sandbox.get_heat()
-    remaining = heat_limit - heat_used
 
-    if heat_used >= heat_limit * 0.55:
-        thrust_mag = 80.0
-    else:
-        thrust_mag = min(600.0, remaining * 0.42)
+    raw_vx = (x - agent_body["prev_x"]) * 60.0
+    raw_vy = (y - agent_body["prev_y"]) * 60.0
+    vx = 0.7 * agent_body["velocity_x"] + 0.3 * raw_vx
+    vy = 0.7 * agent_body["velocity_y"] + 0.3 * raw_vy
+    agent_body["prev_x"] = x
+    agent_body["prev_y"] = y
+    agent_body["velocity_x"] = vx
+    agent_body["velocity_y"] = vy
 
     if DRAIN_LO <= x <= DRAIN_HI:
-        if heat_used < heat_limit * 0.55:
-            thrust_mag = 850.0
-        else:
-            thrust_mag = 200.0
-
-    slip_bonus = 120.0 if SLIP_LO <= x <= SLIP_HI else 0.0
-    wx, wy = _waypoint(x, y)
-
-    if x < 14.0:
-        wy = min(wy, 2.5)
+        fx = 0.0
+    elif SLIP_LO <= x <= SLIP_HI:
+        desired_vx = 2.4
+        fx = 650.0 + 260.0 * (desired_vx - vx)
+        fx = max(250.0, min(1500.0, fx))
+    elif x >= 27.0:
+        desired_vx = max(-0.8, min(0.8, 0.9 * (29.0 - x)))
+        fx = -260.0 + 300.0 * (desired_vx - vx)
+        fx = max(-900.0, min(300.0, fx))
+    elif x >= 20.0:
+        fx = min(0.0, 220.0 * (1.65 - vx))
+        fx = max(-500.0, fx)
     else:
-        wy = min(wy, 2.7)
-    if x > 24.0: wy = 4.0
+        fx = 0.0
 
-    if y < 1.8: wy = max(wy, 2.2)
-    if x < G1_X + 1.0 and y < 1.3: wy = max(wy, 2.0)
-    if G2_X - 1.5 <= x <= G2_X + 1.0 and y < 2.0: wy = max(wy, 2.4)
-    dx, dy = wx - x, wy - y
-    dist = math.sqrt(dx*dx + dy*dy)
-    if dist < 1e-6: return
-    ux = dx / dist
-    uy = dy / dist
-    fx = thrust_mag * ux + slip_bonus
-    fy = thrust_mag * uy
+    if x < 10.5:
+        fy = 0.0
+    else:
+        if x < 14.35:
+            desired_y = 1.5
+        elif x < 18.8:
+            desired_y = None
+        elif x < 24.5:
+            desired_y = 2.38
+        else:
+            desired_y = 2.65
+        if desired_y is None:
+            fy = 0.0
+        else:
+            fy = 525.0 + 520.0 * (desired_y - y) - 260.0 * vy
+            fy = max(-300.0, min(1500.0, fy))
 
-    if y < 1.6: fy += 200.0
-    if x < G1_X + 1.0 and y < 1.5: fy += min(80.0, (1.8 - y) * 150.0)
-    if G2_X - 1.0 <= x <= G2_X + 2.0 and y < 2.0: fy += 160.0
-    if x > 25.0 and y < 3.0: fy += 140.0
-
-    if WIND_LO <= x <= WIND_HI:
-        wind_fy = 50.0 * math.sin(0.20 * step_idx)
-        fy -= wind_fy
-        fx += 30.0
-    total = math.sqrt(fx*fx + fy*fy)
-    cap = thrust_mag * 3.0
-    if y < 1.6: cap = max(cap, 300.0)
-    if G2_X - 1.0 <= x <= G2_X + 2.0 and y < 2.0: cap = max(cap, 400.0)
-    if total > cap:
-        scale = cap / total
-        fx *= scale; fy *= scale
+    remaining = sandbox.get_overheat_limit() - sandbox.get_heat()
+    requested = math.sqrt(fx * fx + fy * fy)
+    available = max(0.0, remaining * 30.0)
+    if requested > available and requested > 0.0:
+        scale = available / requested
+        fx *= scale
+        fy *= scale
     sandbox.apply_thrust(fx, fy)
 
 def build_agent_stage_4(sandbox): return {"reached_target_once": False}

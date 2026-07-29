@@ -2,10 +2,6 @@ import os
 
 import json
 
-import sys
-
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
-
 from pace_bench.tasks.primitives_api import API_INTRO
 
 with open(os.path.join(os.path.dirname(__file__), '..', '..', 'primitives_api.json'), 'r') as f:
@@ -19,7 +15,7 @@ TASK_PROMPT = {
 Design a structure to catch and stabilize seven heavy balls launched sequentially toward a target zone.
 
 - **The Projectiles**: Seven balls spawn on the right at x=22.0 m with nominal radius 0.35 m. Initial center heights (m) are ball1 y=4.0, ball2 y=3.5, ball3 y=4.5, ball4 y=3.8, ball5 y=4.2, ball6 y=3.9, ball7 y=4.1. Ball 1 moves left immediately; balls 2–7 start at rest and receive horizontal velocity at the listed times (simulation time in seconds after reset): ball 2 at t=0.4 s, ball 3 at t=1.0 s, ball 4 at t=1.3 s, ball 5 at t=1.8 s, ball 6 at t=2.2 s, ball 7 at t=2.7 s. Nominal horizontal speeds at release (m/s) are ball1=-24, ball2=-26, ball3=-24, ball4=-28, ball5=-25, ball6=-26, ball7=-25. Mutated environments may change these times and speeds.
-- **Projectile inertia**: Nominal ball density is 95.0 (2D areal density in simulation units).
+- **Projectile inertia**: Ball density is a latent material property and is not disclosed numerically; infer inertia from observed trajectories and impacts.
 - **Projectile damping and contact**: Balls experience linear and angular damping, restitution, and sliding friction against surfaces; numerical values are fixed for a given environment and may differ under mutations—infer behavior from motion and feedback rather than assuming textbook defaults.
 - **Ground surface**: The top of the horizontal ground strip is at **y = 0.5** m (the pit-failure check uses **y < 0.72** m). Ground–ball and ground–beam friction/restitution are environment parameters not duplicated here.
 - **Environmental loads**: Oscillating lateral forces act on balls, scaled by each ball’s mass. Amplitude, period, and internal coupling factors are not disclosed numerically—treat lateral loading as environment-specific.

@@ -1,11 +1,5 @@
 import math
 
-import os
-
-import sys
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../.."))
-
 APEX_SPEED_THRESHOLD = 1.0
 
 VERTICAL_FALL_VX_THRESHOLD = 1.35
@@ -75,7 +69,7 @@ class Evaluator:
             if violations:
                 self._design_constraints_checked = True
                 metrics = self._make_metrics(pos, vel, step_count, False, True,
-                    "Design constraint violated: " + "; ".join(violations))
+                    "Design constraint violated: " + "; ".join(violations), max_steps)
                 return True, 0.0, metrics
             self._design_constraints_checked = True
         success = self._touched_target
@@ -83,11 +77,10 @@ class Evaluator:
         failure_reason = None
         if step_count >= max_steps - 1 and not self._touched_target:
             failed = True
-            failure_reason = (
-            )
+            failure_reason = "Did not reach the target zone within the simulation step limit"
         done = failed or success or step_count >= max_steps - 1
         score = 100.0 if success else (0.0 if failed else 0.0)
-        metrics = self._make_metrics(pos, vel, step_count, success, failed, failure_reason)
+        metrics = self._make_metrics(pos, vel, step_count, success, failed, failure_reason, max_steps)
         return done, score, metrics
     def _check_design_constraints(self):
         violations = []
@@ -106,7 +99,10 @@ class Evaluator:
                     f"y=[{self.BUILD_ZONE_Y_MIN}, {self.BUILD_ZONE_Y_MAX}]"
                 )
         return violations
-    def _make_metrics(self, pos, vel, step_count, success=False, failed=False, failure_reason=None):
+    def _make_metrics(
+        self, pos, vel, step_count, success=False, failed=False,
+        failure_reason=None, max_steps=None,
+    ):
         px, py = pos if pos else (0, 0)
         vx, vy = (vel[0], vel[1]) if vel else (0, 0)
         speed = (vx * vx + vy * vy) ** 0.5
@@ -128,12 +124,9 @@ class Evaluator:
             progress_pct = 100.0 if py >= self._target_y_min else 0.0
         env = self.environment
         force_stats = env.get_force_delivery_stats() if env else {}
-        wind_params = env.get_wind_params() if env else {}
-        energy_state = env.get_energy_state() if env else {}
         speed_stats = env.get_speed_stats() if env else {}
         phase_stats = env.get_phase_alignment_stats() if env else {}
         env_params = env.get_environment_params() if env else {}
-        seat_mass = env.get_seat_mass() if env else 0.0
         max_pump_force = getattr(env, "MAX_PUMP_FORCE", 42.0) if env else 42.0
         max_impulse = max_pump_force * 0.1
         force_ok = speed >= 0 and True
@@ -144,7 +137,7 @@ class Evaluator:
             "pass": force_clamped == 0,
             "detail": "{} call(s) had force clamped to limit".format(force_clamped) if force_clamped else "All forces within limit",
         }
-        impulse_clamped = force_stats.get("force_clamped_count", 0)
+        impulse_clamped = force_stats.get("impulse_clamped_count", 0)
         constraint_impulse = {
             "label": "Impulse magnitude ≤ {:.2f} N·s per step".format(max_impulse),
             "limit": max_impulse,
@@ -169,14 +162,6 @@ class Evaluator:
             "detail": "Checked at build time" if self._design_constraints_checked else "Not yet checked",
         }
         apex_list = sorted(self._apex_events, key=lambda a: a[2], reverse=True)[:5]
-        wind_history = env.get_wind_force_history() if env else []
-        wind_mean = 0.0
-        wind_gust_count = 0
-        if wind_history:
-            wind_forces = [w[1] for w in wind_history]
-            wind_mean = sum(wind_forces) / len(wind_forces)
-            if abs(wind_mean) > 0.01:
-                wind_gust_count = sum(1 for f in wind_forces if abs(f - wind_mean) > abs(wind_mean) * 0.5)
         metrics = {
             "seat_x": px, "seat_y": py,
             "seat_vx": vx, "seat_vy": vy, "seat_speed": speed,
@@ -185,6 +170,7 @@ class Evaluator:
             "target_x_max": self._target_x_max,
             "success": success, "failed": failed, "failure_reason": failure_reason,
             "step_count": step_count,
+            "max_steps": max_steps,
             "structure_mass": env.get_structure_mass() if env else 0.0,
             "max_structure_mass": self.MAX_STRUCTURE_MASS,
             "touched_target": self._touched_target,
@@ -201,26 +187,12 @@ class Evaluator:
             "force_suppressed_deadzone": force_stats.get("force_suppressed_deadzone", 0),
             "force_suppressed_fault": force_stats.get("force_suppressed_fault", 0),
             "force_clamped_count": force_stats.get("force_clamped_count", 0),
+            "impulse_clamped_count": force_stats.get("impulse_clamped_count", 0),
             "force_delivery_pct": force_stats.get("delivery_pct", 100.0),
             "force_total_requested": force_stats.get("total_fx_requested", 0.0) + force_stats.get("total_fy_requested", 0.0),
             "force_total_delivered": force_stats.get("total_fx_delivered", 0.0) + force_stats.get("total_fy_delivered", 0.0),
             "max_pump_force": max_pump_force,
             "max_impulse": max_impulse,
-            "seat_mass": seat_mass,
-            "kinetic_energy_final": energy_state.get("kinetic_energy", 0.0),
-            "potential_energy_final": energy_state.get("potential_energy", 0.0),
-            "total_mechanical_energy_final": energy_state.get("total_mechanical_energy", 0.0),
-            "peak_kinetic_energy": self._peak_kinetic_energy,
-            "peak_kinetic_energy_step": self._peak_kinetic_energy_step,
-            "peak_potential_energy": self._peak_potential_energy,
-            "wind_enabled": wind_params.get("wind_enabled", False),
-            "wind_strength": wind_params.get("wind_strength", 0.0),
-            "wind_period": wind_params.get("wind_period", 0.0),
-            "wind_gust_prob": wind_params.get("gust_prob", 0.0),
-            "wind_gust_force": wind_params.get("gust_force", 0.0),
-            "wind_mean_observed": wind_mean,
-            "wind_gust_count_observed": wind_gust_count,
-            "wind_is_sinusoidal": wind_params.get("wind_period", 0.0) != 0.0,
             "phase_alignment_pct": phase_stats.get("aligned_pct", 0.0),
             "phase_antialigned_pct": phase_stats.get("antialigned_pct", 0.0),
             "phase_neutral_pct": phase_stats.get("neutral_pct", 0.0),
@@ -234,12 +206,9 @@ class Evaluator:
             "pivot_x": env_params.get("pivot_x", 10.0),
             "pivot_y": env_params.get("pivot_y", 10.0),
             "swing_bottom_y": swing_bottom_y,
-            "quadratic_damping": env_params.get("quadratic_damping", 0.0),
             "actuator_fault": env_params.get("actuator_fault"),
             "dead_zone": env_params.get("dead_zone"),
             "dead_zone_min_speed": env_params.get("dead_zone_min_speed"),
-            "seat_linear_damping": env_params.get("seat_linear_damping", 0.0),
-            "seat_angular_damping": env_params.get("seat_angular_damping", 0.0),
             "apex_events": apex_list,
             "constraint_force_limit": constraint_force,
             "constraint_impulse_limit": constraint_impulse,

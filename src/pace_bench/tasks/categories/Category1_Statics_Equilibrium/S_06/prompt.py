@@ -2,10 +2,6 @@ import os
 
 import json
 
-import sys
-
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
-
 from pace_bench.tasks.primitives_api import API_INTRO
 
 with open(os.path.join(os.path.dirname(__file__), '..', '..', 'primitives_api.json'), 'r') as f:
@@ -23,8 +19,7 @@ You cannot use joints or any form of artificial bonding. The structure must rely
 - **Table**: A horizontal surface extending from x=-20 to x=0. The table edge is at x=0.
 - **Table Height**: The table surface is at y=0.0.
 - **Surface Properties**: Both the table and the blocks provide friction, which you must utilize to stabilize the stack.
-- **Table Friction**: mu_table = 0.8 (friction between blocks and the table surface).
-- **Block Friction**: mu_block = 0.6 (friction between stacked blocks).
+- **Surface Properties**: Table and inter-block friction are latent contact parameters; infer traction from observed sliding rather than expecting numeric coefficients in the prompt.
 - **Goal**: Reach x >= 0.1m beyond the edge.
 - **Block Dimensions**: width <= 1.0m, height <= 0.2m.
 - **Spawn Rule**: Blocks must be initialized within the permitted build access zone: x in [-10.0, 0.0].

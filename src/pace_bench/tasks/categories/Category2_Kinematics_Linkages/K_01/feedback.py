@@ -1,4 +1,4 @@
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 
 import math
 
@@ -316,9 +316,6 @@ def _dim5_constraint_profile(metrics: Dict[str, Any]) -> List[str]:
     for c in constraints:
         parts.append(f"  {c}\n")
     env_parts = []
-    gf = metrics.get("ground_friction")
-    if _is_finite_number(gf):
-        env_parts.append(f"gf={float(gf):.4f}")
     mbf = metrics.get("max_body_friction")
     if _is_finite_number(mbf):
         env_parts.append(f"bf={float(mbf):.4f}")
@@ -388,6 +385,8 @@ def _dim6_numerical_health(metrics: Dict[str, Any]) -> List[str]:
     return parts
 
 def format_task_metrics(metrics: Dict[str, Any]) -> List[str]:
+    if not metrics:
+        return ["**No task metrics available.**"]
     parts: List[str] = []
     try:
         critical_keys = (
@@ -397,30 +396,41 @@ def format_task_metrics(metrics: Dict[str, Any]) -> List[str]:
         )
         for k in critical_keys:
             if k in metrics and not _is_finite_number(metrics[k]):
-                parts.append(
-                )
+                parts.append(f"Outcome: INVALID METRICS — non-finite `{k}`={metrics[k]}")
                 return parts
-        parts.extend(_dim1_temporal_chronology(metrics))
-        parts.extend(_dim2_spatial_diagnostics(metrics))
-        parts.extend(_dim3_load_distribution(metrics))
-        parts.extend(_dim4_energy_power_flow(metrics))
-        parts.extend(_dim5_constraint_profile(metrics))
-        parts.extend(_dim6_numerical_health(metrics))
-        parts.append("---\n")
         if metrics.get("failed"):
             parts.append("Outcome: ❌ FAILED\n")
         elif metrics.get("success"):
             parts.append("Outcome: ✅ SUCCESS\n")
         else:
             parts.append("Outcome: ⚠️ INCOMPLETE\n")
-    except Exception:
-        parts = []
+        parts.extend(_dim1_temporal_chronology(metrics))
+        parts.extend(_dim2_spatial_diagnostics(metrics))
+        parts.extend(_dim3_load_distribution(metrics))
+        parts.extend(_dim4_energy_power_flow(metrics))
+        parts.extend(_dim5_constraint_profile(metrics))
+        parts.extend(_dim6_numerical_health(metrics))
+    except Exception as exc:
+        parts = [f"Outcome: FEEDBACK ERROR — {type(exc).__name__}: {exc}"]
     if not parts:
         try:
             from pace_bench.evaluation.verification.diagnostics import (
                 format_generic_execution_metrics,
             )
             parts = format_generic_execution_metrics(metrics)
-        except Exception:
-            parts = []
+        except Exception as exc:
+            parts = [f"Outcome: GENERIC FEEDBACK ERROR — {type(exc).__name__}: {exc}"]
     return parts
+
+
+def get_improvement_suggestions(
+    metrics: Dict[str, Any],
+    score: float,
+    success: bool,
+    failed: bool,
+    failure_reason: Optional[str] = None,
+    error: Optional[str] = None,
+) -> List[str]:
+    if error:
+        return ["- Code execution failed. Review the execution error above."]
+    return []

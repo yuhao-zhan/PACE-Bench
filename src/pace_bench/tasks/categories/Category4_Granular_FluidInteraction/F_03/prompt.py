@@ -2,10 +2,6 @@ import os
 
 import json
 
-import sys
-
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
-
 from pace_bench.tasks.primitives_api import API_INTRO
 
 with open(os.path.join(os.path.dirname(__file__), '..', '..', 'primitives_api.json'), 'r') as f:
@@ -31,7 +27,7 @@ Design a mechanism that:
 
 - **Mass Budget**: Total structure mass <= 800 kg.
 - **Beam Dimensions**: Each beam width and height must be between 0.1 m and 1.5 m.
-- **Per-scoop capacity**: Maximum particles that can be retained and transported by the scoop per trip may be limited by the environment. Monitor carry counts in feedback to determine the effective limit.
+- **Per-scoop capacity**: Maximum 999 particles can be retained and transported by the scoop per trip.
 - **Kinematic Requirement**: The mechanism must have at least 2 degrees of freedom (Arm + Bucket), i.e. at least 2 revolute joints.
 - **APIs**: Use only the primitives documented below.
 """,

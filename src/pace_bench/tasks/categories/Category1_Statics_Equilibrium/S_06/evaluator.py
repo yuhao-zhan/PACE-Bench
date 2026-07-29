@@ -216,6 +216,8 @@ class Evaluator:
             'structure_mass': self.structure_mass,
             'block_count': len(self.environment._bodies),
             'max_block_count_limit': self.MAX_BLOCK_COUNT,
+            'max_block_length_limit': self.MAX_BLOCK_LENGTH,
+            'max_block_height_limit': self.MAX_BLOCK_HEIGHT,
             'max_total_mass_limit': self.MAX_TOTAL_MASS,
             'total_kinetic_energy': self.total_kinetic_energy,
             'max_velocity': self.max_velocity,
@@ -243,6 +245,8 @@ class Evaluator:
             'failure_event_sequence': list(self._failure_events),
             'design_constraint_violations': list(self._design_constraint_violations),
             'per_block_extents': self.environment.get_per_block_extents() if hasattr(self.environment, 'get_per_block_extents') else [],
+            'table_velocity': list(self.environment.get_table_velocity()) if hasattr(self.environment, 'get_table_velocity') else None,
+            'time_step': time_step,
         }
         if self.environment._bodies:
             total_mass = sum(b.mass for b in self.environment._bodies)

@@ -1,38 +1,14 @@
 from __future__ import annotations
 
+from pace_bench.tasks.stage_prompt import uniform_suffix_for_task
+
 from typing import Any, Dict, List
 
 import math
 
 import re
 
-UNIFORM_SUFFIX = """
-
-Sensors indicate that this region exhibits non-standard physical properties.
-While the following variables **MIGHT** have changed from the initial environment, **NOT ALL** of them will necessarily be mutated in any given task. You must use active interaction and environmental feedback to deduce which specific conditions apply:
- - **Deck surface traction**: The vessel deck's friction coefficient may differ, affecting cargo sliding and containment design.
- - **Structure mass budget**: Total allowed structure mass may differ, requiring more efficient designs.
- - **Joint load tolerance**: Structural connections may have different force/torque thresholds before failing.
- - **Cargo loss-plane height**: The height threshold for cargo failure detection may differ.
- - **Submerged obstacle layout**: The number, size, and placement of submerged rocks may differ.
- - **Integration zone (build zone)**: The allowable build region for attaching structures may differ.
- - **Environmental roll-restoring couple**: Passive torque from the environment that restores roll may differ.
- - **Hull vertical placement relative to obstacles**: The boat's vertical position relative to hazards may differ.
- - **Gravitational acceleration**: Global gravity may differ from the baseline.
- - **Hull and beam motion damping**: Linear and angular damping for hull and beams may differ.
- - **Water current effects**: Lateral water current strength may differ.
- - **Lateral wind forcing**: Wind amplitude and frequency may differ.
- - **Periodic lateral impulse kicks**: Impulse magnitude and interval may differ.
- - **Wave-driven vertical forcing**: Primary wave amplitude and frequency may differ.
- - **Secondary wave modulation**: Secondary wave amplitude and frequency may differ.
- - **Vertical gust cadence**: Gust amplitude and interval may differ.
- - **Large transient wave impulses**: Rogue wave amplitude, interval, and double-step may differ.
- - **Hull roll impulses**: Hull roll impulse amplitude and interval may differ.
- - **Cargo restitution**: Granular cargo bounciness may differ.
- - **Cargo friction and damping**: Granular cargo friction and damping may differ.
-
-**Discovery via feedback**: Your objective is to identify the underlying physical rules of this specific environment through trial and reasoning. Initial standard solutions may fail; analyze failure modes from simulation feedback and adapt your design.
-"""
+UNIFORM_SUFFIX = uniform_suffix_for_task("F_05")
 
 from pace_bench.tasks.categories.Category4_Granular_FluidInteraction.F_05.environment import WELD_TORQUE_FORCE_RATIO
 
@@ -78,8 +54,12 @@ def _rock_count_phrase(n: int) -> str:
 def _format_rocks_summary(terrain_config: Dict[str, Any]) -> str:
     rocks = terrain_config.get("rocks")
     if not rocks:
-        return (
-        )
+        rocks = [
+            {"x": 13.5, "y": 1.0, "r": 0.24},
+            {"x": 14.5, "y": 1.1, "r": 0.22},
+            {"x": 15.5, "y": 1.05, "r": 0.23},
+            {"x": 16.5, "y": 1.08, "r": 0.22},
+        ]
     parts = []
     for r in rocks:
         rx = float(r.get("x", 15.0))
@@ -145,24 +125,6 @@ def update_task_description_for_visible_changes(
             description = re.sub(boat_pat_mut, _boat_repl, description, count=1)
         elif re.search(boat_pat_plain, description):
             description = re.sub(boat_pat_plain, _boat_repl, description, count=1)
-    default_df = 0.5
-    target_df = float(target_terrain_config.get("deck_friction", default_df))
-    base_df = float(base_terrain_config.get("deck_friction", default_df))
-    if target_df != base_df:
-        df_pat = r"(- \*\*Hull & beam deck friction\*\*: .*? the baseline value is \*\*)([\d.]+)(\*\* \(variants may override\))"
-        if df_pat and re.search(df_pat, description):
-            def _df_repl(_m: re.Match[str]) -> str:
-                return f"{_m.group(1)}{target_df} (originally {base_df} in the source environment){_m.group(3)}"
-            description = re.sub(df_pat, _df_repl, description, count=1)
-    default_cr = 0.12
-    target_cr = float(target_terrain_config.get("cargo_restitution", default_cr))
-    base_cr = float(base_terrain_config.get("cargo_restitution", default_cr))
-    if target_cr != base_cr:
-        cr_pat = r"(, restitution \*\*)([\d.]+)(\*\* \(variants may override contact parameters\))"
-        if cr_pat and re.search(cr_pat, description):
-            def _cr_repl(_m: re.Match[str]) -> str:
-                return f"{_m.group(1)}{target_cr} (originally {base_cr} in the source environment){_m.group(3)}"
-            description = re.sub(cr_pat, _cr_repl, description, count=1)
     target_rocks = _format_rocks_summary(target_terrain_config)
     base_rocks = _format_rocks_summary(base_terrain_config)
     if target_rocks != base_rocks:
@@ -259,8 +221,8 @@ def update_success_criteria_for_visible_changes(
                         if dot_idx != -1:
                             tmp = tmp[:dot_idx] + f" (originally {base_cap:.1f} degrees in the source environment)."
                 criteria = tmp
-    default_cwy = 1.98
-    default_grace = 120
+    default_cwy = 1.90
+    default_grace = 180
     target_cwy = float(target_terrain_config.get("cargo_water_y", default_cwy))
     base_cwy = float(base_terrain_config.get("cargo_water_y", default_cwy))
     target_grace = int(target_terrain_config.get("cargo_loss_grace_steps", default_grace))
@@ -318,10 +280,12 @@ def get_f05_curriculum_stages() -> List[Dict[str, Any]]:
         {
             "stage_id": "Stage-1",
             "title": "Metacentric Deficit",
-            "mutation_description": "Single-axis challenge: violent angular impulse kicks strike the hull at high frequency — each delivering enough rotational kinetic energy to throw the bare hull past its capsize threshold within fractions of a second. The kicks arrive faster than any passive self-righting can settle the hull between strikes. Without predictive counter-torque timing synchronized to the impulse cadence, massively distributed roll inertia, and active cargo containment against launch events, the hull will invert within the first few kick cycles. Standard roll-trim PID gains are wholly inadequate — this demands pre-emptive torque application and a full-cage architecture.",
-            "task_description_suffix": None,
+            "mutation_description": "Roll impulses and a changed retention plane test passive stability and closed cargo containment.",
+            "task_description_suffix": uniform_suffix_for_task("F_05"),
             "terrain_config": {
-                "hull_roll_impulse_amplitude": 780.0,
+                "cargo_water_y": 1.96,
+                "cargo_loss_grace_steps": 180,
+                "hull_roll_impulse_amplitude": 40.0,
                 "hull_roll_impulse_interval_steps": 22,
             },
             "physics_config": {},
@@ -329,19 +293,19 @@ def get_f05_curriculum_stages() -> List[Dict[str, Any]]:
         {
             "stage_id": "Stage-2",
             "title": "Raised Loss Plane",
-            "mutation_description": "Single-axis challenge: the cargo-loss height threshold is raised to an extreme level above the bare hull deck, requiring a completely elevated containment architecture. Cargo on the bare deck will fail retention unconditionally — the design must supply a raised platform with its own containment walls.",
-            "task_description_suffix": None,
+            "mutation_description": "A tighter retention plane and altered roll impulses reduce cargo and stability margins.",
+            "task_description_suffix": uniform_suffix_for_task("F_05"),
             "terrain_config": {
-                "cargo_water_y": 2.92,
-                "restoring_coeff": 1600.0,
+                "cargo_water_y": 1.98,
+                "hull_roll_impulse_amplitude": 50.0,
             },
             "physics_config": {},
         },
         {
             "stage_id": "Stage-3",
             "title": "Shoal Lock-In",
-            "mutation_description": "Multi-axis coupling: altered reef layout, hull vertical placement, build-zone floor height, joint limits, lateral drift bias, impulsive hull roll kicks, and cargo contact parameters. Containment must supply roll inertia, avoid obstacle envelopes, and seal the hold within stated beam-width limits.",
-            "task_description_suffix": None,
+            "mutation_description": "Coupled obstacle, placement, build-region, weld, forcing, and cargo-contact changes test structural and retention margins.",
+            "task_description_suffix": uniform_suffix_for_task("F_05"),
             "terrain_config": {
                 "boat_y_offset": -0.10,
                 "rocks": list(_stage3_reef_field),
@@ -360,8 +324,8 @@ def get_f05_curriculum_stages() -> List[Dict[str, Any]]:
         {
             "stage_id": "Stage-4",
             "title": "Perfect Storm Assembly Budget",
-            "mutation_description": "Hardest multi-axis coupling: critically weak passive righting, extreme gravity, violent multi-frequency roll kicks, gale-force lateral forcing, ultra-bouncy near-frictionless cargo, massively amplified wave-fields, near-zero structural damping, and the tightest mass and joint budgets across any stage. Active torque must supply nearly all anti-capsize work; the structure must use extreme-cantilever roll inertia with multi-joint load distribution. Cargo containment must defeat bouncing, sliding, and launch events simultaneously within a budget under half the baseline allowance.",
-            "task_description_suffix": None,
+            "mutation_description": "Coupled forcing, gravity, damping, contact, obstacle, mass, and weld changes test a lightweight passive containment design.",
+            "task_description_suffix": uniform_suffix_for_task("F_05"),
             "terrain_config": {
                 "boat_y_offset": -0.10,
                 "rocks": list(_reef_barrier_rocks),
@@ -375,7 +339,7 @@ def get_f05_curriculum_stages() -> List[Dict[str, Any]]:
                 "lateral_impulse_amplitude": 340.0,
                 "lateral_impulse_interval_steps": 35,
                 "joint_max_force": 99999.0,
-                "hull_roll_impulse_amplitude": 420.0,
+                "hull_roll_impulse_amplitude": 160.0,
                 "hull_roll_impulse_interval_steps": 14,
                 "rogue_amplitude": 65.0,
                 "rogue_interval_steps": 90,
@@ -404,6 +368,6 @@ def get_f05_curriculum_stages() -> List[Dict[str, Any]]:
         merged_pc = _merge_f05_physics(merged_pc, s.get("physics_config") or {})
         s["terrain_config"] = dict(merged_tc)
         s["physics_config"] = dict(merged_pc)
-        s["task_description_suffix"] = UNIFORM_SUFFIX
+        s["task_description_suffix"] = uniform_suffix_for_task("F_05")
         out_stages.append(s)
     return out_stages

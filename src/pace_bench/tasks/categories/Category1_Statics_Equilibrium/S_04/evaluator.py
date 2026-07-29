@@ -98,7 +98,14 @@ def _build_constraint_dashboard(
     })
     return dashboard
 
-def _build_numerical_health(beam_angle_deg, net_torque, peak_angular_velocity, structure_mass, gravity_y):
+def _build_numerical_health(
+    beam_angle_deg,
+    net_torque,
+    peak_angular_velocity,
+    structure_mass,
+    pivot_destroy_error_count,
+    last_pivot_destroy_error,
+):
     flags = []
     if not math.isfinite(beam_angle_deg):
         flags.append({'severity': 'CRITICAL', 'tag': 'beam_angle_nan', 'detail': f'beam_angle_deg = {beam_angle_deg}'})
@@ -114,8 +121,11 @@ def _build_numerical_health(beam_angle_deg, net_torque, peak_angular_velocity, s
         flags.append({'severity': 'WARNING', 'tag': 'extreme_torque', 'detail': f'net torque {net_torque:.2e} N·m — possible solver divergence'})
     if math.isfinite(peak_angular_velocity) and peak_angular_velocity > 100.0:
         flags.append({'severity': 'WARNING', 'tag': 'extreme_angular_velocity', 'detail': f'peak angular velocity {peak_angular_velocity:.1f} rad/s — possible instability'})
-    if math.isfinite(gravity_y) and abs(gravity_y) > 200.0:
-        flags.append({'severity': 'WARNING', 'tag': 'extreme_gravity', 'detail': f'gravity_y = {gravity_y:.1f} m/s²'})
+    if pivot_destroy_error_count:
+        detail = f'pivot joint destruction failed {pivot_destroy_error_count} time(s)'
+        if last_pivot_destroy_error:
+            detail += f'; last error: {last_pivot_destroy_error}'
+        flags.append({'severity': 'WARNING', 'tag': 'pivot_destroy_error', 'detail': detail})
     return flags
 
 class Evaluator:
@@ -304,7 +314,8 @@ class Evaluator:
             net_torque=net_torque_about_pivot,
             peak_angular_velocity=getattr(self.environment, "get_peak_angular_velocity", lambda: 0.0)(),
             structure_mass=structure_mass,
-            gravity_y=gravity_y,
+            pivot_destroy_error_count=getattr(self.environment, "_pivot_destroy_error_count", 0),
+            last_pivot_destroy_error=getattr(self.environment, "_last_pivot_destroy_error", None),
         )
         metrics = {
             'load_caught': self.load_caught,
@@ -351,6 +362,8 @@ class Evaluator:
             'initial_body_count_on_load_attach': getattr(self.environment, "_initial_body_count_on_load_attach", 0),
             'joint_count_current': len(getattr(self.environment, "_joints", [])),
             'numerical_health': numerical_health,
+            'pivot_destroy_error_count': getattr(self.environment, "_pivot_destroy_error_count", 0),
+            'last_pivot_destroy_error': getattr(self.environment, "_last_pivot_destroy_error", None),
         }
         return success or failed, score, metrics
     def _check_design_constraints(self):

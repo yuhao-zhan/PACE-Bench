@@ -1,12 +1,8 @@
 import math
 
-import sys
-
 import os
 
 import importlib.util
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../.."))
 
 _c03_eval_dir = os.path.dirname(os.path.abspath(__file__))
 
@@ -105,6 +101,13 @@ class Evaluator:
             )
         )
         self._rendezvous_count = 0
+        self._rendezvous_steps = []
+        self._slot_best = {
+            1: {"distance": None, "relative_speed": None, "heading_error_deg": None, "step": None},
+            2: {"distance": None, "relative_speed": None, "heading_error_deg": None, "step": None},
+        }
+        self._post_rendezvous_peak_distance = None
+        self._post_rendezvous_peak_distance_step = None
     def evaluate(self, agent_body, step_count, max_steps):
         if not self.environment:
             return True, 0.0, {"error": "Environment not available"}
@@ -141,7 +144,20 @@ class Evaluator:
         angle_diff = seeker_heading - target_dir
         while angle_diff > math.pi: angle_diff -= 2 * math.pi
         while angle_diff < -math.pi: angle_diff += 2 * math.pi
+        heading_error_deg = math.degrees(abs(angle_diff))
         heading_aligned = abs(angle_diff) <= self.heading_tolerance_rad
+        active_phase = 1 if in_any_slot1 else (2 if in_any_slot2 else None)
+        if active_phase is not None:
+            best = self._slot_best[active_phase]
+            if best["distance"] is None or distance < best["distance"]:
+                best.update(
+                    {
+                        "distance": distance,
+                        "relative_speed": relative_speed,
+                        "heading_error_deg": heading_error_deg,
+                        "step": step_count,
+                    }
+                )
         conditions_met = (
             activation_achieved
             and distance <= self.rendezvous_distance
@@ -149,10 +165,20 @@ class Evaluator:
             and in_rendezvous_zone
             and heading_aligned
         )
+        previous_rendezvous_count = self._rendezvous_count
         if conditions_met and in_any_slot1:
             self._rendezvous_count = max(self._rendezvous_count, 1)
         if conditions_met and in_any_slot2 and self._rendezvous_count >= 1:
             self._rendezvous_count = 2
+        if self._rendezvous_count > previous_rendezvous_count:
+            self._rendezvous_steps.append(step_count)
+        if self._rendezvous_count >= 2:
+            if (
+                self._post_rendezvous_peak_distance is None
+                or distance > self._post_rendezvous_peak_distance
+            ):
+                self._post_rendezvous_peak_distance = distance
+                self._post_rendezvous_peak_distance_step = step_count
         failed = False
         failure_reason = None
         if getattr(self.environment, "get_out_of_fuel", lambda: False)():
@@ -207,8 +233,9 @@ class Evaluator:
             "failed": failed,
             "failure_reason": failure_reason,
             "rendezvous_count": self._rendezvous_count,
+            "required_rendezvous_count": 2,
             "heading_aligned": heading_aligned,
-            "heading_error_deg": math.degrees(abs(angle_diff)),
+            "heading_error_deg": heading_error_deg,
         }
         if hasattr(self.environment, "get_remaining_impulse_budget"):
             metrics["remaining_impulse_budget"] = self.environment.get_remaining_impulse_budget()
@@ -218,6 +245,15 @@ class Evaluator:
             metrics["corridor_violation"] = self.environment.get_corridor_violation()
         if hasattr(self.environment, "get_activation_achieved"):
             metrics["activation_achieved"] = self.environment.get_activation_achieved()
+        if hasattr(self.environment, "get_activation_progress"):
+            activation_progress = self.environment.get_activation_progress()
+            metrics["activation_current_consecutive_steps"] = int(
+                activation_progress.get("current_consecutive_steps", 0)
+            )
+            metrics["activation_max_consecutive_steps"] = int(
+                activation_progress.get("max_consecutive_steps", 0)
+            )
+            metrics["activation_achieved_step"] = activation_progress.get("achieved_step")
         if hasattr(self.environment, "get_obstacle_collision"):
             metrics["obstacle_collision"] = self.environment.get_obstacle_collision()
         metrics["activation_zone_x_min"] = self.activation_zone_x_min
@@ -253,55 +289,21 @@ class Evaluator:
             metrics["heading_margin_deg"] = self.heading_tolerance_deg - math.degrees(abs(angle_diff))
         else:
             metrics["heading_margin_deg"] = 0.0
-        mass = float(getattr(self.environment, "get_seeker_mass", lambda: 20.0)())
-        gx, gy = getattr(self.environment, "get_gravity", lambda: (0.0, -10.0))()
-        ld = float(getattr(self.environment, "get_linear_damping", lambda: 0.5)())
-        ad = float(getattr(self.environment, "get_angular_damping", lambda: 0.5)())
-        gf = float(getattr(self.environment, "get_ground_friction", lambda: 0.4)())
-        seeker_radius = float(getattr(self.environment, "get_seeker_radius", lambda: 0.35)())
-        gravity_fx = mass * gx
-        gravity_fy = mass * gy
-        damping_fx = -ld * mass * vx
-        damping_fy = -ld * mass * vy
-        wind_fx, wind_fy = getattr(self.environment, "get_local_wind", lambda: (0.0, 0.0))()
-        wind_fx_b = mass * wind_fx
-        wind_fy_b = mass * wind_fy
-        net_body_fx = gravity_fx + damping_fx + wind_fx_b
-        net_body_fy = gravity_fy + damping_fy + wind_fy_b
-        metrics["mass"] = mass
-        metrics["gravity_x"] = gx
-        metrics["gravity_y"] = gy
-        metrics["linear_damping"] = ld
-        metrics["angular_damping"] = ad
-        metrics["ground_friction"] = gf
-        metrics["seeker_radius"] = seeker_radius
-        metrics["gravity_force_x"] = gravity_fx
-        metrics["gravity_force_y"] = gravity_fy
-        metrics["damping_force_x"] = damping_fx
-        metrics["damping_force_y"] = damping_fy
-        metrics["wind_force_x"] = wind_fx_b
-        metrics["wind_force_y"] = wind_fy_b
-        metrics["net_body_force_x"] = net_body_fx
-        metrics["net_body_force_y"] = net_body_fy
-        metrics["gravity_magnitude"] = math.sqrt(gx * gx + gy * gy)
         if hasattr(self.environment, "get_corridor_bounds"):
-            try:
-                c_lo, c_hi = self.environment.get_corridor_bounds()
-                metrics["corridor_x_lo"] = float(c_lo)
-                metrics["corridor_x_hi"] = float(c_hi)
-                margin_lo = sx - c_lo
-                margin_hi = c_hi - sx
-                metrics["corridor_margin_lo"] = margin_lo
-                metrics["corridor_margin_hi"] = margin_hi
-                metrics["corridor_width"] = c_hi - c_lo
-                metrics["corridor_min_margin"] = min(margin_lo, margin_hi)
-            except Exception:
-                pass
-        rendezvous_dist_limit = float(metrics.get("rendezvous_distance", 6.0))
-        rendezvous_rel_limit = float(metrics.get("rendezvous_rel_speed", 1.8))
-        track_dist_limit = float(metrics.get("track_distance", 8.5))
-        impulse_budget_total = float(getattr(self.environment, "get_impulse_budget", lambda: 18500.0)())
-        impulse_used = float(getattr(self.environment, "get_impulse_used", lambda: 0.0)())
+            c_lo, c_hi = self.environment.get_corridor_bounds()
+            metrics["corridor_x_lo"] = float(c_lo)
+            metrics["corridor_x_hi"] = float(c_hi)
+            margin_lo = sx - c_lo
+            margin_hi = c_hi - sx
+            metrics["corridor_margin_lo"] = margin_lo
+            metrics["corridor_margin_hi"] = margin_hi
+            metrics["corridor_width"] = c_hi - c_lo
+            metrics["corridor_min_margin"] = min(margin_lo, margin_hi)
+        rendezvous_dist_limit = self.rendezvous_distance
+        rendezvous_rel_limit = self.rendezvous_rel_speed
+        track_dist_limit = self.track_distance
+        impulse_budget_total = float(self.environment.get_impulse_budget())
+        impulse_used = float(self.environment.get_impulse_used())
         metrics["constraint_distance_margin"] = rendezvous_dist_limit - distance
         metrics["constraint_rel_speed_margin"] = rendezvous_rel_limit - relative_speed
         metrics["constraint_track_distance_margin"] = track_dist_limit - distance
@@ -310,23 +312,29 @@ class Evaluator:
         metrics["impulse_used"] = impulse_used
         metrics["impulse_budget"] = impulse_budget_total
         metrics["impulse_used_pct"] = (impulse_used / impulse_budget_total * 100.0) if impulse_budget_total > 0 else 0.0
-        tb = self.terrain_bounds
-        for key in ("max_thrust_magnitude", "cooldown_threshold", "cooldown_max_thrust",
-                     "cooldown_steps", "blind_zone_x_min", "blind_zone_x_max",
-                     "speed_blind_threshold_mps", "seeker_radius"):
-            if key in tb and key not in metrics:
-                metrics[key] = tb[key]
-        if "spawn_x" not in metrics:
-            spawn = getattr(self.environment, "get_spawn_position", lambda: (11.0, 1.35))()
-            metrics["spawn_x"] = float(spawn[0])
-            metrics["spawn_y"] = float(spawn[1])
-        peak_speed = float(getattr(self.environment, "get_peak_seeker_speed", lambda: 0.0)())
-        peak_accel = float(getattr(self.environment, "get_peak_acceleration", lambda: 0.0)())
+        metrics["remaining_impulse_budget"] = max(0.0, impulse_budget_total - impulse_used)
+        metrics["cooldown_remaining_steps"] = int(
+            self.environment.get_cooldown_remaining_steps()
+        )
+        metrics["last_applied_thrust_magnitude"] = float(
+            self.environment.get_last_applied_thrust_magnitude()
+        )
+        for key in (
+            "max_thrust_magnitude",
+            "cooldown_threshold",
+            "cooldown_max_thrust",
+            "cooldown_steps",
+            "corridor_violation_tolerance",
+            "obstacle_penetration_limit",
+        ):
+            if key in self.terrain_bounds:
+                metrics[key] = self.terrain_bounds[key]
+        peak_speed = float(self.environment.get_peak_seeker_speed())
+        peak_accel = float(self.environment.get_peak_acceleration())
         metrics["peak_seeker_speed"] = peak_speed
         metrics["peak_acceleration"] = peak_accel
         seeker_speed = math.sqrt(vx * vx + vy * vy)
         metrics["seeker_speed_current"] = seeker_speed
-        metrics["numerical_velocity_warning"] = abs(vx) > 5.0 or abs(vy) > 5.0
         any_nonfinite = False
         for fkey in ("seeker_x", "seeker_y", "seeker_vx", "seeker_vy", "target_x", "target_y",
                       "distance_to_target", "relative_speed"):
@@ -337,14 +345,10 @@ class Evaluator:
                         any_nonfinite = True
                         break
                 except (TypeError, ValueError):
-                    pass
+                    any_nonfinite = True
+                    break
         metrics["numerical_nonfinite_detected"] = any_nonfinite
-        fe = []
-        if hasattr(self.environment, "get_failure_events"):
-            try:
-                fe = list(self.environment.get_failure_events())
-            except Exception:
-                pass
+        fe = list(self.environment.get_failure_events())
         metrics["failure_events"] = fe
         if metrics.get("corridor_violation"):
             for ev in reversed(fe):
@@ -360,6 +364,17 @@ class Evaluator:
                 if ev.get("type") == "obstacle_collision":
                     metrics["collision_event_detail"] = ev.get("detail", "")
                     break
+        metrics["rendezvous_steps"] = list(self._rendezvous_steps)
+        for phase in (1, 2):
+            best = self._slot_best[phase]
+            metrics[f"phase{phase}_best_distance"] = best["distance"]
+            metrics[f"phase{phase}_best_relative_speed"] = best["relative_speed"]
+            metrics[f"phase{phase}_best_heading_error_deg"] = best["heading_error_deg"]
+            metrics[f"phase{phase}_best_step"] = best["step"]
+        metrics["post_rendezvous_peak_distance"] = self._post_rendezvous_peak_distance
+        metrics["post_rendezvous_peak_distance_step"] = (
+            self._post_rendezvous_peak_distance_step
+        )
         metrics["rendezvous_conditions_met"] = {
             "activation": activation_achieved,
             "distance_ok": distance <= self.rendezvous_distance,
@@ -394,6 +409,9 @@ class Evaluator:
         return {
             "task": "C-03: The Seeker (Slotted Rendezvous)",
             "description": (
+                "Activate the seeker, complete one heading-aligned rendezvous in "
+                "each slot phase, then retain the target without violating safety "
+                "or impulse constraints."
             ),
             "rendezvous_distance": self.rendezvous_distance,
             "rendezvous_rel_speed": self.rendezvous_rel_speed,
@@ -408,6 +426,11 @@ class Evaluator:
                 "phase2": "Second rendezvous in a phase-2 slot before phase-2 window ends",
                 "phase3": f"After second rendezvous, distance <= {self.track_distance} m until episode end",
                 "capture": (
+                    f"Activation complete; seeker x in "
+                    f"[{self.rendezvous_zone_x_min}, {self.rendezvous_zone_x_max}] m; "
+                    f"distance <= {self.rendezvous_distance} m; relative speed < "
+                    f"{self.rendezvous_rel_speed} m/s; heading error <= "
+                    f"{self.heading_tolerance_deg} degrees."
                 ),
                 "failure": "Miss slots, obstacles, corridor exit, impulse budget, or lose target after rendezvous",
             },

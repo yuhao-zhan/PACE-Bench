@@ -1,8 +1,4 @@
-import sys
-import os
 import pygame
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../..'))
 
 from pace_bench.renderer import Renderer
 from Box2D.b2 import dynamicBody, staticBody
@@ -96,7 +92,7 @@ class E05Renderer(Renderer):
 
             # Top-left: task label
             if self._font_label:
-                label = self._font_label.render("E-05 | Magnet Assembly",
+                label = self._font_label.render("E-05 | Magnetic Navigation",
                                                 True, COLOR_ANNOTATION)
                 self.simulator.screen.blit(label, (18, 14))
 

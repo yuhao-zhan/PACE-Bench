@@ -2,21 +2,7 @@ import math
 
 _PARTIAL_SCORE_MAX = 80.0
 
-import sys
-
-import os
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../.."))
-
 from pace_bench.primitives import compute_constraint_penalty
-
-from pace_bench.tasks.categories.Category5_Cybernetics_Control.C_05.environment import (
-    BARRIER_DELAY_STEPS as _SOURCE_BARRIER_DELAY_STEPS,
-    FORCE_LIMIT_INSIDE as _SOURCE_FORCE_LIMIT_INSIDE,
-    RECENT_A_FOR_B as _SOURCE_RECENT_A_FOR_B,
-    REPULSION_STRONG_THRESHOLD as _SOURCE_REPULSION_STRONG_THRESHOLD,
-
-)
 
 def _distance_point_to_switch_zone(x: float, y: float, cx: float, cy: float, hw: float, hh: float) -> float:
     closest_x = min(max(x, cx - hw), cx + hw)
@@ -112,109 +98,70 @@ class Evaluator:
             "timed_out": timed_out,
             "zones": zones,
         }
-        if self.environment is not None:
-            env = self.environment
-            metrics["env_speed_cap_inside"] = getattr(env, "_speed_cap_inside", None)
-            rab = getattr(env, "_recent_a_for_b", None)
-            if rab is not None:
-                metrics["env_flag_tight_a_to_b"] = rab < _SOURCE_RECENT_A_FOR_B
-                metrics["env_flag_loose_a_to_b_recency"] = rab > _SOURCE_RECENT_A_FOR_B
-            else:
-                metrics["env_flag_tight_a_to_b"] = False
-                metrics["env_flag_loose_a_to_b_recency"] = False
-            bdelay = getattr(env, "_barrier_delay_steps", None)
-            if bdelay is not None:
-                metrics["env_flag_long_barrier_delay"] = (
-                    bdelay > _SOURCE_BARRIER_DELAY_STEPS
-                )
-            rm = getattr(env, "_repulsion_mag", None)
-            if rm is not None:
-                metrics["env_flag_strong_repulsion"] = (
-                    rm >= _SOURCE_REPULSION_STRONG_THRESHOLD
-                )
-            fl = getattr(env, "_force_limit_inside", None)
-            if fl is not None:
-                metrics["env_flag_sensitive_trigger"] = fl < _SOURCE_FORCE_LIMIT_INSIDE
-            get_rep = getattr(env, "get_repulsion_at_agent", None)
-            if callable(get_rep):
-                rfx, rfy, rmag = get_rep()
-                metrics["repulsion_fx"] = rfx
-                metrics["repulsion_fy"] = rfy
-                metrics["repulsion_magnitude"] = rmag
-            get_bar = getattr(env, "get_barrier_status", None)
-            if callable(get_bar):
-                bs = get_bar()
-                metrics["barrier_active"] = bs.get("active", False)
-                metrics["barrier_steps_until_open"] = bs.get("steps_until_open", 0)
-            get_ct = getattr(env, "get_cooldown_total", None)
-            if callable(get_ct):
-                metrics["cooldown_total"] = get_ct()
-            get_tw = getattr(env, "get_temporal_window_status", None)
-            if callable(get_tw):
-                tw = get_tw()
-                metrics["A_visited"] = tw.get("A_visited", False)
-                metrics["B_visited"] = tw.get("B_visited", False)
-                metrics["steps_since_last_A"] = tw.get("steps_since_last_A", -1)
-                metrics["steps_since_last_B"] = tw.get("steps_since_last_B", -1)
-                metrics["temporal_window_A_to_B"] = tw.get("window_A_to_B", 0)
-                metrics["temporal_window_B_to_C"] = tw.get("window_B_to_C", 0)
-            get_drs = getattr(env, "get_dwell_reset_stats", None)
-            if callable(get_drs):
-                drs = get_drs()
-                metrics["dwell_reset_zone_change"] = drs.get("zone_change", 0)
-                metrics["dwell_reset_speed"] = drs.get("speed", 0)
-                metrics["dwell_reset_force"] = drs.get("force", 0)
-                metrics["dwell_blocked_temporal"] = drs.get("blocked_temporal", 0)
-                metrics["dwell_blocked_altitude"] = drs.get("blocked_altitude", 0)
-                metrics["dwell_blocked_cooldown"] = drs.get("blocked_cooldown", 0)
-            get_laf = getattr(env, "get_last_applied_force", None)
-            if callable(get_laf):
-                afx, afy, afm = get_laf()
-                metrics["applied_force_x"] = afx
-                metrics["applied_force_y"] = afy
-                metrics["applied_force_magnitude"] = afm
-            get_yh = getattr(env, "get_agent_y_history_stats", None)
-            if callable(get_yh):
-                yhs = get_yh()
-                metrics["agent_y_max_recent"] = yhs.get("max_recent_y", 0.0)
-                metrics["agent_y_history_length"] = yhs.get("history_length", 0)
-                metrics["history_window"] = yhs.get("history_window", 0)
-                metrics["required_max_y_c"] = yhs.get("required_max_y", 0.0)
-            get_pv = getattr(env, "get_peak_values", None)
-            if callable(get_pv):
-                pv = get_pv()
-                metrics["peak_speed_seen"] = pv.get("peak_speed", 0.0)
-                metrics["peak_force_applied_magnitude"] = pv.get("peak_force_applied", 0.0)
-            get_izfl = getattr(env, "get_in_zone_force_limit", None)
-            if callable(get_izfl):
-                metrics["force_limit_inside"] = get_izfl()
-            get_izsc = getattr(env, "get_in_zone_speed_cap", None)
-            if callable(get_izsc):
-                metrics["speed_cap_inside"] = get_izsc()
-            get_rp = getattr(env, "get_repulsion_params", None)
-            if callable(get_rp):
-                rp = get_rp()
-                metrics["repulsion_mag"] = rp.get("magnitude", 0.0)
-                metrics["repulsion_range"] = rp.get("range", 0.0)
-                metrics["repulsion_tangential_mag"] = rp.get("tangential", 0.0)
-            get_tss = getattr(env, "get_trigger_stay_steps", None)
-            if callable(get_tss):
-                metrics["trigger_stay_steps"] = get_tss()
-            get_bds = getattr(env, "get_barrier_delay_steps", None)
-            if callable(get_bds):
-                metrics["barrier_delay_steps"] = get_bds()
-            get_am = getattr(env, "get_agent_mass", None)
-            if callable(get_am):
-                metrics["agent_mass"] = get_am()
-            get_maf = getattr(env, "get_max_agent_force", None)
-            if callable(get_maf):
-                metrics["max_agent_force_per_axis"] = get_maf()
-            get_ch = getattr(env, "get_c_high_history", None)
-            if callable(get_ch):
-                metrics["c_high_history"] = get_ch()
-            get_crmy = getattr(env, "get_c_required_max_y", None)
-            if callable(get_crmy):
-                metrics["c_required_max_y"] = get_crmy()
+        env = self.environment
+        rfx, rfy, rmag = env.get_repulsion_at_agent()
+        metrics.update(
+            {
+                "repulsion_fx": rfx,
+                "repulsion_fy": rfy,
+                "repulsion_magnitude": rmag,
+            }
+        )
+        barrier = env.get_barrier_status()
+        metrics["barrier_active"] = barrier.get("active", False)
+        metrics["barrier_steps_until_open"] = barrier.get("steps_until_open", 0)
+        metrics["cooldown_total"] = env.get_cooldown_total()
+        temporal = env.get_temporal_window_status()
+        metrics.update(
+            {
+                "A_visited": temporal.get("A_visited", False),
+                "B_visited": temporal.get("B_visited", False),
+                "steps_since_last_A": temporal.get("steps_since_last_A", -1),
+                "steps_since_last_B": temporal.get("steps_since_last_B", -1),
+                "temporal_window_A_to_B": temporal.get("window_A_to_B", 0),
+                "temporal_window_B_to_C": temporal.get("window_B_to_C", 0),
+            }
+        )
+        reset_stats = env.get_dwell_reset_stats()
+        for source_key, metric_key in (
+            ("zone_change", "dwell_reset_zone_change"),
+            ("speed", "dwell_reset_speed"),
+            ("force", "dwell_reset_force"),
+            ("blocked_temporal", "dwell_blocked_temporal"),
+            ("blocked_altitude", "dwell_blocked_altitude"),
+            ("blocked_cooldown", "dwell_blocked_cooldown"),
+        ):
+            metrics[metric_key] = reset_stats.get(source_key, 0)
+        afx, afy, afm = env.get_last_applied_force()
+        metrics.update(
+            {
+                "applied_force_x": afx,
+                "applied_force_y": afy,
+                "applied_force_magnitude": afm,
+            }
+        )
+        history = env.get_agent_y_history_stats()
+        metrics.update(
+            {
+                "agent_y_max_recent": history.get("max_recent_y", 0.0),
+                "agent_y_history_length": history.get("history_length", 0),
+                "history_window": history.get("history_window", 0),
+                "required_max_y_c": history.get("required_max_y", 0.0),
+            }
+        )
+        peaks = env.get_peak_values()
+        metrics["peak_speed_seen"] = peaks.get("peak_speed", 0.0)
+        metrics["peak_force_applied_magnitude"] = peaks.get(
+            "peak_force_applied", 0.0
+        )
+        metrics["force_limit_inside"] = env.get_in_zone_force_limit()
+        metrics["speed_cap_inside"] = env.get_in_zone_speed_cap()
+        repulsion = env.get_repulsion_params()
+        metrics["repulsion_mag"] = repulsion.get("magnitude", 0.0)
+        metrics["repulsion_range"] = repulsion.get("range", 0.0)
+        metrics["trigger_stay_steps"] = env.get_trigger_stay_steps()
+        metrics["barrier_delay_steps"] = env.get_barrier_delay_steps()
+        metrics["max_agent_force_per_axis"] = env.get_max_agent_force()
         done = failed or sequence_correct
         return done, score, metrics
     def compute_score_with_penalty(self, score: float, metrics: dict) -> float:
@@ -229,6 +176,8 @@ class Evaluator:
         }
     def get_task_description(self):
         desc = (
+            "Navigate the agent through trigger zones A, B, and C in order while "
+            "satisfying live dwell, speed, force, cooldown, and timing constraints."
         )
         order_s = ", ".join(self._required_order) if self._required_order else "(see environment)"
         primary = (
@@ -240,8 +189,7 @@ class Evaluator:
             "required_order": self._required_order,
             "success_criteria": {
                 "primary": primary,
-                "failure": (
-                ),
+                "failure": "Wrong order or exhausting the episode before completion",
             },
             "evaluation": {
                 "score_range": "0-100",

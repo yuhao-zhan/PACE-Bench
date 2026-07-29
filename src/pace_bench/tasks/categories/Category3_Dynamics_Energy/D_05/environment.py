@@ -27,6 +27,7 @@ class Sandbox:
         physics_config = physics_config or {}
         self._terrain_config = dict(terrain_config)
         self._physics_config = dict(physics_config)
+        self._observation_errors: list[str] = []
         gravity = tuple(physics_config.get("gravity", (0, -10)))
         self._default_linear_damping = float(physics_config.get("linear_damping", 0.0))
         self._default_angular_damping = float(physics_config.get("angular_damping", 0.0))
@@ -200,8 +201,10 @@ class Sandbox:
         )
         try:
             bar.type = getattr(Box2D.b2, "kinematicBody", 1)
-        except Exception:
-            pass
+        except Exception as exc:
+            self._observation_errors.append(
+                f"slot-bar body type assignment unavailable: {type(exc).__name__}: {exc}"
+            )
         self._terrain_bodies["slot_bar"] = bar
     def _create_shield(self, terrain_config: dict):
         shield_enabled = terrain_config.get("shield_enabled", True)
@@ -533,9 +536,10 @@ class Sandbox:
                     self._world.DestroyJoint(self._shell_joint)
                     self._shell_joint = None
                     self._shell_broken = True
-            except Exception:
-                self._shell_joint = None
-                self._shell_broken = True
+            except Exception as exc:
+                self._observation_errors.append(
+                    f"shell reaction force unavailable: {type(exc).__name__}: {exc}"
+                )
         self._world.Step(time_step, 10, 10)
         if not self._hammer_slot_entry_recorded:
             slot_bar_x = getattr(self, '_slot_bar_x', None)
@@ -625,3 +629,5 @@ class Sandbox:
             'omega': getattr(self, '_slot_bar_omega', 0.0115),
             'half_height': getattr(self, '_slot_bar_half_height', 0.1),
         }
+    def get_observation_errors(self):
+        return list(self._observation_errors)

@@ -2,16 +2,6 @@ from typing import Dict, Any, List, Optional
 
 import math
 
-import sys
-
-_CACHE_ATTR = "_k05_fb_cache"
-
-def _get_cache() -> Optional[Dict[str, Any]]:
-    return getattr(sys, _CACHE_ATTR, None)
-
-def _set_cache(val: Optional[Dict[str, Any]]) -> None:
-    setattr(sys, _CACHE_ATTR, val)
-
 def _is_finite(x: Any) -> bool:
     if x is None:
         return False
@@ -36,7 +26,6 @@ def _format_events_full(metrics: Dict[str, Any]) -> List[str]:
     parts: List[str] = []
     parts.append("### Events\n")
     step_count = metrics.get("step_count")
-    max_steps = metrics.get("max_steps", 10000)
     target_y = metrics.get("target_object_y")
     max_obj_y = metrics.get("max_object_y_reached")
     step_at_max_y = metrics.get("step_at_max_object_y")
@@ -56,15 +45,15 @@ def _format_events_full(metrics: Dict[str, Any]) -> List[str]:
     succeeded = metrics.get("success", False)
     joint_failure_events = metrics.get("joint_failure_events") or []
     if _is_finite(step_count):
-        sim_s = float(step_count) / 60.0
-        parts.append(f"Step {int(step_count)} ({sim_s:.1f}s simulated)\n")
-    if succeeded:
-        parts.append("**Outcome**: SUCCESS\n")
-    elif failed and failure_reason:
-        parts.append(f"**Outcome**: FAILED — {failure_reason}\n")
+        time_step = metrics.get("time_step")
+        if _is_finite(time_step):
+            sim_s = float(step_count) * float(time_step)
+            parts.append(f"Step {int(step_count)} ({sim_s:.1f}s simulated)\n")
+        else:
+            parts.append(f"Step {int(step_count)}\n")
     events: List[str] = []
     lifting_thresh = metrics.get("lifting_threshold_m")
-    initial_y = metrics.get("object_y")
+    initial_y = metrics.get("initial_object_y")
     if _is_finite(initial_y) and _is_finite(lifting_thresh):
         events.append(
             f"Initial y={float(initial_y):.2f} m "
@@ -132,35 +121,21 @@ def _format_spatial_full(metrics: Dict[str, Any]) -> List[str]:
             gap_width = float(c_x_max) - float(c_x_min)
             parts.append(f"Gap at y={float(c_y):.2f} m, x=[{float(c_x_min):.2f}, {float(c_x_max):.2f}], width={gap_width:.2f} m")
             if _is_finite(max_body_width):
-                mw = float(max_body_width)
-                excess = mw - gap_width
-                if excess > 0.001:
-                    parts.append(f"  ⚠ WIDTH VIOLATION: body {mw:.2f} m > gap {gap_width:.2f} m (excess {excess:.2f} m, {mw / gap_width * 100.0:.0f}%)")
-                elif excess < -0.001:
-                    parts.append(f"  Width OK: body {mw:.2f} m fits gap {gap_width:.2f} m ({abs(excess):.2f} m clearance)")
-                else:
-                    parts.append(f"  Width marginal: body ≈ gap ({mw:.2f} m)")
+                parts.append(f"  Widest created body: {float(max_body_width):.2f} m (gap width {gap_width:.2f} m)")
             if _is_finite(max_lifter_y):
-                vc = float(c_y) - float(max_lifter_y)
-                if vc < 0:
-                    parts.append(f"  ⚠ Vertical: lifter peak {float(max_lifter_y):.2f} m ABOVE ceiling {float(c_y):.2f} m ({vc:+.2f} m)")
-                else:
-                    parts.append(f"  Vertical clearance: {vc:.2f} m (lifter {float(max_lifter_y):.2f} m vs ceiling {float(c_y):.2f} m)")
+                parts.append(f"  Observed lifter peak: y={float(max_lifter_y):.2f} m")
         else:
             parts.append("Ceiling configured but parameters incomplete.")
     else:
         parts.append("No ceiling obstacle.")
     obj_plat_h_off = metrics.get("obj_platform_h_offset")
     obj_plat_v_off = metrics.get("obj_platform_v_offset")
-    obj_friction = metrics.get("object_friction")
     parts.append("\n### Object-Platform Retention\n")
     items = []
     if obj_plat_h_off is not None and _is_finite(obj_plat_h_off):
         items.append(f"H-offset: {float(obj_plat_h_off):+.2f} m")
     if obj_plat_v_off is not None and _is_finite(obj_plat_v_off):
         items.append(f"V-offset: {float(obj_plat_v_off):+.2f} m")
-    if _is_finite(obj_friction):
-        items.append(f"μ={float(obj_friction):.2f}")
     if items:
         parts.append(" | ".join(items))
     else:
@@ -273,20 +248,6 @@ def _format_constraints_full(metrics: Dict[str, Any]) -> List[str]:
         status = "PASS" if margin >= 0 else "FAIL"
         pct = float(structure_mass) / float(max_mass) * 100.0
         rows.append(("Mass", status, f"{float(structure_mass):.2f}/{float(max_mass):.1f} kg ({pct:.1f}%)"))
-    if ceiling_gap and _is_finite(max_body_width):
-        c_x_min = ceiling_gap.get("x_min")
-        c_x_max = ceiling_gap.get("x_max")
-        if c_x_min is not None and c_x_max is not None:
-            gap_width = float(c_x_max) - float(c_x_min)
-            excess = float(max_body_width) - gap_width
-            status = "PASS" if excess <= 0 else "FAIL"
-            rows.append(("Ceiling width", status, f"body {float(max_body_width):.2f} m vs gap {gap_width:.2f} m (excess {excess:+.2f})"))
-    if ceiling_gap and _is_finite(max_lifter_y):
-        c_y = ceiling_gap.get("y")
-        if c_y is not None:
-            vc = float(c_y) - float(max_lifter_y)
-            status = "PASS" if vc >= -0.01 else "FAIL"
-            rows.append(("Ceiling vert", status, f"lifter {float(max_lifter_y):.2f} m vs ceiling {float(c_y):.2f} m ({vc:+.2f} m)"))
     if _is_finite(max_jf_limit) and float(max_jf_limit) < float('inf') and _is_finite(peak_jf):
         lim_v = float(max_jf_limit)
         pf = float(peak_jf)
@@ -356,6 +317,12 @@ def _format_health_full(metrics: Dict[str, Any]) -> List[str]:
     peak_jf = metrics.get("peak_joint_reaction_force")
     if _is_finite(peak_jf) and float(peak_jf) > 1e6:
         issues.append(f"Joint force {float(peak_jf):.1e} N > 1 MN — likely numerical artifact")
+    diagnostic_errors = metrics.get("diagnostic_error_count", 0)
+    if isinstance(diagnostic_errors, (int, float)) and diagnostic_errors > 0:
+        issues.append(
+            f"Diagnostic collection errors: {int(diagnostic_errors)}; "
+            f"last={metrics.get('last_diagnostic_error') or 'details unavailable'}"
+        )
     if issues:
         parts.append(f"⚠ {len(issues)} warning(s):")
         for issue in issues:
@@ -652,24 +619,19 @@ def format_task_metrics(metrics: Dict[str, Any]) -> List[str]:
         k for k in sanity_keys
         if metrics.get(k) is not None and not _is_finite(metrics[k])
     ]
-    prev_metrics = _get_cache()
-    is_new_iteration = prev_metrics is None
-    if not is_new_iteration:
-        prev_step = prev_metrics.get("step_count")
-        curr_step = metrics.get("step_count")
-        if prev_step is not None and curr_step is not None and int(curr_step) < int(prev_step):
-            is_new_iteration = True
     parts: List[str] = []
+    success = bool(metrics.get("success"))
+    failed = bool(metrics.get("failed"))
+    status = "SUCCESS ✓" if success else ("FAILED ✗" if failed else "IN PROGRESS")
+    parts.append(f"## Outcome: {status}")
+    if metrics.get("failure_reason"):
+        parts.append(f"Failure: {metrics['failure_reason']}")
     if sanity_issues:
         parts.append(f"⚠ Non-finite values in: {', '.join(sanity_issues)}\n")
     try:
-        if is_new_iteration:
-            parts.extend(_format_full_report(metrics))
-        else:
-            parts.extend(_format_delta_report(metrics, prev_metrics))
+        parts.extend(_format_full_report(metrics))
     except Exception as e:
         parts.append(f"(Formatting error: {type(e).__name__}: {e})")
-    _set_cache(dict(metrics))
     return parts
 
 def get_improvement_suggestions(
@@ -681,4 +643,6 @@ def get_improvement_suggestions(
     error: Optional[str] = None,
 
 ) -> List[str]:
+    if error:
+        return ["- Code execution failed. Review the execution error above."]
     return []

@@ -10,39 +10,64 @@ def _build_agent_internal(sandbox, torque=3000.0, arm_config=None, initial_angle
     prev_body = tower
     prev_anchor = (-2.0, 1.5)
     current_x, current_y = -2.0, 1.5
+    arm_joint = None
     for i, length in enumerate(arm_config):
         center_x = current_x + (length / 2.0) * math.cos(initial_angle)
         center_y = current_y + (length / 2.0) * math.sin(initial_angle)
         body = sandbox.add_beam(center_x, center_y, length, 0.2, angle=initial_angle, density=beam_density)
         if i == 0:
-            _aj = sandbox.add_revolute_joint(prev_body, body, prev_anchor, enable_motor=True, max_motor_torque=torque)
-            sandbox._aj = _aj
-            sandbox.agent_arm_joint = _aj
+            arm_joint = sandbox.add_revolute_joint(
+                prev_body,
+                body,
+                prev_anchor,
+                enable_motor=True,
+                max_motor_torque=torque,
+            )
         else:
             sandbox.add_joint(prev_body, body, (current_x, current_y))
         prev_body = body
         current_x += length * math.cos(initial_angle)
         current_y += length * math.sin(initial_angle)
     scoop_w, scoop_h = 2.0, 1.0
+    if arm_joint is None:
+        raise ValueError("arm_config must contain at least one segment")
     scoop = sandbox.add_scoop(current_x, current_y, scoop_w, scoop_h, angle=initial_angle, density=scoop_density)
-    _bj = sandbox.add_revolute_joint(prev_body, scoop, (current_x, current_y), enable_motor=True, max_motor_torque=bucket_torque)
-    sandbox._bj = _bj
-    sandbox.agent_bucket_joint = _bj
-    return scoop
+    bucket_joint = sandbox.add_revolute_joint(
+        prev_body,
+        scoop,
+        (current_x, current_y),
+        enable_motor=True,
+        max_motor_torque=bucket_torque,
+    )
+    return {
+        "body": scoop,
+        "arm_joint": arm_joint,
+        "bucket_joint": bucket_joint,
+    }
+
+
+def _control_components(agent_components):
+    if not isinstance(agent_components, dict):
+        return None, None, None
+    return (
+        agent_components.get("body"),
+        agent_components.get("arm_joint"),
+        agent_components.get("bucket_joint"),
+    )
 
 def build_agent(sandbox):
     return _build_agent_internal(sandbox, torque=3000.0)
 
 def agent_action(sandbox, agent_body, step_count):
-    _aj = getattr(sandbox, '_aj', None)
-    _bj = getattr(sandbox, '_bj', None)
-    if not _aj or not _bj: return
+    scoop, _aj, _bj = _control_components(agent_body)
+    if scoop is None or not _aj or not _bj:
+        return
     dt = 1.0 / 60.0
     t = step_count * dt
     phase_duration = 10.0
     phase = (t % phase_duration) / phase_duration
     arm_angle = _aj.angle
-    bucket_world_angle = agent_body.angle
+    bucket_world_angle = scoop.angle
     if phase < 0.3:
         ta, tb = -0.2, 0.5
     elif phase < 0.5:
@@ -70,15 +95,14 @@ def build_agent_stage_1(sandbox):
     )
 
 def agent_action_stage_1(sandbox, agent_body, step_count):
-    _aj = getattr(sandbox, '_aj', None)
-    _bj = getattr(sandbox, '_bj', None)
-    if not _aj or not _bj:
+    scoop, _aj, _bj = _control_components(agent_body)
+    if scoop is None or not _aj or not _bj:
         return
     t = step_count * (1.0 / 60.0)
     phase_duration = 8.0
     phase = (t % phase_duration) / phase_duration
     arm_angle = _aj.angle
-    bucket_world_angle = agent_body.angle
+    bucket_world_angle = scoop.angle
     if phase < 0.30:
         ta, tb = -0.45, 0.55
     elif phase < 0.45:
@@ -100,16 +124,15 @@ def build_agent_stage_2(sandbox):
                                  arm_config=[1.5, 1.5, 1.0])
 
 def agent_action_stage_2(sandbox, agent_body, step_count):
-    _aj = getattr(sandbox, '_aj', None)
-    _bj = getattr(sandbox, '_bj', None)
-    if not _aj or not _bj:
+    scoop, _aj, _bj = _control_components(agent_body)
+    if scoop is None or not _aj or not _bj:
         return
     dt = 1.0 / 60.0
     t = step_count * dt
     phase_duration = 4.0
     phase = (t % phase_duration) / phase_duration
     arm_angle = _aj.angle
-    bucket_world_angle = agent_body.angle
+    bucket_world_angle = scoop.angle
     if phase < 0.25:
         ta, tb = -0.35, 0.50
     elif phase < 0.40:
@@ -136,15 +159,14 @@ def build_agent_stage_3(sandbox):
     )
 
 def agent_action_stage_3(sandbox, agent_body, step_count):
-    _aj = getattr(sandbox, '_aj', None)
-    _bj = getattr(sandbox, '_bj', None)
-    if not _aj or not _bj:
+    scoop, _aj, _bj = _control_components(agent_body)
+    if scoop is None or not _aj or not _bj:
         return
     t = step_count * (1.0 / 60.0)
     phase_duration = 2.2
     phase = (t % phase_duration) / phase_duration
     arm_angle = _aj.angle
-    bucket_world_angle = agent_body.angle
+    bucket_world_angle = scoop.angle
     if phase < 0.250:
         ta, tb = -0.35, 0.50
     elif phase < 0.400:
@@ -177,15 +199,14 @@ def build_agent_stage_4(sandbox):
     )
 
 def agent_action_stage_4(sandbox, agent_body, step_count):
-    _aj = getattr(sandbox, '_aj', None)
-    _bj = getattr(sandbox, '_bj', None)
-    if not _aj or not _bj:
+    scoop, _aj, _bj = _control_components(agent_body)
+    if scoop is None or not _aj or not _bj:
         return
     t = step_count * (1.0 / 60.0)
     phase_duration = 2.5
     phase = (t % phase_duration) / phase_duration
     arm_angle = _aj.angle
-    bucket_world_angle = agent_body.angle
+    bucket_world_angle = scoop.angle
     if phase < 0.25:
         ta, tb = -0.35, 0.50
     elif phase < 0.40:

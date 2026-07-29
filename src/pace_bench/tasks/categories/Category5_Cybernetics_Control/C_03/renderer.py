@@ -1,9 +1,6 @@
-import sys
 import os
 import importlib.util
 import pygame
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../.."))
 
 from pace_bench.renderer import Renderer
 
@@ -61,8 +58,8 @@ class C03Renderer(Renderer):
 
         # ── Identify seeker ────────────────────────────────────────
         seeker = (
-            sandbox._terrain_bodies.get("seeker")
-            if hasattr(sandbox, "_terrain_bodies")
+            sandbox.get_seeker_body()
+            if hasattr(sandbox, "get_seeker_body")
             else None
         )
 
@@ -84,10 +81,6 @@ class C03Renderer(Renderer):
         # ── Target circle ──────────────────────────────────────────
         if hasattr(sandbox, "peek_target_position_sensor"):
             tx, ty = sandbox.peek_target_position_sensor()
-        elif hasattr(sandbox, "get_target_position"):
-            tx, ty = sandbox.get_target_position()
-        elif hasattr(sandbox, "get_target_position_true"):
-            tx, ty = sandbox.get_target_position_true()
         else:
             tx, ty = target_x, 0.0
         self.draw_circle(

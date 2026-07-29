@@ -99,12 +99,16 @@ def _format_spatial_diagnostics(metrics: Dict[str, Any]) -> List[str]:
         parts.append(f"Core position: ({_fm2(cx)}, {_fm2(cy)})")
     min_body_y = metrics.get("min_body_y")
     if min_body_y is not None and _is_finite(min_body_y):
-        ct = float(metrics.get("collapse_threshold", 0.3))
-        margin = float(min_body_y) - ct
-        parts.append(
-            f"Lowest beam: y={_fm2(min_body_y)}m "
-            f"(collapse threshold {ct:.2f}m, margin {'+' if margin >= 0 else ''}{margin:.2f}m)"
-        )
+        collapse_threshold = metrics.get("collapse_threshold")
+        if _is_finite(collapse_threshold):
+            ct = float(collapse_threshold)
+            margin = float(min_body_y) - ct
+            parts.append(
+                f"Lowest beam: y={_fm2(min_body_y)}m "
+                f"(collapse threshold {ct:.2f}m, margin {'+' if margin >= 0 else ''}{margin:.2f}m)"
+            )
+        else:
+            parts.append(f"Lowest beam: y={_fm2(min_body_y)}m (collapse limit unavailable)")
     meteor_count = metrics.get("meteor_count")
     if meteor_count is not None:
         parts.append(f"Boulder schedule: {meteor_count} total")
@@ -112,7 +116,7 @@ def _format_spatial_diagnostics(metrics: Dict[str, Any]) -> List[str]:
 
 def _format_load_stress_distribution(metrics: Dict[str, Any]) -> List[str]:
     parts: List[str] = ["### 3. Joint Stress"]
-    joint_peak_records = metrics.get("joint_peak_records") or []
+    joint_peak_records = metrics.get("joint_peak_records_v2") or metrics.get("joint_peak_records") or []
     if not joint_peak_records:
         parts.append("No joints tracked.")
         return parts
@@ -167,8 +171,8 @@ def _format_load_stress_distribution(metrics: Dict[str, Any]) -> List[str]:
         )
     if critical:
         parts.append(
-            f"  ⚠️ Most stressed: Joint at {_anch_str(scored[0]['anchor'])} "
-            f"({scored[0]['worst_pct']:.1f}% — likely failure point)"
+            f"  ⚠️ Highest recorded utilization: Joint at {_anch_str(scored[0]['anchor'])} "
+            f"({scored[0]['worst_pct']:.1f}%)"
         )
     elif elevated and noteworthy:
         pass
@@ -178,7 +182,7 @@ def _format_load_stress_distribution(metrics: Dict[str, Any]) -> List[str]:
     return parts
 
 def _format_energy_flow(metrics: Dict[str, Any]) -> List[str]:
-    parts: List[str] = ["### 4. Energy"]
+    parts: List[str] = ["### 4. Energy & Impact Loads"]
     any_output = False
     tbk = metrics.get("total_boulder_ke")
     if tbk is not None and _is_finite(tbk):
@@ -199,11 +203,7 @@ def _format_energy_flow(metrics: Dict[str, Any]) -> List[str]:
         parts.append(f"Energy to core: {_fm1(core_force)}N peak force")
         any_output = True
     elif core_force is not None and float(core_force) == 0.0:
-        cdc = metrics.get("core_dodge_vs_collapse")
-        if cdc == "collapsed":
-            parts.append("Energy to core: undetermined (structure collapsed).")
-        else:
-            parts.append("Energy to core: 0.0N (fully absorbed or deflected).")
+        parts.append("Recorded peak force on core: 0.0N (no causal inference from this value alone).")
         any_output = True
     if not any_output:
         parts.append("No energy data available.")
@@ -226,14 +226,16 @@ def _format_constraint_profile(metrics: Dict[str, Any]) -> List[str]:
             "detail": f"{_fm2(s)} / {_fm2(m)}kg ({pct:.1f}% used, {abs(margin):.2f}kg {'available' if margin >= 0 else 'EXCEEDED'})",
         })
     mhl = metrics.get("max_height_limit")
-    if mhl is not None and _is_finite(mhl):
+    max_body_y = metrics.get("max_body_y")
+    if mhl is not None and _is_finite(mhl) and _is_finite(max_body_y):
         h = float(mhl)
+        observed = float(max_body_y)
         constraints.append({
             "name": "Structure Height",
             "type": "build-time",
-            "pct": 100.0,
-            "passed": True,
-            "detail": f"max beam y = {_fm2(h)}m",
+            "pct": observed / h * 100.0 if h > 0 else float("nan"),
+            "passed": observed <= h,
+            "detail": f"highest beam y={_fm2(observed)}m / limit {_fm2(h)}m (margin {h - observed:+.2f}m)",
         })
     cf = metrics.get("core_force")
     mcf = metrics.get("max_core_force")
@@ -259,8 +261,9 @@ def _format_constraint_profile(metrics: Dict[str, Any]) -> List[str]:
             })
     mby = metrics.get("min_body_y")
     if mby is not None:
-        ct = float(metrics.get("collapse_threshold", 0.3))
-        if _is_finite(mby):
+        collapse_threshold = metrics.get("collapse_threshold")
+        if _is_finite(mby) and _is_finite(collapse_threshold):
+            ct = float(collapse_threshold)
             y = float(mby)
             margin = y - ct
             passed = y >= ct
@@ -358,6 +361,13 @@ def _format_numerical_health(metrics: Dict[str, Any]) -> List[str]:
     nic = metrics.get("numerical_instability_count")
     if nic is not None and int(nic) > 0:
         issues.append(f"{int(nic)} instability event(s)")
+    observation_errors = metrics.get("joint_observation_errors")
+    if isinstance(observation_errors, dict) and observation_errors.get("count"):
+        detail = observation_errors.get("last_error")
+        issues.append(
+            f"{int(observation_errors['count'])} joint telemetry error(s)"
+            + (f"; last: {detail}" if detail else "")
+        )
     for key, label in [
         ("core_force", "Core force"),
         ("structure_mass", "Structure mass"),
@@ -386,6 +396,16 @@ def format_task_metrics(metrics: Dict[str, Any]) -> List[str]:
     if not metrics:
         return ["**No metrics available** for this evaluation run."]
     parts: List[str] = []
+    success = bool(metrics.get("success", False))
+    failed = bool(metrics.get("failed", False))
+    reason = metrics.get("failure_reason")
+    if success:
+        parts.append("## Outcome: SUCCESS")
+    elif failed:
+        parts.append(f"## Outcome: FAILED — {reason or 'evaluator reported failure'}")
+    else:
+        parts.append("## Outcome: IN PROGRESS")
+    parts.append("")
     dims = [
         _format_temporal_chronology,
         _format_spatial_diagnostics,
@@ -434,50 +454,7 @@ def get_improvement_suggestions(
         else:
             suggestions.append("- Review the error message and fix the build constraint violation.")
     if success:
-        suggestions.append("- The current design passed all constraints.")
         return suggestions
     if not metrics:
         return suggestions
-    cf = metrics.get("core_force")
-    mcf = metrics.get("max_core_force")
-    if cf is not None and mcf is not None and _is_finite(cf) and _is_finite(mcf):
-        if float(cf) > float(mcf):
-            suggestions.append(
-                f"- Core impact force ({float(cf):.1f}N) exceeded the {float(mcf):.1f}N limit. "
-                f"Add more protective structures (roof layers, bracing) to absorb impact energy "
-                f"before it reaches the core."
-            )
-    sm = metrics.get("structure_mass")
-    mm = metrics.get("max_mass")
-    if sm is not None and mm is not None and _is_finite(sm) and _is_finite(mm):
-        if float(sm) > float(mm):
-            suggestions.append(
-                f"- Structure mass ({float(sm):.2f}kg) exceeded the {float(mm):.2f}kg budget. "
-                f"Reduce beam sizes or use lower density materials."
-            )
-    jbc = metrics.get("joints_broken_count")
-    if jbc is not None and int(jbc) > 0:
-        jlf = metrics.get("joint_limit_force")
-        jlt = metrics.get("joint_limit_torque")
-        limit_info = ""
-        if jlf is not None and _is_finite(jlf):
-            limit_info += f" force limit {float(jlf):.1f}N"
-        if jlt is not None and _is_finite(jlt):
-            limit_info += f" torque limit {float(jlt):.1f}Nm"
-        suggestions.append(
-            f"- {int(jbc)} joint(s) broke during simulation"
-            f"{' — limits:' + limit_info if limit_info else ''}. "
-            f"Distribute loads across more joints or reduce structural weight "
-            f"to keep reaction forces below joint limits."
-        )
-    min_body_y = metrics.get("min_body_y")
-    if min_body_y is not None and _is_finite(min_body_y):
-        if float(min_body_y) < 0.3:
-            suggestions.append(
-                f"- Structure collapsed: lowest beam at y={float(min_body_y):.3f}m "
-                f"(below 0.3m threshold). Strengthen anchors and ensure adequate support."
-            )
-    if not suggestions:
-        suggestions.append(
-        )
     return suggestions

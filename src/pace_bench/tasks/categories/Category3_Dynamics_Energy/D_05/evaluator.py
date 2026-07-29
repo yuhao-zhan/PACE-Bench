@@ -24,7 +24,7 @@ class Evaluator:
             if violations:
                 self._design_constraints_checked = True
                 metrics = self._make_metrics(step_count, False, True,
-                    "Design constraint violated: " + "; ".join(violations), agent_body)
+                    "Design constraint violated: " + "; ".join(violations), agent_body, max_steps)
                 return True, 0.0, metrics
             self._design_constraints_checked = True
         shell_broken = self.environment.is_shell_broken()
@@ -45,30 +45,30 @@ class Evaluator:
         failure_reason = None
         if hit_slot_bar:
             failed = True
-            failure_reason = "Hammer hit the oscillating bar inside the slot; the slot has a bar that moves up and down—you must time your swing so the head passes through when the bar is away (geometry + timing)"
+            failure_reason = "Hammer contacted the oscillating bar before shell breakage"
         elif hit_slot_wall:
             failed = True
-            failure_reason = "Hammer hit the slot barrier (wall) before reaching the shell; the path has a narrow vertical GAP—you must design a trajectory that passes through the gap (thread the needle)"
+            failure_reason = "Hammer contacted a slot wall before shell breakage"
         elif hit_pendulum:
             failed = True
             has_second_pendulum = "pendulum_rod_2" in self.environment._terrain_bodies
-            failure_reason = "Hammer hit the pendulum before reaching the shell; must pass when the pendulum has cleared"
+            failure_reason = "Hammer contacted the pendulum before shell breakage"
         elif hit_gate:
             failed = True
             has_second_gate = "gate2" in self.environment._terrain_bodies
-            failure_reason = "Hammer hit the gate before reaching the shell; must pass through only when the gate is open"
+            failure_reason = "Hammer contacted the first gate before shell breakage"
         elif hit_gate2:
             failed = True
-            failure_reason = "Hammer hit the second gate before reaching the shell; both gates must be open when you pass"
+            failure_reason = "Hammer contacted the second gate before shell breakage"
         elif hit_wall:
             failed = True
-            failure_reason = "Hammer hit the central wall before reaching the shell; the path to the shell is blocked—you must swing OVER the wall (high arc) to hit the shell above"
+            failure_reason = "Hammer contacted the central wall before shell breakage"
         elif step_count >= max_steps - 1 and not shell_broken:
             failed = True
-            failure_reason = "Shell not broken: the hammer did not deliver enough force to break the shell, or hit the slot barrier / pendulum / wrong trajectory"
+            failure_reason = "Shell remained intact at the simulation step limit"
         done = failed or success or step_count >= max_steps - 1
         score = 100.0 if success else (0.0 if failed else 0.0)
-        metrics = self._make_metrics(step_count, success, failed, failure_reason, agent_body)
+        metrics = self._make_metrics(step_count, success, failed, failure_reason, agent_body, max_steps)
         return done, score, metrics
     def _check_design_constraints(self):
         violations = []
@@ -87,7 +87,10 @@ class Evaluator:
                     f"y=[{self.BUILD_ZONE_Y_MIN}, {self.BUILD_ZONE_Y_MAX}]"
                 )
         return violations
-    def _make_metrics(self, step_count, success=False, failed=False, failure_reason=None, agent_body=None):
+    def _make_metrics(
+        self, step_count, success=False, failed=False, failure_reason=None,
+        agent_body=None, max_steps=None,
+    ):
         hit_pendulum = getattr(self.environment, "hammer_hit_pendulum_before_shell", lambda: False)
         hit_pendulum = hit_pendulum() if callable(hit_pendulum) else hit_pendulum
         hit_gate = getattr(self.environment, "hammer_hit_gate_before_shell", lambda: False)
@@ -105,6 +108,7 @@ class Evaluator:
             "failed": failed,
             "failure_reason": failure_reason,
             "step_count": step_count,
+            "max_steps": max_steps,
             "structure_mass": self.environment.get_structure_mass(),
             "max_structure_mass": self.MAX_STRUCTURE_MASS,
             "shell_broken": self.environment.is_shell_broken(),
@@ -123,7 +127,9 @@ class Evaluator:
             "peak_speed": getattr(self.environment, '_peak_speed', 0.0),
             "max_shell_joint_force": getattr(self.environment, '_max_shell_joint_force', 0.0),
             "contact_events": getattr(self.environment, 'get_contact_events', lambda: [])() if hasattr(self.environment, 'get_contact_events') else [],
-            "angular_damping": float(getattr(self.environment, '_default_angular_damping', 0.0)),
+            "observation_errors": getattr(
+                self.environment, 'get_observation_errors', lambda: []
+            )(),
         }
         if hasattr(self.environment, 'get_slot_entry_info'):
             slot_info = self.environment.get_slot_entry_info()
@@ -134,10 +140,6 @@ class Evaluator:
             gap_low, gap_high = self.environment.get_slot_gap_bounds()
             metrics["slot_gap_y_low"] = gap_low
             metrics["slot_gap_y_high"] = gap_high
-        if hasattr(self.environment, 'get_slot_bar_params'):
-            bar_params = self.environment.get_slot_bar_params()
-            for k, v in bar_params.items():
-                metrics["slot_bar_" + k] = v
         pendulum_rod = self.environment._terrain_bodies.get("pendulum_rod")
         if pendulum_rod is not None:
             metrics["pendulum_x"] = float(pendulum_rod.position.x)

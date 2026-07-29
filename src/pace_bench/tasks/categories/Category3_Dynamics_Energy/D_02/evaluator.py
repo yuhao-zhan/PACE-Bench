@@ -1,10 +1,5 @@
-import sys
-
-import os
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../.."))
-
 from pace_bench.primitives import compute_constraint_penalty
+from pace_bench.simulator import TIME_STEP
 
 class Evaluator:
     def __init__(self, terrain_bounds, environment=None):
@@ -56,6 +51,7 @@ class Evaluator:
         self._slot_approach = {}
         self._design_pass = None
         self._mass_at_check = None
+        self._observation_errors = []
     def evaluate(self, agent_body, step_count, max_steps):
         if self.environment is None:
             return True, 0.0, {"error": "Environment not available"}
@@ -159,7 +155,10 @@ class Evaluator:
         try:
             jb = self.environment._terrain_bodies.get("jumper") if self.environment else None
             ang_vel = float(jb.angularVelocity) if jb else 0.0
-        except Exception:
+        except Exception as exc:
+            self._observation_errors.append(
+                f"jumper angular velocity unavailable: {type(exc).__name__}: {exc}"
+            )
             ang_vel = 0.0
         abs_ang = abs(ang_vel)
         if abs_ang > self._peak_angular_vel:
@@ -190,7 +189,7 @@ class Evaluator:
                 "angular_vel": round(abs_ang, 3),
             })
         if self._prev_vx is not None and self._prev_step is not None:
-            dt = (step_count - self._prev_step) / 60.0
+            dt = (step_count - self._prev_step) * TIME_STEP
             if dt > 0.0001:
                 ax_eff = (vx - self._prev_vx) / dt
                 ay_eff = (vy - self._prev_vy) / dt
@@ -244,7 +243,6 @@ class Evaluator:
         self, pos, vel, step_count, success=False, failed=False, failure_reason=None,
         max_steps=None,
     ):
-        import math as _m
         px, py = pos if pos else (0, 0)
         vx, vy = (vel[0], vel[1]) if vel else (0, 0)
         speed = (vx * vx + vy * vy) ** 0.5
@@ -267,6 +265,7 @@ class Evaluator:
             "failure_reason": failure_reason,
             "step_count": step_count,
             "max_steps": max_steps,
+            "time_step": TIME_STEP,
             "structure_mass": self.environment.get_structure_mass(),
             "max_structure_mass": self.MAX_STRUCTURE_MASS,
             "landed": self._landed,
@@ -276,52 +275,8 @@ class Evaluator:
             "pit_fail_y": self._pit_fail_y,
             "landing_min_y": self._landing_min_y,
         }
-        env = self.environment
-        if env is not None:
-            gx, gy = env.get_gravity()
-            wx, wy = env.get_wind()
-            jmass = env.get_jumper_mass()
-            ldamp = env.get_linear_damping()
-            adamp = env.get_angular_damping()
-        else:
-            gx, gy, wx, wy = 0.0, -14.0, 0.0, 0.0
-            jmass, ldamp, adamp = 0.0, 0.0, 0.0
-        m["physics_gravity_x"] = gx
-        m["physics_gravity_y"] = gy
-        m["physics_wind_x"] = wx
-        m["physics_wind_y"] = wy
-        m["physics_linear_damping"] = ldamp
-        m["physics_angular_damping"] = adamp
-        m["jumper_mass"] = jmass
-        ke = 0.5 * jmass * (vx * vx + vy * vy)
-        pe = jmass * abs(gy) * max(0.0, py) if gy != 0 else 0.0
-        total_e = ke + pe
-        m["energy_ke"] = round(ke, 3)
-        m["energy_pe"] = round(pe, 3)
-        m["energy_total"] = round(total_e, 3)
         if self._initial_state:
             istep, ipx, ipy, ivx, ivy = self._initial_state
-            ike = 0.5 * jmass * (ivx * ivx + ivy * ivy)
-            ipe = jmass * abs(gy) * max(0.0, ipy) if gy != 0 else 0.0
-            itot = ike + ipe
-            m["energy_initial_ke"] = round(ike, 3)
-            m["energy_initial_pe"] = round(ipe, 3)
-            m["energy_initial_total"] = round(itot, 3)
-            m["energy_loss"] = round(itot - total_e, 3)
-            m["energy_loss_pct"] = round((itot - total_e) / itot * 100.0, 2) if itot > 0 else 0.0
-            dx = px - ipx
-            dy = py - ipy
-            w_grav = jmass * gy * dy
-            w_wind = jmass * wx * dx
-            w_damp = (itot - total_e) - w_grav - w_wind
-            m["energy_work_gravity"] = round(w_grav, 3)
-            m["energy_work_wind"] = round(w_wind, 3)
-            m["energy_work_damping_est"] = round(w_damp, 3)
-            if ivx != 0.0 and vx != 0.0 and ivx * vx > 0 and step_count > 0:
-                t_sec = step_count / 60.0
-                if t_sec > 0.001:
-                    lam = -_m.log(abs(vx / ivx)) / t_sec
-                    m["energy_damping_coeff_est"] = round(lam, 4)
         if self._eff_ax_samples:
             win = self._eff_ax_samples[-max(1, min(20, len(self._eff_ax_samples))):]
             m["effective_ax_mean"] = round(sum(s["ax"] for s in win) / len(win), 3)
@@ -361,6 +316,7 @@ class Evaluator:
         m["jumper_spawn_x"] = self._jumper_spawn_x
         m["jumper_half_w"] = self._jumper_half_w
         m["jumper_half_h"] = self._jumper_half_h
+        m["observation_errors"] = list(self._observation_errors)
         return m
     def compute_score_with_penalty(self, score: float, metrics: dict) -> float:
         if score > 0:

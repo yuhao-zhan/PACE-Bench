@@ -1,8 +1,4 @@
-import sys
-
-import os
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../.."))
+import math
 
 from pace_bench.primitives import compute_constraint_penalty
 
@@ -28,21 +24,45 @@ class Evaluator:
         self._stall_steps_threshold = _stall_steps_from_bounds(terrain_bounds)
         self._mean_speed_error_threshold = float(terrain_bounds.get("mean_speed_error_threshold", MEAN_SPEED_ERROR_THRESHOLD))
         self._stall_count = 0
+        self._maximum_stall_count = 0
+        self._first_stall_step = None
         self._speed_error_sum = 0.0
         self._speed_error_count = 0
+        self._peak_reported_speed_error = 0.0
+        self._last_target = None
+        self._target_change_events = []
     def evaluate(self, agent_body, step_count, max_steps):
         if not self.environment:
             return True, 0.0, {"error": "Environment not available"}
-        omega = self.environment.get_wheel_angular_velocity_actual()
+        omega_true = self.environment._get_wheel_angular_velocity_actual()
+        omega_reported = self.environment.get_wheel_angular_velocity()
         target = self.environment.get_target_speed()
-        speed_error = abs(omega - target)
+        scoring_speed_error = abs(omega_true - target)
+        reported_speed_error = abs(omega_reported - target)
+        self._peak_reported_speed_error = max(
+            self._peak_reported_speed_error, reported_speed_error
+        )
+        if self._last_target is None:
+            self._last_target = target
+        elif not math.isclose(target, self._last_target, rel_tol=0.0, abs_tol=1e-12):
+            self._target_change_events.append(
+                {
+                    "step": int(step_count),
+                    "from": float(self._last_target),
+                    "to": float(target),
+                }
+            )
+            self._last_target = target
         if step_count >= self._regulation_start:
-            self._speed_error_sum += speed_error
+            self._speed_error_sum += scoring_speed_error
             self._speed_error_count += 1
-        if abs(omega) < self._stall_threshold:
+        if abs(omega_true) < self._stall_threshold:
             self._stall_count += 1
+            if self._first_stall_step is None:
+                self._first_stall_step = int(step_count)
         else:
             self._stall_count = 0
+        self._maximum_stall_count = max(self._maximum_stall_count, self._stall_count)
         failed = False
         failure_reason = None
         if self._stall_count >= self._stall_steps_threshold:
@@ -67,6 +87,7 @@ class Evaluator:
             elif self._speed_error_count == 0:
                 failed = True
                 failure_reason = (
+                    "No regulation-phase speed samples were collected."
                 )
             elif mean_speed_error > self._mean_speed_error_threshold:
                 failed = True
@@ -83,11 +104,15 @@ class Evaluator:
             progress = step_count / max_steps if max_steps > 0 else 0.0
             score = progress * 80.0
         metrics = {
-            "wheel_angular_velocity": omega,
+            "wheel_angular_velocity": omega_reported,
             "target_speed": target,
-            "speed_error": speed_error,
+            "speed_error": reported_speed_error,
+            "reported_speed_error": reported_speed_error,
             "mean_speed_error": mean_speed_error,
+            "peak_reported_speed_error": self._peak_reported_speed_error,
             "stall_count": self._stall_count,
+            "maximum_stall_count": self._maximum_stall_count,
+            "first_stall_step": self._first_stall_step,
             "stall_speed_threshold": self._stall_threshold,
             "stall_steps_threshold": self._stall_steps_threshold,
             "mean_speed_error_threshold": self._mean_speed_error_threshold,
@@ -97,54 +122,9 @@ class Evaluator:
             "success": success,
             "failed": failed,
             "failure_reason": failure_reason,
+            "target_change_events": list(self._target_change_events),
         }
-        if self.environment is not None:
-            try:
-                metrics["commanded_torque"] = self.environment.get_last_commanded_torque()
-            except (AttributeError, Exception):
-                pass
-            try:
-                metrics["applied_torque"] = self.environment.get_last_applied_torque()
-            except (AttributeError, Exception):
-                pass
-            try:
-                metrics["load_torque"] = self.environment.get_last_load_torque()
-            except (AttributeError, Exception):
-                pass
-            try:
-                metrics["max_torque_limit"] = self.environment.get_last_max_torque()
-            except (AttributeError, Exception):
-                pass
-            try:
-                metrics["torque_deadzone"] = self.environment.get_torque_deadzone()
-            except (AttributeError, Exception):
-                pass
-            try:
-                metrics["measurement_delay"] = self.environment.get_measurement_delay()
-            except (AttributeError, Exception):
-                pass
-            try:
-                metrics["wheel_angle"] = self.environment.get_wheel_angle()
-            except (AttributeError, Exception):
-                pass
-            try:
-                I_wheel = self.environment.get_wheel_moment_of_inertia()
-                metrics["wheel_moment_of_inertia"] = I_wheel
-                metrics["wheel_rotational_ke"] = 0.5 * I_wheel * omega * omega
-            except (AttributeError, Exception):
-                pass
-            try:
-                app_torque = metrics.get("applied_torque", 0.0)
-                if app_torque is not None and hasattr(app_torque, '__float__'):
-                    metrics["motor_power"] = float(app_torque) * omega
-            except (AttributeError, Exception):
-                pass
-            try:
-                ld_torque = metrics.get("load_torque", 0.0)
-                if ld_torque is not None and hasattr(ld_torque, '__float__'):
-                    metrics["load_power"] = float(ld_torque) * abs(omega)
-            except (AttributeError, Exception):
-                pass
+        metrics["commanded_torque"] = self.environment._get_last_commanded_torque()
         done = failed or (step_count >= max_steps - 1)
         return done, score, metrics
     def compute_score_with_penalty(self, score: float, metrics: dict) -> float:

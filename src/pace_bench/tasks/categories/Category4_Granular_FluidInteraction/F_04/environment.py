@@ -51,6 +51,7 @@ class Sandbox:
         self.MIN_PURITY = float(terrain_config.get("min_purity", 0.35))
         self._pending_second_wave = []
         self._pending_third_wave = []
+        self._wave_events = []
         self.SECOND_WAVE_STEP = int(terrain_config.get("second_wave_step", 1800))
         self.THIRD_WAVE_STEP = int(terrain_config.get("third_wave_step", 3600))
         self._beam_fixture_friction = float(terrain_config.get("beam_friction", 0.4))
@@ -95,10 +96,7 @@ class Sandbox:
         sweep_config = terrain_config.get("sweeper", {})
         if not sweep_config.get("enabled", True):
             return
-        try:
-            kinematicBody = getattr(Box2D.b2, 'kinematicBody', 1)
-        except Exception:
-            kinematicBody = 1
+        kinematic_body_type = Box2D.b2.kinematicBody
         y1 = float(sweep_config.get("y1", 4.0))
         x_min1 = float(sweep_config.get("x_min1", 5.25))
         x_max1 = float(sweep_config.get("x_max1", 6.85))
@@ -114,10 +112,7 @@ class Sandbox:
                 restitution=0.35,
             ),
         )
-        try:
-            body1.type = kinematicBody
-        except Exception:
-            pass
+        body1.type = kinematic_body_type
         body1.userData = {"sweeper": True, "x_min": x_min1, "x_max": x_max1, "v_sweep": v1}
         self._terrain_bodies["sweeper1"] = body1
         if sweep_config.get("sweeper2_enabled", True):
@@ -133,10 +128,7 @@ class Sandbox:
                     restitution=0.35,
                 ),
             )
-            try:
-                body2.type = kinematicBody
-            except Exception:
-                pass
+            body2.type = kinematic_body_type
             body2.userData = {"sweeper": True, "x_min": x_min2, "x_max": x_max2, "v_sweep": v2}
             self._terrain_bodies["sweeper2"] = body2
     def _create_particles(self, terrain_config: dict):
@@ -156,12 +148,12 @@ class Sandbox:
         n_third_small = int(mix_config.get("count_third_small", n_third))
         n_third_medium = int(mix_config.get("count_third_medium", n_third))
         n_third_large = int(mix_config.get("count_third_large", n_third))
-        random.seed(42)
+        rng = random.Random(42)
         for _ in range(n_small):
-            radius_small = r_s + random.uniform(-radius_jitter, radius_jitter)
+            radius_small = r_s + rng.uniform(-radius_jitter, radius_jitter)
             radius_small = max(0.04, min(0.08, radius_small))
-            x = random.uniform(self.FEED_X_MIN + radius_small, self.FEED_X_MAX - radius_small)
-            y = random.uniform(self.FEED_Y_MIN + radius_small, self.FEED_Y_MAX - radius_small)
+            x = rng.uniform(self.FEED_X_MIN + radius_small, self.FEED_X_MAX - radius_small)
+            y = rng.uniform(self.FEED_Y_MIN + radius_small, self.FEED_Y_MAX - radius_small)
             mass = density * (math.pi * radius_small ** 2)
             body = self._world.CreateDynamicBody(
                 position=(x, y),
@@ -176,10 +168,10 @@ class Sandbox:
             body.angularDamping = self._default_angular_damping
             self._particles_small.append(body)
         for _ in range(n_medium):
-            radius_medium = r_m + random.uniform(-radius_jitter, radius_jitter)
+            radius_medium = r_m + rng.uniform(-radius_jitter, radius_jitter)
             radius_medium = max(0.07, min(0.12, radius_medium))
-            x = random.uniform(self.FEED_X_MIN + radius_medium, self.FEED_X_MAX - radius_medium)
-            y = random.uniform(self.FEED_Y_MIN + radius_medium, self.FEED_Y_MAX - radius_medium)
+            x = rng.uniform(self.FEED_X_MIN + radius_medium, self.FEED_X_MAX - radius_medium)
+            y = rng.uniform(self.FEED_Y_MIN + radius_medium, self.FEED_Y_MAX - radius_medium)
             mass = density * (math.pi * radius_medium ** 2)
             body = self._world.CreateDynamicBody(
                 position=(x, y),
@@ -194,10 +186,10 @@ class Sandbox:
             body.angularDamping = self._default_angular_damping
             self._particles_medium.append(body)
         for _ in range(n_large):
-            radius_large = r_l + random.uniform(-radius_jitter, radius_jitter)
+            radius_large = r_l + rng.uniform(-radius_jitter, radius_jitter)
             radius_large = max(0.11, min(0.16, radius_large))
-            x = random.uniform(self.FEED_X_MIN + radius_large, self.FEED_X_MAX - radius_large)
-            y = random.uniform(self.FEED_Y_MIN + radius_large, self.FEED_Y_MAX - radius_large)
+            x = rng.uniform(self.FEED_X_MIN + radius_large, self.FEED_X_MAX - radius_large)
+            y = rng.uniform(self.FEED_Y_MIN + radius_large, self.FEED_Y_MAX - radius_large)
             mass = density * (math.pi * radius_large ** 2)
             body = self._world.CreateDynamicBody(
                 position=(x, y),
@@ -211,44 +203,44 @@ class Sandbox:
             body.linearDamping = self._default_linear_damping
             body.angularDamping = self._default_angular_damping
             self._particles_large.append(body)
-        random.seed(43)
+        rng = random.Random(43)
         for _ in range(n_small):
-            rs = r_s + random.uniform(-radius_jitter, radius_jitter)
+            rs = r_s + rng.uniform(-radius_jitter, radius_jitter)
             rs = max(0.04, min(0.08, rs))
-            x = random.uniform(self.FEED_X_MIN + rs, self.FEED_X_MAX - rs)
-            y = random.uniform(self.FEED_Y_MIN + rs, self.FEED_Y_MAX - rs)
+            x = rng.uniform(self.FEED_X_MIN + rs, self.FEED_X_MAX - rs)
+            y = rng.uniform(self.FEED_Y_MIN + rs, self.FEED_Y_MAX - rs)
             self._pending_second_wave.append(("small", x, y, rs, density, friction, particle_restitution))
         for _ in range(n_medium):
-            rm = r_m + random.uniform(-radius_jitter, radius_jitter)
+            rm = r_m + rng.uniform(-radius_jitter, radius_jitter)
             rm = max(0.07, min(0.12, rm))
-            x = random.uniform(self.FEED_X_MIN + rm, self.FEED_X_MAX - rm)
-            y = random.uniform(self.FEED_Y_MIN + rm, self.FEED_Y_MAX - rm)
+            x = rng.uniform(self.FEED_X_MIN + rm, self.FEED_X_MAX - rm)
+            y = rng.uniform(self.FEED_Y_MIN + rm, self.FEED_Y_MAX - rm)
             self._pending_second_wave.append(("medium", x, y, rm, density, friction, particle_restitution))
         for _ in range(n_large):
-            rl = r_l + random.uniform(-radius_jitter, radius_jitter)
+            rl = r_l + rng.uniform(-radius_jitter, radius_jitter)
             rl = max(0.11, min(0.16, rl))
-            x = random.uniform(self.FEED_X_MIN + rl, self.FEED_X_MAX - rl)
-            y = random.uniform(self.FEED_Y_MIN + rl, self.FEED_Y_MAX - rl)
+            x = rng.uniform(self.FEED_X_MIN + rl, self.FEED_X_MAX - rl)
+            y = rng.uniform(self.FEED_Y_MIN + rl, self.FEED_Y_MAX - rl)
             self._pending_second_wave.append(("large", x, y, rl, density, friction, particle_restitution))
         if n_third_small + n_third_medium + n_third_large > 0:
-            random.seed(44)
+            rng = random.Random(44)
             for _ in range(n_third_small):
-                rs = r_s + random.uniform(-radius_jitter, radius_jitter)
+                rs = r_s + rng.uniform(-radius_jitter, radius_jitter)
                 rs = max(0.04, min(0.08, rs))
-                x = random.uniform(self.FEED_X_MIN + rs, self.FEED_X_MAX - rs)
-                y = random.uniform(self.FEED_Y_MIN + rs, self.FEED_Y_MAX - rs)
+                x = rng.uniform(self.FEED_X_MIN + rs, self.FEED_X_MAX - rs)
+                y = rng.uniform(self.FEED_Y_MIN + rs, self.FEED_Y_MAX - rs)
                 self._pending_third_wave.append(("small", x, y, rs, density, friction, particle_restitution))
             for _ in range(n_third_medium):
-                rm = r_m + random.uniform(-radius_jitter, radius_jitter)
+                rm = r_m + rng.uniform(-radius_jitter, radius_jitter)
                 rm = max(0.07, min(0.12, rm))
-                x = random.uniform(self.FEED_X_MIN + rm, self.FEED_X_MAX - rm)
-                y = random.uniform(self.FEED_Y_MIN + rm, self.FEED_Y_MAX - rm)
+                x = rng.uniform(self.FEED_X_MIN + rm, self.FEED_X_MAX - rm)
+                y = rng.uniform(self.FEED_Y_MIN + rm, self.FEED_Y_MAX - rm)
                 self._pending_third_wave.append(("medium", x, y, rm, density, friction, particle_restitution))
             for _ in range(n_third_large):
-                rl = r_l + random.uniform(-radius_jitter, radius_jitter)
+                rl = r_l + rng.uniform(-radius_jitter, radius_jitter)
                 rl = max(0.11, min(0.16, rl))
-                x = random.uniform(self.FEED_X_MIN + rl, self.FEED_X_MAX - rl)
-                y = random.uniform(self.FEED_Y_MIN + rl, self.FEED_Y_MAX - rl)
+                x = rng.uniform(self.FEED_X_MIN + rl, self.FEED_X_MAX - rl)
+                y = rng.uniform(self.FEED_Y_MIN + rl, self.FEED_Y_MAX - rl)
                 self._pending_third_wave.append(("large", x, y, rl, density, friction, particle_restitution))
         self._initial_small_count = n_small * 2 + n_third_small
         self._initial_medium_count = n_medium * 2 + n_third_medium
@@ -340,6 +332,7 @@ class Sandbox:
                     ud["v_sweep"] = abs(v)
                 sweeper.linearVelocity = (ud["v_sweep"], 0)
         if self._step_count == self.SECOND_WAVE_STEP and self._pending_second_wave:
+            wave_size = len(self._pending_second_wave)
             for item in self._pending_second_wave:
                 kind, x, y, rad, density, friction, rest = item[0], item[1], item[2], item[3], item[4], item[5], item[6]
                 mass = density * (math.pi * rad ** 2)
@@ -361,7 +354,14 @@ class Sandbox:
                 else:
                     self._particles_large.append(body)
             self._pending_second_wave.clear()
+            self._wave_events.append({
+                "wave": 2,
+                "step": self._step_count,
+                "spawned_count": wave_size,
+                "active_count": self.get_spawned_particle_count(),
+            })
         if self._step_count == self.THIRD_WAVE_STEP and self._pending_third_wave:
+            wave_size = len(self._pending_third_wave)
             for item in self._pending_third_wave:
                 kind, x, y, rad, density, friction, rest = item[0], item[1], item[2], item[3], item[4], item[5], item[6]
                 mass = density * (math.pi * rad ** 2)
@@ -383,6 +383,12 @@ class Sandbox:
                 else:
                     self._particles_large.append(body)
             self._pending_third_wave.clear()
+            self._wave_events.append({
+                "wave": 3,
+                "step": self._step_count,
+                "spawned_count": wave_size,
+                "active_count": self.get_spawned_particle_count(),
+            })
         self._step_count += 1
         self._world.Step(time_step, 10, 10)
     def get_particles_small(self):
@@ -410,6 +416,8 @@ class Sandbox:
     def get_spawned_particle_count(self):
         parts = self._particles_small + self._particles_medium + self._particles_large
         return sum(1 for p in parts if p is not None and p.active)
+    def get_wave_events(self):
+        return [dict(event) for event in self._wave_events]
     def get_small_in_small_zone_count(self):
         return sum(1 for p in self._particles_small if p.active and p.position.y < self.SMALL_ZONE_Y_MAX)
     def get_medium_in_medium_zone_count(self):
@@ -598,9 +606,10 @@ class Sandbox:
                 if spd > 100.0:
                     extreme_v.append({"class": label, "speed": round(spd, 1),
                                        "vx": round(vx, 1), "vy": round(vy, 1)})
-                if not (math.isfinite(vx) and math.isfinite(vy)):
+                state_values = (vx, vy, p.position.x, p.position.y)
+                if any(math.isnan(value) for value in state_values):
                     nan_detected = True
-                if not (math.isfinite(p.position.x) and math.isfinite(p.position.y)):
+                if any(math.isinf(value) for value in state_values):
                     inf_detected = True
         return {
             "extreme_velocity_events": extreme_v,
