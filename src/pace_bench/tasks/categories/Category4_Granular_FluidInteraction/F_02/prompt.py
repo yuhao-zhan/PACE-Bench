@@ -2,10 +2,6 @@ import os
 
 import json
 
-import sys
-
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
-
 from pace_bench.tasks.primitives_api import API_INTRO
 
 with open(os.path.join(os.path.dirname(__file__), '..', '..', 'primitives_api.json'), 'r') as f:
@@ -26,10 +22,10 @@ Design an amphibian vehicle to cross a body of water and reach the target bank.
 - **Beam Size**: Each beam dimension (width or height) must be between 0.15 m and 2.0 m.
 - **Propulsion Limit**: Maximum force per component per thrust application is 520 N.
 - **Speed Cap**: Maximum linear speed is 4.0 m/s (simulation stability).
-- **Environmental Factors**: Fluid resistance (water drag coefficient: 115 N·s²/m²), current (standard 5.5 N/kg opposing force on submerged bodies), gravity, and localized atmospheric/liquid forces that may affect stability.
-- **Electromagnetic Deadzone**: Electromagnetic field regions (EMP) that disable thrust for components entering them: not present in this environment.
-- **Corrosive Altitude Ceiling**: A toxic atmospheric layer above the water that applies catastrophic downward crushing forces to elevated structures: not present in this environment.
-- **Abyssal Whirlpool**: Localized vortexes in the water channel that generate extreme downward suction on submerged or floating masses: not present in this environment.
+- **Environmental Factors**: Fluid resistance, current strength/direction, and localized forces are latent physical parameters that must be inferred from observed motion.
+- **Electromagnetic Deadzone**: The source environment has no EMP region. A non-standard environment may contain an undisclosed region that disables thrust; infer it from actuator response.
+- **Corrosive Altitude Ceiling**: The source environment has no toxic atmospheric layer. A non-standard environment may contain an undisclosed altitude above which strong downward loading occurs.
+- **Abyssal Whirlpool**: The source environment has no localized vortex. A non-standard environment may contain an undisclosed region with strong downward suction.
 - **Sink Threshold**: Vehicle is considered sunk and fails if its lowest point falls below y = -0.5 m.
 - **Propulsion**: Use `apply_force()` for paddling. **Cooldown**: Each component has a 3-step cooldown between thrusts.
 

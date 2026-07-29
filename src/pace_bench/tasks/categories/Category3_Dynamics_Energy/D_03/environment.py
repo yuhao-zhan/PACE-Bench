@@ -92,6 +92,7 @@ class Sandbox:
         self._trace_interval = 50
         self._last_known_zone = "start"
         self._initial_total_mass = None
+        self._observation_errors: list[str] = []
     def _create_terrain(self, terrain_config: dict):
         ground_len = 35.0
         ground_h = 0.4
@@ -292,7 +293,10 @@ class Sandbox:
                             self.env._gate_collision_occurred = True
                             try:
                                 angle = rod.angle
-                            except Exception:
+                            except Exception as exc:
+                                self.env._observation_errors.append(
+                                    f"gate {idx} collision angle unavailable: {type(exc).__name__}: {exc}"
+                                )
                                 angle = None
                             self.env._gate_collision_details.append({
                                 "gate": idx,
@@ -422,8 +426,7 @@ class Sandbox:
             raise ValueError("add_joint: body_a cannot be None.")
         anchor_x, anchor_y = anchor_point[0], anchor_point[1]
         if body_b is None:
-            raise ValueError(
-            )
+            raise ValueError("add_joint: body_b cannot be None; ground anchoring is disabled.")
         if type == "rigid":
             joint = self._world.CreateWeldJoint(
                 bodyA=body_a,
@@ -551,11 +554,17 @@ class Sandbox:
                 self._gate_arrived[gid] = True
                 try:
                     ang = ang_fn()
-                except Exception:
+                except Exception as exc:
+                    self._observation_errors.append(
+                        f"gate {gid} arrival angle unavailable: {type(exc).__name__}: {exc}"
+                    )
                     ang = None
                 try:
                     is_open = open_fn()
-                except Exception:
+                except Exception as exc:
+                    self._observation_errors.append(
+                        f"gate {gid} open-state unavailable: {type(exc).__name__}: {exc}"
+                    )
                     is_open = False
                 self._gate_arrival_events.append({
                     "gate": gid, "step": self._step_count,
@@ -577,8 +586,10 @@ class Sandbox:
                         self._energy_min_ke = ke
                     if self._energy_max_ke is None or ke > self._energy_max_ke:
                         self._energy_max_ke = ke
-            except Exception:
-                pass
+            except Exception as exc:
+                self._observation_errors.append(
+                    f"speed/energy diagnostic unavailable: {type(exc).__name__}: {exc}"
+                )
         try:
             current_zone = self._detect_active_zone(_cabin_x2)
             if current_zone != self._last_known_zone:
@@ -590,8 +601,10 @@ class Sandbox:
                     "speed": math.sqrt(cabin.linearVelocity.x ** 2 + cabin.linearVelocity.y ** 2) if cabin else 0.0,
                 })
                 self._last_known_zone = current_zone
-        except Exception:
-            pass
+        except Exception as exc:
+            self._observation_errors.append(
+                f"zone transition diagnostic unavailable: {type(exc).__name__}: {exc}"
+            )
         if (self._step_count % self._trace_interval == 0 or self._step_count <= 2) and cabin is not None:
             try:
                 self._speed_trace.append({
@@ -608,8 +621,10 @@ class Sandbox:
                     excess = len(self._speed_trace) - 200
                     self._speed_trace = (self._speed_trace[:keep_first] +
                                          self._speed_trace[keep_first + excess:])
-            except Exception:
-                pass
+            except Exception as exc:
+                self._observation_errors.append(
+                    f"speed trace diagnostic unavailable: {type(exc).__name__}: {exc}"
+                )
         if not getattr(self, "_speed_trap_checked", False) and cabin_x >= getattr(self, "_speed_trap_x", 9.0):
             self._speed_trap_checked = True
             vx = cabin.linearVelocity.x if cabin else 0.0
@@ -727,3 +742,5 @@ class Sandbox:
         return self.get_passenger_velocity()
     def get_vehicle_cabin(self):
         return self._terrain_bodies.get("vehicle_cabin")
+    def get_observation_errors(self):
+        return list(self._observation_errors)

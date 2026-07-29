@@ -1,705 +1,512 @@
-from typing import Dict, Any, List, Optional
+from typing import Any, Dict, List, Optional
 
 import math
 
-import sys as _sys
 
-_SIG_ATTR = "_davinci_fb_last_sig"
-
-def _get_last_sig() -> Optional[str]:
-    return getattr(_sys, _SIG_ATTR, None)
-
-def _set_last_sig(sig: str) -> None:
-    setattr(_sys, _SIG_ATTR, sig)
-
-def _f(val: Any) -> Optional[float]:
-    if val is None:
+def _f(value: Any) -> Optional[float]:
+    if value is None:
         return None
     try:
-        fv = float(val)
-        return fv if math.isfinite(fv) else None
+        number = float(value)
     except (TypeError, ValueError):
         return None
+    return number if math.isfinite(number) else None
 
-def _pct(numer: float, denom: float) -> Optional[float]:
-    if denom is None or not math.isfinite(denom) or denom == 0.0:
+
+def _step(value: Any) -> Optional[int]:
+    number = _f(value)
+    return int(number) if number is not None else None
+
+
+def _fmt_pos(position: Any) -> str:
+    if not isinstance(position, (list, tuple)) or len(position) < 2:
+        return "(unavailable)"
+    x = _f(position[0])
+    y = _f(position[1])
+    if x is None or y is None:
+        return "(unavailable)"
+    return f"({x:.2f}, {y:.2f}) m"
+
+
+def _anchor_position(record: Dict[str, Any], prefix: str = "") -> Any:
+    anchor_a = record.get(f"{prefix}anchor_a_pos")
+    anchor_b = record.get(f"{prefix}anchor_b_pos")
+    if not isinstance(anchor_a, (list, tuple)) or len(anchor_a) < 2:
         return None
-    n = _f(numer)
-    if n is None:
-        return None
-    return (n / denom) * 100.0
+    if not isinstance(anchor_b, (list, tuple)) or len(anchor_b) < 2:
+        return anchor_a
+    ax = _f(anchor_a[0])
+    ay = _f(anchor_a[1])
+    bx = _f(anchor_b[0])
+    by = _f(anchor_b[1])
+    if None in (ax, ay, bx, by):
+        return anchor_a
+    return ((ax + bx) / 2.0, (ay + by) / 2.0)
 
-def _margin(actual: float, limit: float) -> Optional[float]:
-    a = _f(actual)
-    l = _f(limit)
-    if a is None or l is None:
-        return None
-    return l - a
 
-def _fmt_pos(x: Any, y: Any) -> str:
-    fx = _f(x)
-    fy = _f(y)
-    if fx is None or fy is None:
-        return "(?,?)"
-    return f"({fx:.2f}, {fy:.2f})"
+def _moment_signature(metrics: Dict[str, Any]) -> tuple[Any, ...]:
+    return (
+        _step(metrics.get("step_count")),
+        bool(metrics.get("success")),
+        bool(metrics.get("failed")),
+        _f(metrics.get("vehicle_x")),
+        metrics.get("failure_reason"),
+    )
 
-def _fmt_lim(val: Any, lim: Any, unit: str = "") -> str:
-    v = _f(val)
-    l = _f(lim)
-    if v is None:
-        return "n/a"
-    s = f"{v:.3f}"
-    if l is not None and math.isfinite(l):
-        m = l - v
-        s += f" / {l:.3f}{unit} (margin {m:+.3f}{unit})"
-    return s
 
-def _stall_detected(metrics: Dict[str, Any]) -> tuple:
-    vx = _f(metrics.get("velocity_x"))
-    step = _f(metrics.get("step_count"))
-    angle = _f(metrics.get("normalized_angle"))
+def _format_outcome(metrics: Dict[str, Any]) -> List[str]:
+    step_count = _step(metrics.get("step_count"))
+    samples = _step(metrics.get("evaluation_sample_count"))
+    detail = []
+    if samples is not None:
+        detail.append(f"{samples} evaluator samples")
+    if step_count is not None:
+        detail.append(f"terminal step {step_count}")
+    suffix = f" — {', '.join(detail)}" if detail else ""
+    return [f"## Passage and terminal state{suffix}"]
+
+
+def _format_progress(metrics: Dict[str, Any]) -> List[str]:
+    parts: List[str] = []
     vehicle_x = _f(metrics.get("vehicle_x"))
+    vehicle_y = _f(metrics.get("vehicle_y"))
     target_x = _f(metrics.get("target_x"))
     start_x = _f(metrics.get("vehicle_start_x"))
-    stall_thresh = _f(metrics.get("stall_threshold_x"))
-    failed = metrics.get("failed", False)
-    if vx is None:
-        return False, ""
-    reasons = []
-    if (step is not None and step > 300 and abs(vx) < 0.05
-            and vehicle_x is not None and target_x is not None and vehicle_x < target_x
-            and not failed):
-        reasons.append(f"forward velocity {vx:.3f} m/s at step {int(step)}")
-    if (vehicle_x is not None and stall_thresh is not None
-            and vehicle_x < stall_thresh and step is not None and step > 400
-            and not failed):
-        reasons.append(f"vehicle at x={vehicle_x:.2f} has not reached stall-threshold x={stall_thresh:.2f} at step {int(step)}")
-    if (angle is not None and abs(angle) > 0.2
-            and vehicle_x is not None and start_x is not None
-            and vehicle_x < start_x + 3.0 and step is not None and step > 200
-            and not failed):
-        reasons.append(f"vehicle tilted {math.degrees(abs(angle)):.1f}° near entry x={vehicle_x:.2f}")
-    return bool(reasons), "; ".join(reasons)
+    best_x = _f(metrics.get("best_vehicle_x"))
+    best_step = _step(metrics.get("best_vehicle_x_step"))
+    best_y = _f(metrics.get("best_vehicle_y_at_progress"))
+    best_is_terminal = (
+        best_x is not None
+        and vehicle_x is not None
+        and abs(best_x - vehicle_x) < 1e-9
+        and best_step == _step(metrics.get("step_count"))
+    )
+    if vehicle_x is not None and vehicle_y is not None and not best_is_terminal:
+        terminal = f"- Terminal chassis: ({vehicle_x:.2f}, {vehicle_y:.2f}) m"
+        if target_x is not None:
+            terminal += f"; target margin {vehicle_x - target_x:+.2f} m"
+        parts.append(terminal)
+    if best_x is not None:
+        label = "Best/terminal chassis" if best_is_terminal else "Best sampled progress"
+        best_line = f"- {label}: x={best_x:.2f} m"
+        if best_y is not None:
+            best_line += f", y={best_y:.2f} m"
+        if best_step is not None:
+            best_line += f" at step {best_step}"
+        if target_x is not None:
+            best_line += (
+                f"; target x≥{target_x:.2f}, deficit "
+                f"{max(0.0, target_x - best_x):.2f} m"
+            )
+        if start_x is not None and target_x is not None and target_x > start_x:
+            progress = 100.0 * (best_x - start_x) / (target_x - start_x)
+            best_line += f" ({progress:.1f}% displacement)"
+        parts.append(best_line)
 
-def _moment_signature(metrics: Dict[str, Any]) -> str:
-    step = int(_f(metrics.get("step_count")) or -1)
-    failed = 1 if metrics.get("failed") else 0
-    vx = _f(metrics.get("vehicle_x")) or 0.0
-    return f"{step}|{failed}|{vx:.3f}"
-
-def _format_numerical_health(metrics: Dict[str, Any]) -> List[str]:
-    issues = []
-    for key, label in [
-        ("vehicle_x", "vehicle_x"), ("vehicle_y", "vehicle_y"),
-        ("velocity_x", "velocity_x"), ("velocity_y", "velocity_y"),
-        ("angular_velocity", "angular_velocity"),
-        ("max_vertical_accel", "max_vertical_accel"),
-    ]:
-        v = _f(metrics.get(key))
-        if v is not None and not math.isfinite(v):
-            issues.append(f"{label} = {v}")
-    for key, label, lim in [
-        ("velocity_x", "vx", 100.0), ("velocity_y", "vy", 100.0),
-        ("angular_velocity", "angular velocity", 50.0),
-    ]:
-        v = _f(metrics.get(key))
-        if v is not None and abs(v) > lim:
-            issues.append(f"{label} = {v:.2f} exceeds {lim:.1f}")
-    mva = _f(metrics.get("max_vertical_accel"))
-    if mva is not None and mva > 200.0:
-        issues.append(f"max_vertical_accel = {mva:.2f} m/s² (>20g)")
-    stalled, stall_reason = _stall_detected(metrics)
-    if stalled:
-        issues.append(f"vehicle stall detected: {stall_reason}")
-    if issues:
-        parts = ["## Numerical Health"]
-        for iss in issues:
-            parts.append(f"- ⚠️ {iss}")
-        return parts
-    else:
-        return ["## Numerical Health: all finite ✓"]
-
-def _format_state_snapshot(metrics: Dict[str, Any]) -> List[str]:
-    parts = ["## State"]
-    vx = _f(metrics.get("vehicle_x"))
-    vy = _f(metrics.get("vehicle_y"))
-    tx = _f(metrics.get("target_x"))
-    sx = _f(metrics.get("vehicle_start_x"))
-    if vx is not None and vy is not None:
-        pos_str = f"- Position: ({vx:.2f}, {vy:.2f}) m"
-        if tx is not None and sx is not None:
-            total = tx - sx
-            covered = vx - sx
-            if total > 0:
-                pct = (covered / total) * 100.0
-                pos_str += f" | target x={tx:.2f}, remaining {tx - vx:.2f}m, covered {pct:.1f}%"
-            else:
-                pos_str += f" | target x={tx:.2f}"
-        parts.append(pos_str)
-    vx_vel = _f(metrics.get("velocity_x"))
-    vy_vel = _f(metrics.get("velocity_y"))
-    if vx_vel is not None and vy_vel is not None:
-        speed = math.hypot(vx_vel, vy_vel)
-        parts.append(f"- Velocity: ({vx_vel:.2f}, {vy_vel:.2f}) m/s, |v|={speed:.2f}")
-    nang = _f(metrics.get("normalized_angle"))
-    av = _f(metrics.get("angular_velocity"))
-    avl = _f(metrics.get("max_angular_velocity_limit"))
-    if nang is not None:
-        att_str = f"- Tilt: {math.degrees(nang):.1f}°"
-        if av is not None:
-            att_str += f" | angular vel: {av:.3f} rad/s"
-            if avl is not None:
-                att_str += f" (limit {avl:.2f})"
-        parts.append(att_str)
-    sm = _f(metrics.get("structure_mass"))
-    msm = _f(metrics.get("max_structure_mass"))
-    if sm is not None and msm is not None:
-        pct = (sm / msm * 100.0) if msm > 0 else 0.0
-        parts.append(f"- Mass: {sm:.2f}/{msm:.2f} kg ({pct:.1f}% used)")
-    fzy = _f(metrics.get("fail_zone_y"))
-    if vy is not None and fzy is not None:
-        margin = vy - fzy
-        sev = "CRITICAL" if margin < 1.0 else ("WARNING" if margin < 3.0 else "SAFE")
-        parts.append(f"- Altitude vs fail-zone y={fzy:.2f}: margin {margin:+.2f}m [{sev}]")
-    stall_x = _f(metrics.get("stall_threshold_x"))
-    if vx is not None and stall_x is not None:
-        to_stall = stall_x - vx
-        parts.append(f"- Gap threshold x={stall_x:.2f}: distance {to_stall:+.2f}m")
-    jf = _f(metrics.get("joint_max_force_limit"))
-    jt = _f(metrics.get("joint_max_torque_limit"))
-    af = _f(metrics.get("anchor_max_force_limit"))
-    at = _f(metrics.get("anchor_max_torque_limit"))
-    limit_parts = []
-    if jf is not None:
-        limit_parts.append(f"struct F={jf:.1f}N")
-    if jt is not None:
-        limit_parts.append(f"struct T={jt:.3f}Nm")
-    if af is not None:
-        limit_parts.append(f"anchor F={af:.1f}N")
-    if at is not None:
-        limit_parts.append(f"anchor T={at:.3f}Nm")
-    if limit_parts:
-        parts.append(f"- Joint limits: {', '.join(limit_parts)}")
+    velocity_x = _f(metrics.get("velocity_x"))
+    velocity_y = _f(metrics.get("velocity_y"))
+    angle = _f(metrics.get("normalized_angle"))
+    angular_velocity = _f(metrics.get("angular_velocity"))
+    state = []
+    if velocity_x is not None and velocity_y is not None:
+        state.append(
+            f"velocity=({velocity_x:.2f}, {velocity_y:.2f}) m/s"
+        )
+    if angle is not None:
+        state.append(f"tilt={math.degrees(angle):.1f}°")
+    if angular_velocity is not None:
+        state.append(f"angular velocity={angular_velocity:.3f} rad/s")
+    if state:
+        parts.append("- Terminal motion: " + "; ".join(state))
+    if not parts:
+        parts.append("- Spatial state unavailable")
     return parts
+
+
+def _build_zone_result(metrics: Dict[str, Any]) -> Optional[tuple[bool, str]]:
+    bounds = [
+        _f(metrics.get("build_zone_x_min")),
+        _f(metrics.get("build_zone_x_max")),
+        _f(metrics.get("build_zone_y_min")),
+        _f(metrics.get("build_zone_y_max")),
+    ]
+    positions = metrics.get("body_creation_positions")
+    if any(value is None for value in bounds) or not isinstance(positions, list):
+        return None
+    x_min, x_max, y_min, y_max = bounds
+    invalid = []
+    worst_margin = math.inf
+    worst_index = None
+    worst_position = None
+    for index, position in enumerate(positions):
+        if not isinstance(position, (list, tuple)) or len(position) < 2:
+            invalid.append(index)
+            continue
+        x = _f(position[0])
+        y = _f(position[1])
+        if x is None or y is None:
+            invalid.append(index)
+            continue
+        margin = min(x - x_min, x_max - x, y - y_min, y_max - y)
+        if margin < worst_margin:
+            worst_margin = margin
+            worst_index = index
+            worst_position = (x, y)
+        if margin < 0.0:
+            invalid.append(index)
+    status = not invalid
+    text = (
+        f"build {len(invalid)}/{len(positions)} centers out, "
+        f"x[{x_min:.1f},{x_max:.1f}] y[{y_min:.1f},{y_max:.1f}]"
+    )
+    if worst_index is not None and worst_position is not None:
+        text += (
+            f", min Δ{worst_margin:+.2f} m at B{worst_index} "
+            f"{_fmt_pos(worst_position)}"
+        )
+    return status, text
+
 
 def _format_constraints(metrics: Dict[str, Any]) -> List[str]:
-    parts = ["## Constraints"]
-    failed_flag = metrics.get("failed", False)
-    failure_reason = metrics.get("failure_reason", "")
-    active_lines: List[str] = []
-    passive_count = 0
-    sm = _f(metrics.get("structure_mass"))
-    msm = _f(metrics.get("max_structure_mass"))
-    if sm is not None and msm is not None:
-        pct_used = (sm / msm * 100.0) if msm > 0 else 0.0
-        mar = msm - sm
-        if sm > msm:
-            active_lines.append(
-                f"- ❌ FAIL Mass: {sm:.2f}/{msm:.2f} kg "
-                f"({pct_used:.0f}% used, over by {-mar:.2f} kg)"
-            )
-        elif pct_used > 80.0:
-            active_lines.append(
-                f"- ⚠️ NEAR Mass: {sm:.2f}/{msm:.2f} kg "
-                f"({pct_used:.0f}% used, margin {mar:.2f} kg)"
-            )
-        else:
-            passive_count += 1
-    bx_min = _f(metrics.get("build_zone_x_min", 10.0))
-    bx_max = _f(metrics.get("build_zone_x_max", 30.0))
-    by_min = _f(metrics.get("build_zone_y_min", 5.0))
-    by_max = _f(metrics.get("build_zone_y_max", 15.0))
-    body_positions = metrics.get("body_positions_and_angles") or []
-    zone_ok = True
-    if body_positions:
-        for bp in body_positions:
-            if len(bp) >= 2:
-                xx, yy = _f(bp[0]), _f(bp[1])
-                if xx is not None and yy is not None:
-                    if not (bx_min <= xx <= bx_max and by_min <= yy <= by_max):
-                        zone_ok = False
-                        break
-    if not zone_ok:
-        active_lines.append("- ❌ FAIL Build zone: beams outside allowed area")
-    else:
-        passive_count += 1
-    design_violated = (failed_flag and failure_reason and
-                       "Design constraint" in str(failure_reason))
-    if design_violated:
-        active_lines.append("- ❌ FAIL Design constraints")
-    else:
-        passive_count += 1
-    jc = metrics.get("joint_count")
-    ijc = metrics.get("initial_joint_count")
-    structure_broken = metrics.get("structure_broken", False)
-    if ijc is not None and int(ijc) > 0:
-        broken = int(ijc) - int(jc) if jc is not None else 0
-        pct_broken = (broken / int(ijc)) * 100.0
-        if broken > 0:
-            active_lines.append(
-                f"- ❌ FAIL Structural integrity: {broken}/{int(ijc)} joints broken "
-                f"({pct_broken:.0f}%)"
-            )
-        else:
-            passive_count += 1
-    elif structure_broken:
-        active_lines.append("- ❌ FAIL Structural integrity")
-    elif ijc is not None:
-        passive_count += 1
-    vy = _f(metrics.get("vehicle_y"))
-    fzy = _f(metrics.get("fail_zone_y"))
-    if vy is not None and fzy is not None:
-        alt_margin = vy - fzy
-        if alt_margin <= 0:
-            active_lines.append(
-                f"- ❌ FAIL Altitude: y={vy:.2f}m below fail-zone {fzy:.2f}m "
-                f"(by {-alt_margin:.2f}m)"
-            )
-        elif alt_margin < 2.0:
-            active_lines.append(
-                f"- ⚠️ NEAR Altitude: margin {alt_margin:+.2f}m above fail-zone"
-            )
-        else:
-            passive_count += 1
-    mva = _f(metrics.get("max_vertical_accel"))
-    mval = _f(metrics.get("max_vertical_acceleration_limit"))
-    if mva is not None and mval is not None:
-        acc_pct = (mva / mval * 100.0) if mval > 0 else 0.0
-        acc_margin = mval - mva
-        if acc_margin < 0:
-            active_lines.append(
-                f"- ❌ FAIL Vertical accel: {mva:.2f}/{mval:.2f} m/s² "
-                f"(over by {-acc_margin:.2f})"
-            )
-        elif acc_pct > 50.0:
-            active_lines.append(
-                f"- ⚠️ NEAR Vertical accel: {mva:.2f}/{mval:.2f} m/s² ({acc_pct:.0f}%)"
-            )
-        else:
-            passive_count += 1
-    havc = metrics.get("high_angular_velocity_count", 0)
-    ut = _f(metrics.get("unstable_threshold_limit", 5))
-    if havc is not None and ut is not None:
-        if int(havc) >= int(ut):
-            active_lines.append(
-                f"- ❌ FAIL Angular stability: {havc}/{int(ut)} unstable steps"
-            )
-        elif int(havc) > int(ut) * 0.5 and int(havc) > 0:
-            active_lines.append(
-                f"- ⚠️ NEAR Angular stability: {havc}/{int(ut)} unstable steps"
-            )
-        else:
-            passive_count += 1
-    nangle = _f(metrics.get("normalized_angle"))
-    flip_limit = _f(metrics.get("flip_angle_limit_rad", math.pi / 2))
-    if nangle is not None and flip_limit is not None:
-        abs_angle = abs(nangle)
-        flip_margin = flip_limit - abs_angle
-        if flip_margin < 0:
-            active_lines.append(
-                f"- ❌ FAIL Flip angle: |{math.degrees(abs_angle):.0f}°| "
-                f"> {math.degrees(flip_limit):.0f}°"
-            )
-        elif math.degrees(flip_margin) < 20.0:
-            active_lines.append(
-                f"- ⚠️ NEAR Flip angle: |{math.degrees(abs_angle):.0f}°|, "
-                f"margin {math.degrees(flip_margin):.0f}°"
-            )
-        else:
-            passive_count += 1
-    arb_rot = _f(metrics.get("airborne_rotation_accumulated"))
-    arb_lim = _f(metrics.get("max_airborne_rotation_limit"))
-    if arb_rot is not None and arb_lim is not None:
-        arb_pct = (arb_rot / arb_lim * 100.0) if arb_lim > 0 else 0.0
-        arb_margin = arb_lim - arb_rot
-        if arb_margin < 0:
-            active_lines.append(
-                f"- ❌ FAIL Airborne rotation: {math.degrees(arb_rot):.0f}°/"
-                f"{math.degrees(arb_lim):.0f}°"
-            )
-        elif arb_pct > 50.0:
-            active_lines.append(
-                f"- ⚠️ NEAR Airborne rotation: {math.degrees(arb_rot):.0f}°/"
-                f"{math.degrees(arb_lim):.0f}° ({arb_pct:.0f}%)"
-            )
-        else:
-            passive_count += 1
-    if active_lines:
-        parts.extend(active_lines)
-        if passive_count > 0:
-            parts.append(f"- All {passive_count} other constraints: PASS ✓")
-    elif passive_count > 0:
-        parts.append(f"- All {passive_count} constraints: PASS ✓")
+    rows: List[tuple[bool, str]] = []
+    mass = _f(metrics.get("structure_mass"))
+    mass_limit = _f(metrics.get("max_structure_mass"))
+    if mass is not None and mass_limit is not None:
+        margin = mass_limit - mass
+        rows.append(
+            (margin >= 0.0, f"mass {mass:.2f}≤{mass_limit:.2f} kg, Δ{margin:+.2f}")
+        )
+
+    build_zone = _build_zone_result(metrics)
+    if build_zone is not None:
+        rows.append(build_zone)
+
+    joint_count = _step(metrics.get("joint_count"))
+    initial_joint_count = _step(metrics.get("initial_joint_count"))
+    failure_events = metrics.get("joint_failure_events")
+    event_count = len(failure_events) if isinstance(failure_events, list) else None
+    if joint_count is not None and initial_joint_count is not None:
+        broken = bool(metrics.get("structure_broken"))
+        text = (
+            f"integrity {joint_count}/{initial_joint_count} active, "
+            f"{max(0, initial_joint_count - joint_count)} lost"
+        )
+        if event_count is not None:
+            text += f", {event_count} events"
+        rows.append((not broken, text))
+
+    fail_y = _f(metrics.get("fail_zone_y"))
+    min_vehicle_y = _f(metrics.get("min_vehicle_y"))
+    if min_vehicle_y is not None and fail_y is not None:
+        margin = min_vehicle_y - fail_y
+        first_step = _step(metrics.get("first_chassis_fail_zone_sample_step"))
+        minimum_step = _step(metrics.get("min_vehicle_y_step"))
+        text = f"chassis y_min {min_vehicle_y:.2f}>{fail_y:.2f} m"
+        minimum_x = _f(metrics.get("min_vehicle_x_at_min_y"))
+        if minimum_x is not None:
+            text += f" at ({minimum_x:.2f},{min_vehicle_y:.2f})"
+        if minimum_step is not None:
+            text += f" s{minimum_step}"
+        text += f", Δ{margin:+.2f}"
+        if first_step is not None and first_step != minimum_step:
+            text += f", first fail s{first_step}"
+        rows.append((margin > 0.0, text))
+
+    min_structure_y = _f(metrics.get("min_structure_y"))
+    if min_structure_y is not None and fail_y is not None:
+        margin = min_structure_y - fail_y
+        first_step = _step(metrics.get("first_structure_fail_zone_sample_step"))
+        minimum_step = _step(metrics.get("min_structure_y_step"))
+        minimum_position = (
+            metrics.get("min_structure_x_at_min_y"),
+            min_structure_y,
+        )
+        text = f"structure y_min {min_structure_y:.2f}>{fail_y:.2f} m"
+        body_index = _step(metrics.get("min_structure_body_index"))
+        if body_index is not None:
+            text += f" B{body_index}"
+        if _f(minimum_position[0]) is not None:
+            text += f" at {_fmt_pos(minimum_position)}"
+        if minimum_step is not None:
+            text += f" s{minimum_step}"
+        text += f", Δ{margin:+.2f}"
+        if first_step is not None and first_step != minimum_step:
+            text += f", first fail s{first_step}"
+        rows.append((margin > 0.0, text))
+
+    acceleration = _f(metrics.get("max_vertical_accel_seen"))
+    if acceleration is None:
+        acceleration = _f(metrics.get("max_vertical_accel"))
+    acceleration_limit = _f(metrics.get("max_vertical_acceleration_limit"))
+    if acceleration is not None and acceleration_limit is not None:
+        margin = acceleration_limit - acceleration
+        peak_step = _step(metrics.get("max_vertical_accel_step"))
+        text = (
+            f"|a_y| peak {acceleration:.2f}≤{acceleration_limit:.2f} "
+            f"m/s², Δ{margin:+.2f}"
+        )
+        if peak_step is not None:
+            text += f" s{peak_step}"
+        rows.append((margin >= 0.0, text))
+
+    maximum_streak = _step(metrics.get("max_high_angular_velocity_count"))
+    streak_limit = _step(metrics.get("unstable_threshold_limit"))
+    angular_limit = _f(metrics.get("max_angular_velocity_limit"))
+    stability_start = _step(metrics.get("stability_check_start_step"))
+    if maximum_streak is not None and streak_limit is not None and angular_limit is not None:
+        text = (
+            f"ω streak {maximum_streak}<{streak_limit} samples "
+            f"(|ω|>{angular_limit:.2f} rad/s"
+        )
+        if stability_start is not None:
+            text += f" after s{stability_start}"
+        text += ")"
+        first_high_step = _step(metrics.get("first_high_angular_velocity_step"))
+        if first_high_step is not None:
+            text += f", first post-start over-limit s{first_high_step}"
+        rows.append((maximum_streak < streak_limit, text))
+
+    peak_angle = _f(metrics.get("max_abs_angle"))
+    flip_limit = _f(metrics.get("flip_angle_limit_rad"))
+    if peak_angle is not None and flip_limit is not None:
+        margin = flip_limit - peak_angle
+        peak_step = _step(metrics.get("max_abs_angle_step"))
+        text = (
+            f"|tilt| peak {math.degrees(peak_angle):.1f}°≤"
+            f"{math.degrees(flip_limit):.1f}°, Δ{math.degrees(margin):+.1f}°"
+        )
+        if peak_step is not None:
+            text += f" s{peak_step}"
+        rows.append((margin >= 0.0, text))
+
+    airborne_rotation = _f(metrics.get("max_airborne_rotation_seen"))
+    if airborne_rotation is None:
+        airborne_rotation = _f(metrics.get("airborne_rotation_accumulated"))
+    airborne_limit = _f(metrics.get("max_airborne_rotation_limit"))
+    if airborne_rotation is not None and airborne_limit is not None:
+        margin = airborne_limit - airborne_rotation
+        peak_step = _step(metrics.get("max_airborne_rotation_step"))
+        text = (
+            f"air rotation {math.degrees(airborne_rotation):.1f}°≤"
+            f"{math.degrees(airborne_limit):.1f}°, Δ{math.degrees(margin):+.1f}°"
+        )
+        if peak_step is not None:
+            text += f" s{peak_step}"
+        rows.append((margin >= 0.0, text))
+
+    parts = ["## Constraint profile"]
+    failed_rows = [text for passed, text in rows if not passed]
+    passed_rows = [text for passed, text in rows if passed]
+    parts.extend(f"- [FAIL] {text}" for text in failed_rows)
+    if passed_rows:
+        parts.append("- [PASS] " + "; ".join(passed_rows))
+    if not rows:
+        parts.append("- Constraint measurements unavailable")
     return parts
 
-def _format_stress_distribution(metrics: Dict[str, Any]) -> List[str]:
-    parts = ["## Stress Distribution"]
-    stress_records = metrics.get("joint_stress_summary") or []
-    if not stress_records:
-        parts.append("- No joint stress records available")
-        return parts
-    try:
-        entries = []
-        for rec in stress_records:
-            if not isinstance(rec, dict):
+
+def _limit_for_record(
+    record: Dict[str, Any], metrics: Dict[str, Any], channel: str
+) -> Optional[float]:
+    direct = _f(record.get(f"{channel}_limit"))
+    if direct is not None:
+        return direct
+    role = "anchor" if record.get("is_anchor") else "joint"
+    return _f(metrics.get(f"{role}_max_{channel}_limit"))
+
+
+def _stress_entries(metrics: Dict[str, Any]) -> List[Dict[str, Any]]:
+    entries = []
+    sources = [
+        (metrics.get("joint_failure_events"), True),
+        (metrics.get("joint_stress_summary"), False),
+    ]
+    for records, failed in sources:
+        if not isinstance(records, list):
+            continue
+        for sequence, record in enumerate(records):
+            if not isinstance(record, dict):
                 continue
-            fl = _f(rec.get("force_limit")) or 0.0
-            tl = _f(rec.get("torque_limit")) or 0.0
-            pf = _f(rec.get("peak_force")) or 0.0
-            pt = _f(rec.get("peak_torque")) or 0.0
-            force_pct = (pf / fl * 100.0) if fl > 0 else 0.0
-            torque_pct = (pt / tl * 100.0) if tl > 0 else 0.0
-            max_pct = max(force_pct, torque_pct)
-            is_anchor = bool(rec.get("is_anchor", False))
-            ba = rec.get("body_a_pos", (0.0, 0.0))
-            idx = rec.get("joint_idx", -1)
-            entries.append({
-                "idx": idx,
-                "pos_a": (float(ba[0]), float(ba[1])),
-                "force_pct": force_pct,
-                "torque_pct": torque_pct,
-                "max_pct": max_pct,
-                "peak_force": pf,
-                "force_limit": fl,
-                "peak_torque": pt,
-                "torque_limit": tl,
-                "is_anchor": is_anchor,
-            })
-        if not entries:
-            parts.append("- No stress entries computable")
-            return parts
-        entries.sort(key=lambda e: e["max_pct"], reverse=True)
-        critical = [e for e in entries if e["max_pct"] > 80.0]
-        elevated = [e for e in entries if 50.0 < e["max_pct"] <= 80.0]
-        nominal = [e for e in entries if e["max_pct"] <= 50.0]
-        parts.append(
-            f"- Tiers: {len(critical)} critical (>80%), "
-            f"{len(elevated)} elevated (50-80%), "
-            f"{len(nominal)} nominal (≤50%)"
-        )
-        parts.append("- Top 5 by severity:")
-        for rank, e in enumerate(entries[:5], 1):
-            role = "anchor" if e["is_anchor"] else "struct"
-            parts.append(
-                f"  #{rank} Joint #{e['idx']} ({role}) at "
-                f"{_fmt_pos(e['pos_a'][0], e['pos_a'][1])}: "
-                f"force {e['force_pct']:.0f}%/F, torque {e['torque_pct']:.0f}%/T"
-            )
-        if critical:
-            parts.append(f"- Critical joints (>{80.0:.0f}% of limit):")
-            for e in critical:
-                role = "anchor" if e["is_anchor"] else "struct"
-                parts.append(
-                    f"  - Joint #{e['idx']} ({role}): "
-                    f"{_fmt_pos(e['pos_a'][0], e['pos_a'][1])}; "
-                    f"force {e['force_pct']:.0f}%F, torque {e['torque_pct']:.0f}%T"
-                )
-        if elevated:
-            if len(elevated) <= 3:
-                parts.append(f"- Elevated-stress joints (50–80% of limit):")
-                for e in elevated:
-                    role = "anchor" if e["is_anchor"] else "struct"
-                    parts.append(
-                        f"  - Joint #{e['idx']} ({role}): "
-                        f"{_fmt_pos(e['pos_a'][0], e['pos_a'][1])}; "
-                        f"force {e['force_pct']:.0f}%F, torque {e['torque_pct']:.0f}%T"
-                    )
-            else:
-                parts.append(
-                    f"- Elevated-stress joints (50–80%): {len(elevated)} total, top 3:"
-                )
-                for e in elevated[:3]:
-                    role = "anchor" if e["is_anchor"] else "struct"
-                    parts.append(
-                        f"  - Joint #{e['idx']} ({role}): "
-                        f"{_fmt_pos(e['pos_a'][0], e['pos_a'][1])}; "
-                        f"force {e['force_pct']:.0f}%F, torque {e['torque_pct']:.0f}%T"
-                    )
-                if len(elevated) > 3:
-                    parts.append(f"  ... and {len(elevated) - 3} more elevated-stress joints")
-        anchor_entries = [e for e in entries if e["is_anchor"]]
-        struct_entries = [e for e in entries if not e["is_anchor"]]
-        if anchor_entries:
-            avg_anchor = sum(e["max_pct"] for e in anchor_entries) / len(anchor_entries)
-            parts.append(
-                f"- Anchor stress: {len(anchor_entries)} joints, avg {avg_anchor:.0f}% of limit"
-            )
-        if struct_entries:
-            avg_struct = sum(e["max_pct"] for e in struct_entries) / len(struct_entries)
-            parts.append(
-                f"- Structural joint stress: {len(struct_entries)} joints, avg {avg_struct:.0f}% of limit"
-            )
-    except (TypeError, ValueError, KeyError, IndexError, ZeroDivisionError) as exc:
-        parts.append(f"- Error computing stress: {type(exc).__name__}: {exc}")
-    return parts
-
-def _format_failure_timeline(metrics: Dict[str, Any]) -> List[str]:
-    parts = ["## Failure Timeline"]
-    failure_events = metrics.get("joint_failure_events") or []
-    if not failure_events:
-        if metrics.get("structure_broken"):
-            parts.append("- Structure reported broken but no failure events recorded")
-        else:
-            parts.append("- No joint failure events — structure intact throughout simulation")
-        return parts
-    parts.append(f"- **{len(failure_events)} joint failure events**")
-    sorted_events = sorted(failure_events, key=lambda e: int(e.get("step", 0)))
-    waves = []
-    current_wave = []
-    last_step = -100
-    for ev in sorted_events:
-        step = int(ev.get("step", 0))
-        if current_wave and (step - last_step > 10):
-            waves.append(current_wave)
-            current_wave = []
-        current_wave.append(ev)
-        last_step = step
-    if current_wave:
-        waves.append(current_wave)
-    if len(waves) == 1 and len(waves[0]) <= 3:
-        parts.append("- Individual events:")
-        for ev in waves[0]:
-            step = ev.get("step", -1)
-            pos = ev.get("body_a_pos", (None, None))
-            is_anchor = ev.get("is_anchor", False)
-            pf = ev.get("peak_force", 0.0)
-            pt = ev.get("peak_torque", 0.0)
-            role = "anchor" if is_anchor else "struct"
-            parts.append(
-                f"  Step {step}: {role} joint at {_fmt_pos(pos[0], pos[1])}; "
-                f"force={float(pf):.2f} N, torque={float(pt):.3f} Nm"
-            )
-    else:
-        parts.append(f"- **{len(waves)} cascade wave(s)**:")
-        for wi, wave in enumerate(waves):
-            w_start = int(wave[0].get("step", 0))
-            w_end = int(wave[-1].get("step", 0))
-            n_anchor = sum(1 for e in wave if e.get("is_anchor"))
-            n_struct = len(wave) - n_anchor
-            xs = []
-            for ev in wave:
-                pos = ev.get("body_a_pos", (None, None))
-                if pos[0] is not None:
-                    try:
-                        xs.append(float(pos[0]))
-                    except (TypeError, ValueError):
-                        pass
-            x_range = f"x=[{min(xs):.2f}, {max(xs):.2f}]" if xs else "unknown"
-            first = wave[0]
-            fp = first.get("body_a_pos", (None, None))
-            parts.append(
-                f"  Wave {wi+1}: steps {w_start}–{w_end}, {len(wave)} failures "
-                f"({n_anchor} anchor, {n_struct} struct), {x_range}"
-            )
-            parts.append(
-                f"    Initiated: step {w_start}, joint at {_fmt_pos(fp[0], fp[1])}"
-            )
-            if len(wave) <= 5:
-                for ev in wave:
-                    step = ev.get("step", -1)
-                    pos = ev.get("body_a_pos", (None, None))
-                    is_anchor = ev.get("is_anchor", False)
-                    pf = ev.get("peak_force", 0.0)
-                    pt = ev.get("peak_torque", 0.0)
-                    role = "anchor" if is_anchor else "struct"
-                    parts.append(
-                        f"    Step {step}: {role} joint at {_fmt_pos(pos[0], pos[1])}; "
-                        f"force={float(pf):.2f} N, torque={float(pt):.3f} Nm"
-                    )
-            else:
-                for ev in wave[:2]:
-                    step = ev.get("step", -1)
-                    pos = ev.get("body_a_pos", (None, None))
-                    is_anchor = ev.get("is_anchor", False)
-                    pf = ev.get("peak_force", 0.0)
-                    pt = ev.get("peak_torque", 0.0)
-                    role = "anchor" if is_anchor else "struct"
-                    parts.append(
-                        f"    Step {step}: {role} joint at {_fmt_pos(pos[0], pos[1])}; "
-                        f"force={float(pf):.2f} N, torque={float(pt):.3f} Nm"
-                    )
-                last_ev = wave[-1]
-                lstep = last_ev.get("step", -1)
-                lpos = last_ev.get("body_a_pos", (None, None))
-                lis_anchor = last_ev.get("is_anchor", False)
-                lpf = last_ev.get("peak_force", 0.0)
-                lpt = last_ev.get("peak_torque", 0.0)
-                lrole = "anchor" if lis_anchor else "struct"
-                parts.append(
-                    f"    ... {len(wave) - 3} more failures ..."
-                )
-                parts.append(
-                    f"    Step {lstep}: {lrole} joint at {_fmt_pos(lpos[0], lpos[1])}; "
-                    f"force={float(lpf):.2f} N, torque={float(lpt):.3f} Nm"
-                )
-    first_ev = sorted_events[0]
-    first_step = first_ev.get("step", -1)
-    fpos = first_ev.get("body_a_pos", (None, None))
-    fis_anchor = first_ev.get("is_anchor", False)
-    fpf = first_ev.get("peak_force", 0.0)
-    fpt = first_ev.get("peak_torque", 0.0)
-    jf_lim = _f(metrics.get("joint_max_force_limit", 80.0))
-    jt_lim = _f(metrics.get("joint_max_torque_limit", 300.0))
-    af_lim = _f(metrics.get("anchor_max_force_limit", 100.0))
-    at_lim = _f(metrics.get("anchor_max_torque_limit", 500.0))
-    if fis_anchor:
-        force_lim, torque_lim = af_lim, at_lim
-    else:
-        force_lim, torque_lim = jf_lim, jt_lim
-    force_exceeded = fpf > force_lim if force_lim is not None else False
-    torque_exceeded = fpt > torque_lim if torque_lim is not None else False
-    exceed_str = []
-    if force_exceeded:
-        exceed_str.append(
-            f"force {float(fpf):.2f} N > limit {force_lim:.2f} N "
-            f"(by {float(fpf) - force_lim:+.2f} N)"
-        )
-    if torque_exceeded:
-        exceed_str.append(
-            f"torque {float(fpt):.3f} Nm > limit {torque_lim:.3f} Nm "
-            f"(by {float(fpt) - torque_lim:+.3f} Nm)"
-        )
-    role = "anchor" if fis_anchor else "struct"
-    parts.append(
-        f"- **First failure**: step {first_step}, {role} joint at "
-        f"{_fmt_pos(fpos[0], fpos[1])}; "
-        f"{' & '.join(exceed_str) if exceed_str else 'limit exceeded'}"
-    )
-    return parts
-
-def _format_interaction(metrics: Dict[str, Any]) -> List[str]:
-    parts = ["## Interaction"]
-    vx = _f(metrics.get("vehicle_x"))
-    vy = _f(metrics.get("vehicle_y"))
-    sx = _f(metrics.get("vehicle_start_x"))
-    nang = _f(metrics.get("normalized_angle"))
-    step = _f(metrics.get("step_count"))
-    has_content = False
-    if (vx is not None and sx is not None and step is not None
-            and vx < sx + 2.0 and step > 200 and vx > 0):
-        nang_deg = math.degrees(abs(nang)) if nang is not None else None
-        parts.append(
-            f"- Vehicle near entry: x={vx:.2f} m, "
-            f"{('tilted ' + f'{nang_deg:.1f}°' if nang_deg is not None else 'attitude unknown')}, "
-            f"at step {int(step)}"
-        )
-        has_content = True
-    body_positions = metrics.get("body_positions_and_angles") or []
-    entry_bodies = []
-    if body_positions:
-        for bp in body_positions:
-            if len(bp) >= 3:
-                xx, yy, aa = _f(bp[0]), _f(bp[1]), _f(bp[2])
-                if xx is not None and 8.0 <= xx <= 12.0:
-                    entry_bodies.append((xx, yy, aa))
-    if entry_bodies:
-        entry_bodies.sort(key=lambda b: b[1], reverse=True)
-        top_beam = entry_bodies[0]
-        beam_angle_deg = math.degrees(abs(top_beam[2])) % 180.0
-        if beam_angle_deg > 90.0:
-            beam_angle_deg = 180.0 - beam_angle_deg
-        parts.append(
-            f"- Bridge entry (x≈10m): {len(entry_bodies)} beams, "
-            f"highest at ({top_beam[0]:.2f}, {top_beam[1]:.2f}), "
-            f"slope {beam_angle_deg:.1f}°"
-        )
-        has_content = True
-    closest_dist = float('inf')
-    if vx is not None and vy is not None and body_positions:
-        for bp in body_positions:
-            if len(bp) >= 2:
-                bx, by = _f(bp[0]), _f(bp[1])
-                if bx is not None and by is not None:
-                    dist = math.hypot(vx - bx, vy - by)
-                    if dist < closest_dist:
-                        closest_dist = dist
-        if math.isfinite(closest_dist) and closest_dist < 3.0:
-            parts.append(f"- Closest beam: {closest_dist:.2f}m from vehicle")
-            has_content = True
-    vx_vel = _f(metrics.get("velocity_x"))
-    vy_vel = _f(metrics.get("velocity_y"))
-    if vx_vel is not None and vy_vel is not None:
-        speed = math.hypot(vx_vel, vy_vel)
-        if speed < 0.01 and step is not None and step > 100:
-            parts.append(f"- Vehicle nearly stationary: speed {speed:.4f} m/s at step {int(step)}")
-            has_content = True
-        elif vx_vel < -0.1:
-            parts.append(f"- Vehicle moving backward: vx={vx_vel:.3f} m/s")
-            has_content = True
-    if not has_content:
-        parts.append("- No notable vehicle-structure interactions detected")
-    return parts
-
-def _format_geometry(metrics: Dict[str, Any]) -> List[str]:
-    parts = ["## Geometry"]
-    right_cliff_x = _f(metrics.get("terrain_right_cliff_x_start", 25.0))
-    right_cliff_end = _f(metrics.get("terrain_right_cliff_x_end", 100.0))
-    gap_width = _f(metrics.get("terrain_gap_width", 15.0))
-    bx_max = _f(metrics.get("build_zone_x_max", 30.0))
-    cliff_top_y = _f(metrics.get("cliff_top_y", 10.0))
-    parts.append(
-        f"- Terrain: gap {gap_width:.1f}m (x=10.0–{right_cliff_x:.1f}), "
-        f"cliff top y={cliff_top_y:.1f}, "
-        f"right cliff x=[{right_cliff_x:.1f}, {right_cliff_end:.1f}], "
-        f"build zone x=[10.0, {bx_max:.1f}]"
-    )
-    anchor_positions = metrics.get("anchor_positions") or []
-    if anchor_positions:
-        left_count = 0
-        right_on_cliff = 0
-        right_past_cliff = 0
-        for ap in anchor_positions:
-            if len(ap) < 5:
+            force = _f(record.get("peak_force"))
+            torque = _f(record.get("peak_torque"))
+            force_limit = _limit_for_record(record, metrics, "force")
+            torque_limit = _limit_for_record(record, metrics, "torque")
+            force_util = force / force_limit if force is not None and force_limit and force_limit > 0 else None
+            torque_util = torque / torque_limit if torque is not None and torque_limit and torque_limit > 0 else None
+            utilizations = [
+                (name, value)
+                for name, value in (("force", force_util), ("torque", torque_util))
+                if value is not None
+            ]
+            if not utilizations:
                 continue
-            awx = _f(ap[0])
-            is_left = bool(ap[4])
-            if is_left:
-                left_count += 1
-            elif right_cliff_x is not None and right_cliff_end is not None and awx is not None:
-                if awx > right_cliff_end + 1.0:
-                    right_past_cliff += 1
-                elif right_cliff_x - 1.0 <= awx <= right_cliff_end + 1.0:
-                    right_on_cliff += 1
-        parts.append(
-            f"- Anchors: {len(anchor_positions)} total "
-            f"({left_count} left cliff, {right_on_cliff} right cliff"
-            + (f", {right_past_cliff} past cliff — unsupported" if right_past_cliff else "")
-            + ")"
-        )
-        if right_past_cliff:
-            for ap in anchor_positions:
-                if len(ap) < 5:
-                    continue
-                awx = _f(ap[0])
-                awy = _f(ap[1])
-                is_left = bool(ap[4])
-                if not is_left and awx is not None and right_cliff_end is not None and awx > right_cliff_end + 1.0:
-                    overhang = awx - right_cliff_end
-                    parts.append(
-                        f"  - Anchor at ({awx:.2f}, {awy:.2f}), "
-                        f"{overhang:.1f}m past right cliff end"
-                    )
-    else:
-        parts.append("- No anchor position data available")
-    body_positions = metrics.get("body_positions_and_angles") or []
-    if body_positions and right_cliff_end is not None:
-        beams_past = sum(
-            1 for bp in body_positions
-            if len(bp) >= 1 and _f(bp[0]) is not None and _f(bp[0]) > right_cliff_end + 1.0
-        )
-        if beams_past > 0:
-            max_overhang = max(
-                (_f(bp[0]) - right_cliff_end)
-                for bp in body_positions
-                if len(bp) >= 1 and _f(bp[0]) is not None and _f(bp[0]) > right_cliff_end + 1.0
+            governing_channel, governing_utilization = max(
+                utilizations, key=lambda item: item[1]
             )
-            parts.append(
-                f"- Beams past right cliff (x={right_cliff_end:.1f}): "
-                f"{beams_past}, max overhang {max_overhang:.2f}m"
+            prefix = f"peak_{governing_channel}_"
+            entries.append(
+                {
+                    "joint_id": record.get("joint_id", record.get("joint_idx", sequence)),
+                    "is_anchor": bool(record.get("is_anchor")),
+                    "failed": failed,
+                    "force": force,
+                    "force_limit": force_limit,
+                    "force_util": force_util,
+                    "torque": torque,
+                    "torque_limit": torque_limit,
+                    "torque_util": torque_util,
+                    "governing_channel": governing_channel,
+                    "governing_utilization": governing_utilization,
+                    "peak_step": _step(record.get(f"{prefix}step", record.get("step"))),
+                    "position": _anchor_position(record, prefix),
+                }
+            )
+    return sorted(entries, key=lambda entry: entry["governing_utilization"], reverse=True)
+
+
+def _format_loads(metrics: Dict[str, Any]) -> List[str]:
+    entries = _stress_entries(metrics)
+    parts = ["## Peak joint loads"]
+    if not entries:
+        parts.append("- No finite joint stress measurements available")
+        return parts
+    failed_count = sum(1 for entry in entries if entry["failed"])
+    parts.append(
+        f"- Top 3 of {len(entries)} joints; {failed_count} failed:"
+    )
+    for rank, entry in enumerate(entries[:3], start=1):
+        role = "anchor" if entry["is_anchor"] else "structural"
+        lifecycle = "failed" if entry["failed"] else "active"
+        channel = entry["governing_channel"]
+        actual = entry[channel]
+        limit = entry[f"{channel}_limit"]
+        margin = limit - actual
+        force_text = "unavailable"
+        if entry["force"] is not None and entry["force_limit"] is not None:
+            force_text = (
+                f"{entry['force']:.2f}/{entry['force_limit']:.2f}="
+                f"{100.0 * entry['force_util']:.1f}%"
+            )
+        torque_text = "unavailable"
+        if entry["torque"] is not None and entry["torque_limit"] is not None:
+            torque_text = (
+                f"{entry['torque']:.3f}/{entry['torque_limit']:.3f}="
+                f"{100.0 * entry['torque_util']:.1f}%"
+            )
+        where = _fmt_pos(entry["position"])
+        when = (
+            f"s{entry['peak_step']}"
+            if entry["peak_step"] is not None
+            else "step unavailable"
+        )
+        parts.append(
+            f"- #{rank} J{entry['joint_id']} {role}/{lifecycle} {when} {where}: "
+            f"F {force_text}; T {torque_text}; {channel} Δ{margin:+.3f}"
+        )
+    return parts
+
+
+def _format_chronology(metrics: Dict[str, Any]) -> List[str]:
+    timeline: List[tuple[int, int, str]] = []
+    failure_events = metrics.get("joint_failure_events")
+    if isinstance(failure_events, list) and failure_events:
+        valid_events = [
+            event
+            for event in failure_events
+            if isinstance(event, dict) and _step(event.get("step")) is not None
+        ]
+        if valid_events:
+            valid_events.sort(key=lambda event: _step(event.get("step")))
+            first = valid_events[0]
+            first_step = _step(first.get("step"))
+            role = "anchor" if first.get("is_anchor") else "structural"
+            timeline.append(
+                (
+                    first_step,
+                    0,
+                    f"first joint failure J{first.get('joint_id', '?')} "
+                    f"{role} {_fmt_pos(_anchor_position(first))}",
+                )
+            )
+            last_step = _step(valid_events[-1].get("step"))
+            anchor_count = sum(1 for event in valid_events if event.get("is_anchor"))
+            structural_count = len(valid_events) - anchor_count
+            x_values = [
+                _f(position[0])
+                for event in valid_events
+                if (position := _anchor_position(event)) is not None
+            ]
+            x_values = [value for value in x_values if value is not None]
+            span = f"steps {first_step}–{last_step}"
+            if x_values:
+                span += f", anchor x=[{min(x_values):.2f}, {max(x_values):.2f}] m"
+            cascade_text = (
+                f"{len(valid_events)} total ({anchor_count} anchor, "
+                f"{structural_count} structural), {span}"
             )
         else:
-            parts.append("- All beams within terrain bounds ✓")
+            cascade_text = f"{len(failure_events)} malformed or untimed failure records"
+    else:
+        cascade_text = "no joint failure events"
+
+    for key, priority, label in (
+        ("first_chassis_fail_zone_sample_step", 1, "chassis first at/below fail plane"),
+        ("first_structure_fail_zone_sample_step", 2, "structure first at/below fail plane"),
+    ):
+        event_step = _step(metrics.get(key))
+        if event_step is not None:
+            timeline.append((event_step, priority, label))
+
+    terminal_step = _step(metrics.get("step_count"))
+    if terminal_step is not None:
+        terminal_text = "terminal evaluation"
+        if metrics.get("success"):
+            terminal_text += " (passage success)"
+        timeline.append((terminal_step, 9, terminal_text))
+
+    parts = ["## Chronology"]
+    if timeline:
+        parts.append(
+            "- "
+            + " → ".join(
+                f"s{event_step} {label}"
+                for event_step, _, label in sorted(timeline)
+            )
+        )
+    parts.append(f"- Joint failures: {cascade_text}")
     return parts
+
+
+def _format_numerical_health(metrics: Dict[str, Any]) -> List[str]:
+    required = (
+        "vehicle_x",
+        "vehicle_y",
+        "velocity_x",
+        "velocity_y",
+        "angular_velocity",
+        "normalized_angle",
+        "structure_mass",
+        "max_vertical_accel",
+    )
+    missing = []
+    invalid = []
+    for key in required:
+        if key not in metrics or metrics.get(key) is None:
+            missing.append(key)
+            continue
+        try:
+            value = float(metrics.get(key))
+        except (TypeError, ValueError):
+            invalid.append(f"{key}={metrics.get(key)!r}")
+            continue
+        if not math.isfinite(value):
+            invalid.append(f"{key}={value}")
+    if invalid:
+        return ["## Numerical health: FAIL", "- Non-finite or non-numeric: " + ", ".join(invalid)]
+    if missing:
+        return ["## Numerical health: PARTIAL", "- Missing core fields: " + ", ".join(missing)]
+    return ["## Numerical health: PASS — core evaluator values are finite"]
+
 
 def format_task_metrics(
     metrics: Dict[str, Any],
@@ -707,30 +514,25 @@ def format_task_metrics(
 
 ) -> List[str]:
     if not metrics:
-        return ["**No metrics available**"]
-    sig = _moment_signature(metrics)
-    if _get_last_sig() is not None and sig == _get_last_sig():
-        step_count = int(_f(metrics.get("step_count")) or 0)
-        return [f"## Summary: *(State unchanged from previous moment, step {step_count})*"]
-    _set_last_sig(sig)
+        return ["## Outcome: metrics unavailable"]
+    if (
+        prev_metrics is not None
+        and _moment_signature(metrics) == _moment_signature(prev_metrics)
+    ):
+        step_count = _step(metrics.get("step_count"))
+        return [
+            "## Outcome: state unchanged"
+            + (f" at evaluator sample step {step_count}" if step_count is not None else "")
+        ]
     parts: List[str] = []
-    score = _f(metrics.get("score", 0.0))
-    success = metrics.get("success", False)
-    failed = metrics.get("failed", False)
-    failure_reason = metrics.get("failure_reason", "")
-    step_count = metrics.get("step_count", 0)
-    status = "SUCCESS ✓" if success else ("FAILED ❌" if failed else "IN PROGRESS")
-    parts.append(f"## Summary: {status} | score={score:.1f} | step={step_count}")
-    if failure_reason:
-        parts.append(f"**Failure reason**: {failure_reason}")
-    parts.extend(_format_numerical_health(metrics))
-    parts.extend(_format_state_snapshot(metrics))
+    parts.extend(_format_outcome(metrics))
+    parts.extend(_format_progress(metrics))
+    parts.extend(_format_chronology(metrics))
     parts.extend(_format_constraints(metrics))
-    parts.extend(_format_stress_distribution(metrics))
-    parts.extend(_format_failure_timeline(metrics))
-    parts.extend(_format_interaction(metrics))
-    parts.extend(_format_geometry(metrics))
+    parts.extend(_format_loads(metrics))
+    parts.extend(_format_numerical_health(metrics))
     return parts
+
 
 def get_improvement_suggestions(
     metrics: Dict[str, Any],
@@ -741,57 +543,6 @@ def get_improvement_suggestions(
     error: Optional[str] = None,
 
 ) -> List[str]:
-    suggestions = []
     if error:
-        suggestions.append("- Code execution failed. Review error details above.")
-        return suggestions
-    if success:
-        return suggestions
-    if failed and failure_reason:
-        fr_lower = failure_reason.lower()
-        if "design constraint" in fr_lower:
-            suggestions.append("- Build-time constraint violated. Review constraint profile above.")
-        elif "water" in fr_lower or "fail zone" in fr_lower:
-            suggestions.append("- Vehicle or structural component entered the fail zone.")
-        elif "integrity" in fr_lower or "joint" in fr_lower:
-            suggestions.append("- Structure lost integrity. Review temporal chronology for failure cascade details.")
-            suggestions.append("- Review load distribution section for stress concentration points.")
-        elif "acceleration" in fr_lower:
-            suggestions.append("- Vertical acceleration exceeded limit. Review constraint profile.")
-        elif "unstable" in fr_lower:
-            suggestions.append("- Vehicle angular stability exceeded. Review constraint profile.")
-        elif "flipped" in fr_lower:
-            suggestions.append("- Vehicle flipped past 90° limit. Review vehicle-structure interaction section.")
-        elif "airborne" in fr_lower:
-            suggestions.append("- Excessive airborne rotation detected.")
-        else:
-            suggestions.append("- Review constraint profile for specific violation details.")
-    jc = metrics.get("joint_count")
-    ijc = metrics.get("initial_joint_count")
-    if ijc is not None and jc is not None and int(ijc) > 0 and int(jc) < int(ijc):
-        broken = int(ijc) - int(jc)
-        suggestions.append(
-            f"- {broken}/{int(ijc)} joints failed. Review temporal chronology for failure order."
-        )
-    stress_records = metrics.get("joint_stress_summary") or []
-    if stress_records:
-        try:
-            critical_count = 0
-            for rec in stress_records:
-                if not isinstance(rec, dict):
-                    continue
-                fl = _f(rec.get("force_limit")) or 0.0
-                tl = _f(rec.get("torque_limit")) or 0.0
-                pf = _f(rec.get("peak_force")) or 0.0
-                pt = _f(rec.get("peak_torque")) or 0.0
-                fp = (pf / fl * 100.0) if fl > 0 else 0.0
-                tp = (pt / tl * 100.0) if tl > 0 else 0.0
-                if max(fp, tp) > 80.0:
-                    critical_count += 1
-            if critical_count > 0:
-                suggestions.append(
-                    f"- {critical_count} joints at >80% of limit. Review stress concentration ranking."
-                )
-        except (TypeError, ValueError):
-            pass
-    return suggestions
+        return ["- Code execution failed. Review the error details above."]
+    return []

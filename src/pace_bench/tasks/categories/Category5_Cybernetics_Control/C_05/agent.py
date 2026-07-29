@@ -10,31 +10,15 @@ _ZONE_EXTENTS_FALLBACK = {
 }
 
 def _max_agent_force(sandbox):
-    fn = getattr(sandbox, "get_terrain_bounds", None)
-    if callable(fn):
-        tb = fn()
-        if isinstance(tb, dict) and "max_agent_force_per_axis" in tb:
-            return float(tb["max_agent_force_per_axis"])
+    del sandbox
     return 50.0
 
 def _zone_center(sandbox, name: str):
-    fn = getattr(sandbox, "get_terrain_bounds", None)
-    if callable(fn):
-        tb = fn()
-        zones = tb.get("zones") if isinstance(tb, dict) else None
-        if zones and name in zones:
-            cx, cy, _, _ = zones[name]
-            return (cx, cy)
+    del sandbox
     return _ZONE_CENTERS_FALLBACK[name]
 
 def is_inside_zone(sandbox, x, y, zone_name):
-    fn = getattr(sandbox, "get_terrain_bounds", None)
-    if callable(fn):
-        tb = fn()
-        zones = tb.get("zones") if isinstance(tb, dict) else None
-        if zones and zone_name in zones:
-            cx, cy, hw, hh = zones[zone_name]
-            return (cx - hw <= x <= cx + hw) and (cy - hh <= y <= cy + hh)
+    del sandbox
     x_min, x_max, y_min, y_max = _ZONE_EXTENTS_FALLBACK[zone_name]
     return x_min <= x <= x_max and y_min <= y <= y_max
 
@@ -67,13 +51,13 @@ def build_agent(sandbox):
     return sandbox.get_agent_body()
 
 def agent_action(sandbox, agent_body, step_count):
-    bx = float(getattr(sandbox, "get_barrier_x", lambda: 4.5)())
+    bx = float(sandbox.get_barrier_x())
     mf = _max_agent_force(sandbox)
     triggered = sandbox.get_triggered_switches()
     if triggered and "A" in triggered and _step_when_a_triggered[0] is None:
         _step_when_a_triggered[0] = step_count
     next_switch = sandbox.get_next_required_switch()
-    cooldown = getattr(sandbox, "get_cooldown_remaining", lambda: 0)()
+    cooldown = sandbox.get_cooldown_remaining()
     if next_switch is None:
         vx, vy = sandbox.get_agent_velocity()
         sandbox.apply_agent_force(-HOLD_DAMP * 2.0 * vx, -HOLD_DAMP * 2.0 * vy)
@@ -83,9 +67,7 @@ def agent_action(sandbox, agent_body, step_count):
         sandbox.apply_agent_force(-HOLD_DAMP * 2.0 * vx, -HOLD_DAMP * 2.0 * vy)
         return
     if next_switch == "B" and _step_when_a_triggered[0] is not None:
-        delay = int(
-            getattr(sandbox, "get_barrier_delay_steps", lambda: 70)()
-        )
+        delay = int(sandbox.get_barrier_delay_steps())
         steps_since_a = step_count - _step_when_a_triggered[0]
         if steps_since_a < delay:
             tx, ty = _zone_center(sandbox, "A")
@@ -170,7 +152,7 @@ def build_agent_stage_1(sandbox):
     return sandbox.get_agent_body()
 
 def agent_action_stage_1(sandbox, agent_body, step_count):
-    bx = float(getattr(sandbox, "get_barrier_x", lambda: 4.5)())
+    bx = float(sandbox.get_barrier_x())
     mf = _max_agent_force(sandbox)
     triggered = sandbox.get_triggered_switches()
     if triggered and "A" in triggered and _step_when_a_triggered_s1[0] is None:
@@ -178,7 +160,7 @@ def agent_action_stage_1(sandbox, agent_body, step_count):
     if triggered and "B" in triggered and _step_when_b_triggered_s1[0] is None:
         _step_when_b_triggered_s1[0] = step_count
     next_switch = sandbox.get_next_required_switch()
-    cooldown = getattr(sandbox, "get_cooldown_remaining", lambda: 0)()
+    cooldown = sandbox.get_cooldown_remaining()
     x, y = sandbox.get_agent_position()
     vx, vy = sandbox.get_agent_velocity()
     if next_switch is None:
@@ -284,18 +266,19 @@ def agent_action_stage_1(sandbox, agent_body, step_count):
 _step_when_a_triggered_s2 = [None]
 
 def build_agent_stage_2(sandbox):
+    _step_when_a_triggered_s2[0] = None
     return sandbox.get_agent_body()
 
 def agent_action_stage_2(sandbox, agent_body, step_count):
-    bx = float(getattr(sandbox, "get_barrier_x", lambda: 4.5)())
-    delay_barrier = int(getattr(sandbox, "get_barrier_delay_steps", lambda: 70)())
+    bx = float(sandbox.get_barrier_x())
+    delay_barrier = int(sandbox.get_barrier_delay_steps())
     mf = _max_agent_force(sandbox)
     SPEED_CAP_S2 = 0.05
     triggered = sandbox.get_triggered_switches()
     if triggered and triggered[0] == "A" and _step_when_a_triggered_s2[0] is None:
         _step_when_a_triggered_s2[0] = step_count
     next_switch = sandbox.get_next_required_switch()
-    cooldown = getattr(sandbox, "get_cooldown_remaining", lambda: 0)()
+    cooldown = sandbox.get_cooldown_remaining()
     if next_switch is None:
         vx, vy = sandbox.get_agent_velocity()
         sandbox.apply_agent_force(-HOLD_DAMP * vx, -HOLD_DAMP * vy)
@@ -382,11 +365,12 @@ def agent_action_stage_2(sandbox, agent_body, step_count):
 _step_when_a_triggered_s3 = [None]
 
 def build_agent_stage_3(sandbox):
+    _step_when_a_triggered_s3[0] = None
     return sandbox.get_agent_body()
 
 def agent_action_stage_3(sandbox, agent_body, step_count):
-    bx = float(getattr(sandbox, "get_barrier_x", lambda: 4.5)())
-    delay_barrier = int(getattr(sandbox, "get_barrier_delay_steps", lambda: 70)())
+    bx = float(sandbox.get_barrier_x())
+    delay_barrier = int(sandbox.get_barrier_delay_steps())
     mf = _max_agent_force(sandbox)
     FORCE_LIMIT = 24.0
     SPEED_CAP = 0.03
@@ -394,7 +378,7 @@ def agent_action_stage_3(sandbox, agent_body, step_count):
     if triggered and triggered[0] == "A" and _step_when_a_triggered_s3[0] is None:
         _step_when_a_triggered_s3[0] = step_count
     next_switch = sandbox.get_next_required_switch()
-    cooldown = getattr(sandbox, "get_cooldown_remaining", lambda: 0)()
+    cooldown = sandbox.get_cooldown_remaining()
     x, y = sandbox.get_agent_position()
     vx, vy = sandbox.get_agent_velocity()
     speed = math.sqrt(vx * vx + vy * vy)
@@ -514,11 +498,12 @@ def agent_action_stage_3(sandbox, agent_body, step_count):
 _step_when_a_triggered_s4 = [None]
 
 def build_agent_stage_4(sandbox):
+    _step_when_a_triggered_s4[0] = None
     return sandbox.get_agent_body()
 
 def agent_action_stage_4(sandbox, agent_body, step_count):
-    bx = float(getattr(sandbox, "get_barrier_x", lambda: 4.5)())
-    delay_barrier = int(getattr(sandbox, "get_barrier_delay_steps", lambda: 70)())
+    bx = float(sandbox.get_barrier_x())
+    delay_barrier = int(sandbox.get_barrier_delay_steps())
     mf = _max_agent_force(sandbox)
     FORCE_LIMIT_S4 = 60.0
     HOLD_DAMP_S4 = 10.0
@@ -526,7 +511,7 @@ def agent_action_stage_4(sandbox, agent_body, step_count):
     if triggered and triggered[0] == "A" and _step_when_a_triggered_s4[0] is None:
         _step_when_a_triggered_s4[0] = step_count
     next_switch = sandbox.get_next_required_switch()
-    cooldown = getattr(sandbox, "get_cooldown_remaining", lambda: 0)()
+    cooldown = sandbox.get_cooldown_remaining()
     if next_switch is None:
         vx, vy = sandbox.get_agent_velocity()
         sandbox.apply_agent_force(-HOLD_DAMP_S4 * vx, -HOLD_DAMP_S4 * vy)

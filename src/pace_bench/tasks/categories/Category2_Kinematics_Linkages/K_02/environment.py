@@ -43,6 +43,8 @@ class Sandbox:
         self._current_step: int = 0
         self._last_joint_stress: List[dict] = []
         self._joint_failure_events: List[dict] = []
+        self._observation_error_count: int = 0
+        self._last_observation_error: str | None = None
         self.world = self._world
         self.bodies = self._bodies
         self.joints = self._joints
@@ -258,7 +260,8 @@ class Sandbox:
                             "force_limit_N": self._max_joint_force,
                             "torque_limit_Nm": self._max_joint_torque,
                         })
-                except Exception:
+                except Exception as exc:
+                    self._record_observation_error("step.joint_failure_check", exc)
                     continue
             self._joint_failure_events.extend(failure_records)
             for j in to_destroy:
@@ -267,6 +270,9 @@ class Sandbox:
                     self._joints.remove(j)
         self._physics_history.append(self._snapshot_step_state(time_step))
         self._current_step += 1
+    def _record_observation_error(self, source: str, exc: Exception) -> None:
+        self._observation_error_count += 1
+        self._last_observation_error = f"{source}: {type(exc).__name__}: {exc}"
     def get_terrain_bounds(self):
         wall_x = getattr(self, '_wall_x', 5.0)
         wall_contact_x = [wall_x - 1.5, wall_x + 2.5]
@@ -305,8 +311,8 @@ class Sandbox:
                     "torque_Nm": round(rt, 3),
                     "torque_pct": round(torque_pct, 2),
                 })
-            except Exception:
-                pass
+            except Exception as exc:
+                self._record_observation_error("_compute_joint_stress", exc)
         return results
     def _snapshot_step_state(self, time_step: float) -> Dict[str, Any]:
         grav_y = self._world.gravity.y
@@ -328,8 +334,8 @@ class Sandbox:
                     "vy": round(b.linearVelocity.y, 3),
                     "ang_vel": round(b.angularVelocity, 3),
                 })
-            except Exception:
-                pass
+            except Exception as exc:
+                self._record_observation_error("_snapshot_step_state.body_velocity", exc)
         pad_states = []
         for pad in self._pads:
             try:
@@ -338,8 +344,8 @@ class Sandbox:
                     "x": round(pad.position.x, 3),
                     "active": self._pad_active.get(pad, False),
                 })
-            except Exception:
-                pass
+            except Exception as exc:
+                self._record_observation_error("_snapshot_step_state.pad", exc)
         total_ke = 0.0
         total_pe = 0.0
         g_mag = abs(grav_y)
@@ -349,8 +355,8 @@ class Sandbox:
                 vy = b.linearVelocity.y
                 total_ke += 0.5 * b.mass * (vx * vx + vy * vy)
                 total_pe += b.mass * g_mag * max(b.position.y, 0.0)
-            except Exception:
-                pass
+            except Exception as exc:
+                self._record_observation_error("_snapshot_step_state.energy", exc)
         max_body_speed = 0.0
         max_body_ang_vel = 0.0
         for b in self._bodies:
@@ -361,8 +367,8 @@ class Sandbox:
                 av = abs(b.angularVelocity)
                 if av > max_body_ang_vel:
                     max_body_ang_vel = av
-            except Exception:
-                pass
+            except Exception as exc:
+                self._record_observation_error("_snapshot_step_state.speed", exc)
         return {
             "step": self._current_step,
             "time": round(getattr(self, "_time", 0.0), 3),
@@ -426,8 +432,8 @@ class Sandbox:
                 vy = b.linearVelocity.y
                 total_ke += 0.5 * b.mass * (vx * vx + vy * vy)
                 total_pe += b.mass * g_mag * max(b.position.y, 0.0)
-            except Exception:
-                pass
+            except Exception as exc:
+                self._record_observation_error("get_energy_state", exc)
         return {
             "total_ke": round(total_ke, 3),
             "total_pe": round(total_pe, 3),

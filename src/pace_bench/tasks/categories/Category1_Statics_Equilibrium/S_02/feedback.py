@@ -4,11 +4,11 @@ import math
 
 def _is_finite(x: Any) -> bool:
     if x is None:
-        return True
+        return False
     try:
         return math.isfinite(float(x))
     except (TypeError, ValueError):
-        return True
+        return False
 
 def _fmt(x: Any, decimals: int = 2) -> str:
     if x is None:
@@ -65,9 +65,11 @@ def _format_failures_compact(metrics: Dict[str, Any]) -> List[str]:
     parts: List[str] = []
     jfe = metrics.get("joint_failure_events", []) or []
     if not jfe:
-        nj = metrics.get("num_joints", 0)
-        ijc = metrics.get("initial_joint_count", 0)
-        if nj > 0 or ijc > 0:
+        nj = metrics.get("num_joints")
+        ijc = metrics.get("initial_joint_count")
+        if nj is None and ijc is None:
+            parts.append("Joint integrity: data unavailable")
+        elif (nj or 0) > 0 or (ijc or 0) > 0:
             parts.append("Joint integrity: no failures recorded")
         else:
             parts.append("No joints present")
@@ -130,35 +132,41 @@ def _format_failures_compact(metrics: Dict[str, Any]) -> List[str]:
 def _format_spatial_compact(metrics: Dict[str, Any]) -> List[str]:
     parts: List[str] = []
     beams = metrics.get("per_beam_positions", []) or []
-    target_height = metrics.get("target_height", 30.0)
-    build_half = metrics.get("build_zone_half_width", 4.5)
-    max_width = metrics.get("max_width_limit", 24.0)
+    target_height = metrics.get("target_height")
+    build_half = metrics.get("build_zone_half_width")
+    max_width = metrics.get("max_width_limit")
     if not beams:
         return parts
     max_y_beam = max(beams, key=lambda b: b.get("y", 0))
-    margin = float(target_height) - float(max_y_beam.get("y", 0))
-    parts.append(
-        f"Height: top beam y={_fmt(max_y_beam.get('y'))}m "
-        f"(target {_fmt(target_height)}m, margin {margin:+.2f}m)"
-    )
+    if target_height is not None and _is_finite(target_height):
+        margin = float(target_height) - float(max_y_beam.get("y", 0))
+        parts.append(
+            f"Height: top beam y={_fmt(max_y_beam.get('y'))}m "
+            f"(target {_fmt(target_height)}m, margin {margin:+.2f}m)"
+        )
+    else:
+        parts.append(f"Height: top beam y={_fmt(max_y_beam.get('y'))}m (target unavailable)")
     xs = [b.get("x", 0) for b in beams if _is_finite(b.get("x"))]
-    if xs:
+    if xs and max_width is not None and _is_finite(max_width):
         spread = max(xs) - min(xs)
         w_margin = float(max_width) - spread
         parts.append(f"Width: spread={_fmt(spread)}m (limit {_fmt(max_width)}m, margin {w_margin:+.2f}m)")
     violations = []
     for b in beams:
-        if b.get("y", 0) < 1.01 and abs(b.get("x", 0)) > build_half:
+        if build_half is not None and _is_finite(build_half) and b.get("y", 0) < 1.01 and abs(b.get("x", 0)) > float(build_half):
             violations.append({"index": b.get("index"), "x": b.get("x"), "dist": abs(b.get("x", 0))})
-    if violations:
+    if violations and build_half is not None:
         parts.append(f"Foundation breach: {len(violations)} beam(s) outside ±{build_half}m")
         for v in violations[:3]:
             parts.append(f"  Beam #{v['index']}: x={_fmt(v['x'])}m (dist={_fmt(v['dist'])}m)")
     min_y_beam = min(beams, key=lambda b: b.get("y", 0))
     min_y = min_y_beam.get("y", 0)
     if min_y < 1.0:
-        survival = metrics.get("survival_threshold", 5.0)
-        parts.append(f"Lowest beam: y={_fmt(min_y)}m (survival threshold {_fmt(survival)}m)")
+        survival = metrics.get("survival_threshold")
+        if survival is not None and _is_finite(survival):
+            parts.append(f"Lowest beam: y={_fmt(min_y)}m (survival threshold {_fmt(survival)}m)")
+        else:
+            parts.append(f"Lowest beam: y={_fmt(min_y)}m")
     return parts
 
 def _format_load_compact(metrics: Dict[str, Any]) -> List[str]:
@@ -300,8 +308,8 @@ def _format_constraints_compact(metrics: Dict[str, Any]) -> List[str]:
         if near_limit:
             parts.append(f"  Near-limit: {', '.join(near_limit)}")
     pfd = metrics.get("peak_foundation_displacement")
-    contact_limit = metrics.get("foundation_contact_limit", 4.5)
-    if pfd is not None and _is_finite(pfd) and float(pfd) > 0:
+    contact_limit = metrics.get("foundation_contact_limit")
+    if pfd is not None and _is_finite(pfd) and float(pfd) > 0 and contact_limit is not None and _is_finite(contact_limit):
         pfd_passed = float(pfd) <= float(contact_limit)
         if not pfd_passed:
             parts.append(f"  ❌ FAILED: Foundation lateral drift "
@@ -319,12 +327,19 @@ def _format_health_compact(metrics: Dict[str, Any]) -> List[str]:
         v = metrics.get(k)
         if v is not None and not _is_finite(v):
             anomalous.append(f"{k}={v}")
-    max_vel = metrics.get("max_body_velocity", 0)
+    max_vel = metrics.get("max_body_velocity")
     vel_str = f"max velocity={_fmt(max_vel, 1)} m/s" if max_vel is not None and _is_finite(max_vel) else ""
     if anomalous:
         parts.append(f"⚠ Non-finite metrics: {', '.join(anomalous)} | {vel_str}")
     else:
         parts.append(f"Numerics: clean | {vel_str}")
+    observation_errors = metrics.get("joint_observation_error_count")
+    if observation_errors is not None and _is_finite(observation_errors) and int(observation_errors) > 0:
+        detail = metrics.get("last_joint_observation_error")
+        parts.append(
+            f"⚠ Joint reaction telemetry failed {int(observation_errors)} time(s)"
+            + (f"; last error: {detail}" if detail else "")
+        )
     if max_vel is not None and _is_finite(max_vel):
         vel = float(max_vel)
         if vel > 100.0:
@@ -332,8 +347,8 @@ def _format_health_compact(metrics: Dict[str, Any]) -> List[str]:
         elif vel > 50.0:
             parts.append(f"⚠ Elevated velocity {vel:.0f} m/s — possible joint-break fling")
     ch = metrics.get("current_height")
-    ihl = metrics.get("instability_height_limit", 150.0)
-    if ch is not None and _is_finite(ch) and float(ch) > float(ihl):
+    ihl = metrics.get("instability_height_limit")
+    if ch is not None and _is_finite(ch) and ihl is not None and _is_finite(ihl) and float(ch) > float(ihl):
         parts.append(f"⚠ Height {_fmt(ch)}m > instability cap {_fmt(ihl)}m")
     return parts
 
@@ -341,14 +356,14 @@ def format_task_metrics(metrics: Dict[str, Any]) -> List[str]:
     parts: List[str] = []
     try:
         if not metrics:
-            return parts
+            return ["**No task metrics available.**"]
         if metrics.get("error"):
             parts.append(f"**Evaluation note**: {metrics.get('error')}")
             return parts
         success = metrics.get("success", False)
         failed = metrics.get("failed", False)
         fr = metrics.get("failure_reason")
-        eval_step = metrics.get("eval_step", 0)
+        eval_step = metrics.get("eval_step", metrics.get("step_count"))
         max_steps = metrics.get("max_steps_setting", "?")
         if success:
             parts.append("**Outcome**: ✅ SUCCESS — all constraints satisfied")
@@ -356,13 +371,14 @@ def format_task_metrics(metrics: Dict[str, Any]) -> List[str]:
             cat = _reason_category(str(fr or ""))
             parts.append(f"**Outcome**: ❌ FAILED — [{cat}] {fr}")
         else:
-            parts.append(f"**Outcome**: ⚠ IN PROGRESS — step {eval_step}/{max_steps}")
-        ih = metrics.get("initial_height", 0)
+            step_text = eval_step if eval_step is not None else "?"
+            parts.append(f"**Outcome**: ⚠ IN PROGRESS — step {step_text}/{max_steps}")
+        ih = metrics.get("initial_height")
         mh = metrics.get("min_height_during_quake")
-        jbc = metrics.get("joint_break_count", 0)
-        nj = metrics.get("num_joints", 0)
-        sm = metrics.get("structure_mass", 0)
-        nb = metrics.get("num_bodies", 0)
+        jbc = metrics.get("joint_break_count")
+        nj = metrics.get("num_joints")
+        sm = metrics.get("structure_mass")
+        nb = metrics.get("num_bodies")
         summary_items = []
         if ih is not None and _is_finite(ih):
             th = metrics.get("target_height")
@@ -376,12 +392,17 @@ def format_task_metrics(metrics: Dict[str, Any]) -> List[str]:
                 summary_items.append(f"min-quake={float(mh):.2f}/{float(st):.2f}m")
             else:
                 summary_items.append(f"min-quake={float(mh):.2f}m")
-        summary_items.append(f"joints={nj}/{nj + jbc} intact")
+        if nj is not None and jbc is not None:
+            summary_items.append(f"joints={nj}/{nj + jbc} intact")
         if sm is not None and _is_finite(sm):
             summary_items.append(f"mass={float(sm):.2f}kg")
         if nb is not None:
             summary_items.append(f"beams={nb}")
-        parts.append("**Summary**: " + " | ".join(summary_items))
+        parts.append(
+            "**Summary**: " + " | ".join(summary_items)
+            if summary_items
+            else "**Summary**: no measurements available"
+        )
         parts.append("")
         parts.append(f"Environment: {_format_env_compact(metrics)}")
         parts.append("")
@@ -391,15 +412,15 @@ def format_task_metrics(metrics: Dict[str, Any]) -> List[str]:
                 if constraint_parts:
                     parts.extend(constraint_parts)
                     parts.append("")
-            except Exception:
-                pass
+            except Exception as exc:
+                parts.append(f"Constraint formatting error: {type(exc).__name__}: {exc}")
             try:
                 spatial_parts = _format_spatial_compact(metrics)
                 if spatial_parts:
                     parts.extend(spatial_parts)
                     parts.append("")
-            except Exception:
-                pass
+            except Exception as exc:
+                parts.append(f"Spatial formatting error: {type(exc).__name__}: {exc}")
             return parts
         try:
             failure_parts = _format_failures_compact(metrics)
@@ -407,49 +428,49 @@ def format_task_metrics(metrics: Dict[str, Any]) -> List[str]:
                 parts.append("**Failures**:")
                 parts.extend(failure_parts)
                 parts.append("")
-        except Exception:
-            pass
+        except Exception as exc:
+            parts.append(f"Failure chronology formatting error: {type(exc).__name__}: {exc}")
         try:
             spatial_parts = _format_spatial_compact(metrics)
             if spatial_parts:
                 parts.append("**Spatial**:")
                 parts.extend(spatial_parts)
                 parts.append("")
-        except Exception:
-            pass
+        except Exception as exc:
+            parts.append(f"Spatial formatting error: {type(exc).__name__}: {exc}")
         try:
             load_parts = _format_load_compact(metrics)
             if load_parts:
                 parts.append("**Stress**:")
                 parts.extend(load_parts)
                 parts.append("")
-        except Exception:
-            pass
+        except Exception as exc:
+            parts.append(f"Stress formatting error: {type(exc).__name__}: {exc}")
         try:
             constraint_parts = _format_constraints_compact(metrics)
             if constraint_parts:
                 parts.append("**Constraints**:")
                 parts.extend(constraint_parts)
                 parts.append("")
-        except Exception:
-            pass
+        except Exception as exc:
+            parts.append(f"Constraint formatting error: {type(exc).__name__}: {exc}")
         try:
             health_parts = _format_health_compact(metrics)
             if health_parts:
                 parts.append("**Health**:")
                 parts.extend(health_parts)
-        except Exception:
-            pass
-    except Exception:
-        parts = []
+        except Exception as exc:
+            parts.append(f"Numerical-health formatting error: {type(exc).__name__}: {exc}")
+    except Exception as exc:
+        parts = [f"**Task feedback formatting error**: {type(exc).__name__}: {exc}"]
     if not parts:
         try:
             from pace_bench.evaluation.verification.diagnostics import (
                 format_generic_execution_metrics,
             )
             parts = format_generic_execution_metrics(metrics)
-        except Exception:
-            parts = []
+        except Exception as exc:
+            parts = [f"**Generic feedback formatting error**: {type(exc).__name__}: {exc}"]
     return parts
 
 def get_improvement_suggestions(metrics, score, success, failed,

@@ -2,13 +2,13 @@ import os
 
 import json
 
-import sys
-
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
-
 from pace_bench.tasks.primitives_api import API_INTRO
 
-with open(os.path.join(os.path.dirname(__file__), '..', '..', 'primitives_api.json'), 'r') as f:
+with open(
+    os.path.join(os.path.dirname(__file__), '..', '..', 'primitives_api.json'),
+    'r',
+    encoding='utf-8',
+) as f:
     _api_data = json.load(f)
 
 if 'E_04' in _api_data and 'API_INTRO' in _api_data['E_04']:
@@ -18,11 +18,11 @@ TASK_PROMPT = {
     "task_description": """
 Design a complex structure that remains intact under sinusoidally varying mass and environmental vibration.
 
-- **Wind Pressure**: The environment may apply lateral wind pressure. Wind pressure may differ from nominal (discoverable via feedback).
-- **Mass Variation**: Every beam's mass varies over time according to sinusoidal frequency components; the phase of mass oscillation varies with beam position along the structure. The dominant mass variation frequency and secondary frequency, along with their amplitude ratios and the spatial phase gradient, are nominal values; these parameters may differ from nominal (discoverable via feedback).
-- **Base Excitation**: The ground support oscillates vertically and horizontally in an elliptical pattern. The vertical amplitude, horizontal amplitude, and driving frequency are nominal values; these parameters may differ from nominal (discoverable via feedback).
-- **Fatigue**: Joint strength (force and torque limits) decay exponentially over time with a nominal time constant τ = 100.0 s: effective_limit = nominal × exp(-t/τ). The time constant τ (how quickly limits erode) may differ from nominal (discoverable via feedback).
-- **Joint Limits (nominal)**: Joints fail if reaction force exceeds 6.0 N or reaction torque exceeds 10.0 N·m (before fatigue decay).
+- **Wind Pressure**: The environment may apply lateral wind pressure.
+- **Mass Variation**: Every beam's mass varies over time according to sinusoidal frequency components; the phase of mass oscillation varies with beam position along the structure.
+- **Base Excitation**: The ground support oscillates vertically and horizontally in an elliptical pattern.
+- **Fatigue**: Joint strength may decay over time according to latent environment-specific dynamics.
+- **Joint Limits (nominal)**: Joints fail if reaction force exceeds 6 N or reaction torque exceeds 10 N·m (before fatigue decay).
 - **Beam Size**: Each beam's width and height are independently bounded: width and height each between 0.1 m and 4.0 m.
 - **Build Zone**: x in [5.0, 15.0] m, y in [1.5, 8.0] m.
 - **Simulation Duration**: The run lasts for 12000 simulation steps. Success is evaluated at the end of the run; the structure must remain intact for the entire simulation.
@@ -42,7 +42,7 @@ Design a structure that:
 4. **Complexity**: Meets the minimum beam (5) and joint (6) counts.
 5. **Variety**: At least one joint must be a pivot (`type='pivot'`).
 
-- **Mass Budget**: Total structure mass (instantaneous) must remain within 400 kg.
+- **Mass Budget**: Total instantaneous structure mass must never exceed 400 kg.
 - **Beam Count**: At least 5 beams are required.
 - **Joint Count**: At least 6 joints are required.
 - **Pivot Requirement**: At least one joint must be a pivot (`type='pivot'`).

@@ -10,6 +10,7 @@ class Sandbox:
         physics_config = physics_config or {}
         self._terrain_config = dict(terrain_config)
         self._physics_config = dict(physics_config)
+        self._observation_errors = []
         gravity = tuple(physics_config.get("gravity", (0, -10)))
         self._default_linear_damping = float(physics_config.get("linear_damping", 0.0))
         self._default_angular_damping = float(physics_config.get("angular_damping", 0.0))
@@ -237,33 +238,33 @@ class Sandbox:
             for j in list(self._joints):
                 if not j.active:
                     continue
-                try:
-                    force = j.GetReactionForce(1.0/time_step).length
-                    if force > self._max_joint_force:
-                        try:
-                            ba = j.bodyA
-                            bb = j.bodyB
-                            ax, ay = j.anchorA.x, j.anchorA.y
-                            ba_idx = self._bodies.index(ba) if ba in self._bodies else -1
-                            bb_idx = self._bodies.index(bb) if bb in self._bodies else -1
-                            self._joint_failure_events.append({
-                                "step": self._step_count,
-                                "body_a_idx": ba_idx,
-                                "body_b_idx": bb_idx,
-                                "anchor": (float(ax), float(ay)),
-                                "reaction_force": float(force),
-                                "force_limit": float(self._max_joint_force),
-                            })
-                        except Exception:
-                            self._joint_failure_events.append({
-                                "step": self._step_count,
-                                "reaction_force": float(force),
-                                "force_limit": float(self._max_joint_force),
-                            })
-                        self._world.DestroyJoint(j)
-                        self._joints.remove(j)
-                except:
-                    pass
+                force = j.GetReactionForce(1.0/time_step).length
+                if force > self._max_joint_force:
+                    try:
+                        ba = j.bodyA
+                        bb = j.bodyB
+                        ax, ay = j.anchorA.x, j.anchorA.y
+                        ba_idx = self._bodies.index(ba) if ba in self._bodies else -1
+                        bb_idx = self._bodies.index(bb) if bb in self._bodies else -1
+                        self._joint_failure_events.append({
+                            "step": self._step_count,
+                            "body_a_idx": ba_idx,
+                            "body_b_idx": bb_idx,
+                            "anchor": (float(ax), float(ay)),
+                            "reaction_force": float(force),
+                            "force_limit": float(self._max_joint_force),
+                        })
+                    except (AttributeError, TypeError, ValueError) as exc:
+                        self._observation_errors.append(
+                            f"joint failure metadata unavailable at step {self._step_count}: {exc}"
+                        )
+                        self._joint_failure_events.append({
+                            "step": self._step_count,
+                            "reaction_force": float(force),
+                            "force_limit": float(self._max_joint_force),
+                        })
+                    self._world.DestroyJoint(j)
+                    self._joints.remove(j)
         self._world.Step(time_step, 10, 10)
         for body in self._bodies:
             if not body.active:
@@ -357,8 +358,10 @@ class Sandbox:
                         "reaction_force": float(force),
                         "force_limit": float(self._max_joint_force),
                     })
-                except Exception:
-                    pass
+                except (AttributeError, TypeError, ValueError) as exc:
+                    self._observation_errors.append(
+                        f"joint force sample unavailable at step {self._step_count}: {exc}"
+                    )
         if self._prev_front_vy is not None and fx is not None:
             vely = self._prev_front_vy
             front_body = None
@@ -395,13 +398,25 @@ class Sandbox:
             },
         }
     def get_vehicle_front_x(self):
-        if not self._bodies:
+        active = [body for body in self._bodies if body.active]
+        if not active:
             return None
-        return max(b.position.x for b in self._bodies if b.active)
+        return max(self._body_axis_extent(body, axis=0, upper=True) for body in active)
     def get_vehicle_lowest_y(self):
-        if not self._bodies:
+        active = [body for body in self._bodies if body.active]
+        if not active:
             return None
-        return min(b.position.y for b in self._bodies if b.active)
+        return min(self._body_axis_extent(body, axis=1, upper=False) for body in active)
+    @staticmethod
+    def _body_axis_extent(body, *, axis, upper):
+        coordinates = []
+        for fixture in body.fixtures:
+            vertices = getattr(fixture.shape, "vertices", None)
+            if vertices:
+                coordinates.extend(float(body.GetWorldPoint(vertex)[axis]) for vertex in vertices)
+        if coordinates:
+            return max(coordinates) if upper else min(coordinates)
+        return float(body.position[axis])
     def get_vehicle_velocity(self):
         if not self._bodies:
             return None
@@ -421,6 +436,28 @@ class Sandbox:
         return list(self._joint_force_samples)
     def get_max_vertical_accel(self):
         return float(self._max_vertical_accel_seen)
+    def get_observation_errors(self):
+        return list(self._observation_errors)
+    def get_body_observations(self):
+        observations = []
+        for index, body in enumerate(self._bodies):
+            if not body.active:
+                continue
+            x = float(body.position.x)
+            y = float(body.position.y)
+            vx = float(body.linearVelocity.x)
+            vy = float(body.linearVelocity.y)
+            observations.append({
+                "body_idx": index,
+                "x": round(x, 3),
+                "y": round(y, 3),
+                "vx": round(vx, 3),
+                "vy": round(vy, 3),
+                "speed": round(math.hypot(vx, vy), 3),
+                "in_water": self.WATER_X_LEFT <= x <= self.WATER_X_RIGHT
+                and self.WATER_BOTTOM_Y <= y <= self.WATER_SURFACE_Y,
+            })
+        return observations
     def get_env_parameters(self):
         wp = self._whirlpool
         emp = self._emp_zone

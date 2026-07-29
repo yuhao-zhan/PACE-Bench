@@ -1,11 +1,5 @@
 import math
 
-import sys
-
-import os
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../..'))
-
 from pace_bench.simulator import TIME_STEP
 
 from pace_bench.primitives import compute_constraint_penalty
@@ -93,15 +87,21 @@ class Evaluator:
                     force_vec = (force_vec[0] * phase, force_vec[1] * phase)
                 total_ext_force_y += force_vec[1]
         self.external_force_y = total_ext_force_y / len(self.environment._bodies) if self.environment._bodies else 0.0
-        inv_dt = 1.0 / TIME_STEP
-        for joint in self.environment._joints:
-            try:
-                force = joint.GetReactionForce(inv_dt)
-                torque = abs(joint.GetReactionTorque(inv_dt))
-                fm = math.sqrt(force.x**2 + force.y**2)
-                self.max_recorded_torque = max(self.max_recorded_torque, torque)
-                self.max_recorded_force = max(self.max_recorded_force, fm)
-            except: pass
+        # The environment samples every live joint immediately after each physics
+        # step. Reuse that single authoritative observation instead of performing a
+        # second fallible Box2D query and silently discarding failures.
+        current_forces = (
+            self.environment._current_anchor_forces
+            + self.environment._current_internal_forces
+        )
+        current_torques = (
+            self.environment._current_anchor_torques
+            + self.environment._current_internal_torques
+        )
+        if current_forces:
+            self.max_recorded_force = max(self.max_recorded_force, max(current_forces))
+        if current_torques:
+            self.max_recorded_torque = max(self.max_recorded_torque, max(current_torques))
         base_anchor_t = self.environment._terrain_config.get("max_anchor_torque", 100000000.0)
         base_anchor_f = self.environment._terrain_config.get("max_anchor_force", 100000000.0)
         strength_map = self.environment._terrain_config.get("anchor_strength_map", None)
@@ -309,6 +309,17 @@ class Evaluator:
             'obstacle_active': self.environment._obstacle_active,
             'obstacle_rects': list(self.environment._obstacle_rects),
             'load_duration': self.load_duration,
+            'time_step': TIME_STEP,
+            'reach_satisfied_initially': self.reach_satisfied_initially,
+            'build_zone_bounds': {
+                'x_min': self.BUILD_ZONE_X_MIN,
+                'x_max': self.BUILD_ZONE_X_MAX,
+                'y_min': self.BUILD_ZONE_Y_MIN,
+                'y_max': self.BUILD_ZONE_Y_MAX,
+            },
+            'joint_observation_error_count': self.environment._joint_observation_error_count,
+            'last_joint_observation_error': self.environment._last_joint_observation_error,
+            'joint_warning_fraction': self.environment.JOINT_WARNING_FRACTION,
         }
         return done, score, metrics
     def _check_design_constraints(self):

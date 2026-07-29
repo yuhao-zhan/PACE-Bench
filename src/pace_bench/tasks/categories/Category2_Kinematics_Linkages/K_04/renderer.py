@@ -1,8 +1,4 @@
-import sys
-import os
 import pygame
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../..'))
 
 from pace_bench.renderer import Renderer
 from Box2D.b2 import dynamicBody, staticBody, revoluteJoint
@@ -137,7 +133,7 @@ class K04Renderer(Renderer):
             _sh = self.simulator.screen_height
 
             if self._font_label:
-                label = self._font_label.render("K-04 | Scissor Lift",
+                label = self._font_label.render("K-04 | Pusher",
                                                 True, COLOR_ANNOTATION)
                 self.simulator.screen.blit(label, (18, 14))
 

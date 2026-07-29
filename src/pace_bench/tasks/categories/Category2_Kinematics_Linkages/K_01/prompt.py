@@ -2,10 +2,6 @@ import os
 
 import json
 
-import sys
-
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
-
 from pace_bench.tasks.primitives_api import API_INTRO
 
 with open(os.path.join(os.path.dirname(__file__), '..', '..', 'primitives_api.json'), 'r') as f:
@@ -24,8 +20,8 @@ TASK_PROMPT = {
 Design a 2D side-view walker that moves forward using motor-driven joints.
 
 - **Ground**: A flat horizontal surface at y=1.0m.
-- **Ground friction**: The default ground traction coefficient is 0.8. Friction significantly affects rolling resistance and grip. The exact coefficient may differ in mutated environments — verify through feedback metrics.
-- **Gravitational acceleration**: Earth-like magnitude, directed downward.
+- **Ground friction**: Ground traction is a latent contact parameter; infer it from observed motion rather than expecting a numeric coefficient in the prompt.
+- **Gravitational acceleration**: The source environment uses an Earth-like downward field. Anomalous environments may differ; infer its effect from observed motion.
 - **Build Zone**: x=[0, 50], y=[2, 10]. All structure components must be placed within this zone. During motion, the torso must remain within x=[0, 50] and y ≥ 1.2 and y ≤ 10.
 - **Starting Position**: Walker components should be centered around x=10m, y=2.0m (within the build zone).
 - **Target**: Move the walker's torso to at least x=25.0m (15 meters forward from starting x).
@@ -36,12 +32,12 @@ Design a 2D side-view walker that moves forward using motor-driven joints.
 - **Build Zone**: All components must be placed within x=[0, 50], y=[2, 10]; during motion the torso must stay within x=[0, 50] and y ≥ 1.2 and y ≤ 10.
 - **Beam Dimensions**: 0.05 <= width, height <= 5.0 meters.
 - **Wheel Radius** (if used): 0.05 <= radius <= 0.8 meters.
-- **Ground Friction**: See environment description for default coefficient. Mutated environments may change this value — verify through feedback and interaction.
+- **Ground Friction**: See the source-environment description above. Mutated values remain hidden and must be inferred from interaction.
 - **Body Friction Cap**: `sandbox.MAX_BODY_FRICTION` limits the maximum friction coefficient usable via `set_material_properties`. The default friction cap is 1.0, some mutated stages lower this cap, silently clamping your friction values to the cap. Never set friction above the current cap value.
-- **Gravity**: Earth-like magnitude, directed downward — this is a design constraint; the agent must size structure mass and motor torque to overcome this gravitational load.
+- **Gravity**: The gravity vector is latent and must be inferred from motion.
 - **Linear Damping**: The linear velocity damping coefficient of dynamic bodies, which may differ in mutated environments.
 - **Angular Damping**: The angular velocity damping coefficient of dynamic bodies, which may differ in mutated environments.
-- **Motor Torque**: The default maximum torque for a motor joint via `set_motor` is 100 N·m. This is a design constraint; if you do not explicitly specify `max_torque` in `set_motor`, the motor torque is limited to 100 N·m. Mutated environments may change this default value.
+- **Motor Torque**: The default maximum torque for a motor joint via `set_motor` is 100 N·m. If you do not explicitly specify `max_torque`, this default applies.
 - **Pivot Joint Angle Range**: By default, pivot (revolute) joints allow rotation in the range -π to π radians (full circle); mutated environments may impose a narrower default range. If you do not explicitly specify `lower_limit` and `upper_limit` in `add_joint`, the environment's default limits apply (full ±π radians in the initial environment).
 
 1. **Design**: Create a walker structure (e.g., bipedal, quadrupedal, or using rotating linkages).

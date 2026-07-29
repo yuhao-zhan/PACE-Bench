@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pace_bench.tasks.stage_prompt import uniform_suffix_for_task
+
 from typing import Any, Dict, List
 
 import re
@@ -179,38 +181,6 @@ def update_task_description_for_visible_changes(
                 description = re.sub(pattern_anchor, replacement_anchor, description)
             elif re.search(pattern_anchor_updated, description):
                 description = re.sub(pattern_anchor_updated, replacement_anchor, description)
-    target_sf = (target_physics_config or {}).get("spatial_force")
-    base_sf = (base_physics_config or {}).get("spatial_force")
-    if target_sf is not None and base_sf is None:
-        sf_type = target_sf.get("type", "unknown")
-        sf_mag = target_sf.get("magnitude", 0.0)
-        sf_center = target_sf.get("center", (0, 0))
-        sf_radius = target_sf.get("radius", 0.0)
-        base_str_sf = "none in the source environment"
-        pattern_sf_initial = r"(- \*\*Atmosphere\*\*: The environment exhibits physical properties that will test the structural integrity of your design\.)"
-        pattern_sf_updated = r"(\*\*Atmosphere\*\*: A localized force field \(type: [^\]]+?, magnitude: [^\]]+?\).*? \(originally [^)]+\)\.)"
-        replacement_sf = f"**Atmosphere**: A localized force field (type: {sf_type}, magnitude: {sf_mag:.0f} N, center: ({sf_center[0]:.1f}, {sf_center[1]:.1f}) m, radius: {sf_radius:.1f} m) (originally {base_str_sf})."
-        if re.search(pattern_sf_initial, description):
-            description = re.sub(pattern_sf_initial, replacement_sf, description)
-        elif re.search(pattern_sf_updated, description):
-            description = re.sub(pattern_sf_updated, replacement_sf, description)
-    elif target_sf is not None and base_sf is not None and target_sf != base_sf:
-        sf_type = target_sf.get("type", "unknown")
-        sf_mag = target_sf.get("magnitude", 0.0)
-        sf_center = target_sf.get("center", (0, 0))
-        sf_radius = target_sf.get("radius", 0.0)
-        bf_type = base_sf.get("type", "unknown")
-        bf_mag = base_sf.get("magnitude", 0.0)
-        bf_center = base_sf.get("center", (0, 0))
-        bf_radius = base_sf.get("radius", 0.0)
-        base_str_sf = f"type: {bf_type}, magnitude: {bf_mag:.0f} N, center: ({bf_center[0]:.1f}, {bf_center[1]:.1f}) m, radius: {bf_radius:.1f} m"
-        pattern_sf_initial = r"(- \*\*Atmosphere\*\*: The environment exhibits physical properties that will test the structural integrity of your design\.)"
-        pattern_sf_updated = r"(\*\*Atmosphere\*\*: A localized force field \(type: [^\]]+?, magnitude: [^\]]+?\).*? \(originally [^)]+\)\.)"
-        replacement_sf = f"**Atmosphere**: A localized force field (type: {sf_type}, magnitude: {sf_mag:.0f} N, center: ({sf_center[0]:.1f}, {sf_center[1]:.1f}) m, radius: {sf_radius:.1f} m) (originally {base_str_sf} in the source environment)."
-        if re.search(pattern_sf_initial, description):
-            description = re.sub(pattern_sf_initial, replacement_sf, description)
-        elif re.search(pattern_sf_updated, description):
-            description = re.sub(pattern_sf_updated, replacement_sf, description)
     return description
 
 def update_success_criteria_for_visible_changes(
@@ -226,7 +196,19 @@ def update_success_criteria_for_visible_changes(
     base_reach = base_terrain_config.get("target_reach", 12.0)
     if target_reach != base_reach:
         pattern = r"(\(Tip reaches x >= )(\d+\.?\d*)m(?: \(originally [^)]+\))?\)\."
-        criteria = re.sub(pattern, f"\\g<1>{target_reach:.1f}m (originally {base_reach:.1f}m in the source environment).", criteria)
+        criteria, count = re.subn(
+            pattern,
+            (
+                f"\\g<1>{target_reach:.1f}m "
+                f"(originally {base_reach:.1f}m in the source environment))."
+            ),
+            criteria,
+            count=1,
+        )
+        if count != 1:
+            raise ValueError(
+                f"S_03 expected one reach success-criteria target; found {count}"
+            )
     target_mass = target_terrain_config.get("max_structure_mass", 15000.0)
     base_mass = base_terrain_config.get("max_structure_mass", 15000.0)
     if target_mass != base_mass:
@@ -356,10 +338,11 @@ def get_s03_curriculum_stages() -> List[Dict[str, Any]]:
         },
         {
             "stage_id": "Stage-2",
-            "title": "The Fragile Anchors",
-            "mutation_description": "Single Variable: Wall anchor force capacity reduced to a near-breaking extreme (9,500 N, over 10,500× weaker than the standard 100,000,000 N limit). Any conventional cantilever generates wall reaction forces exceeding this threshold by an order of magnitude — anchors rip off the wall instantly. Even a lightweight truss with moderate anchor spacing fails catastrophically as the reaction forces from the overturning moment and structural weight combine to exceed 9,500 N. The agent must discover through repeated anchor failure that only an ultra-wide anchor vertical separation (spanning the full wall height to minimise the overturning couple) combined with careful structural lightness and stiffness can keep individual anchor forces below this near-impossible threshold. The structure must also resist excessive sagging under load.",
+            "title": "The Monolithic Mandate",
+            "mutation_description": "Coupled joint-and-anchor threshold: beam-to-beam joints can sustain only 100 N, so every segmented truss develops a failure cascade before either payload arrives. Wall anchors remain fragile at 18,000 N, preventing a monolithic beam from surviving unless two well-separated wall connections share its payload reactions. The adaptation therefore requires abandoning the Initial repeated-bay truss in favour of a jointless load-bearing body whose depth supplies the anchor moment arm.",
             "terrain_config": {
-                "max_anchor_force": 9500.0,
+                "max_anchor_force": 18000.0,
+                "max_internal_force": 100.0,
             },
             "physics_config": {},
         },
@@ -429,41 +412,6 @@ def get_s03_curriculum_stages() -> List[Dict[str, Any]]:
             },
         },
     ]
-    variable_descriptions = {
-        "target_reach": "**Operational Range**: The required horizontal extension (Target Reach) from the anchor wall may have been significantly adjusted.",
-        "load_mass": "**Structural Load Capacity**: The target load mass may have been tuned to test extreme material efficiency.",
-        "max_structure_mass": "**Mass Budget**: The total structural mass budget may be constrained.",
-        "max_internal_force": "**Joint Integrity Thresholds**: The maximum force that internal (beam-to-beam) joints can withstand may differ significantly from standard conditions.",
-        "max_internal_torque": "**Joint Torque Thresholds**: The maximum torque internal joints can endure may differ significantly from standard conditions.",
-        "max_anchor_force": "**Wall Anchor Force Limit**: The maximum force wall anchors can sustain before failure may differ significantly from standard conditions.",
-        "max_anchor_torque": "**Wall Anchor Torque Limit**: The maximum torque wall anchors can sustain before failure may differ significantly from standard conditions.",
-        "anchor_strength_map": "**Regional Anchor Weakness**: Certain vertical segments of the wall may exhibit structural integrity that differs from standard conditions, affecting anchor stability.",
-        "forbidden_anchor_y": "**Forbidden Anchor Zones**: Specific vertical segments of the wall may be restricted from attaching anchors.",
-        "obstacle_active": "**Static Obstructions**: Massive, impenetrable structures might be present in the build zone, necessitating complex geometries to navigate around them.",
-        "obstacle_rects": "**Obstacle Dimensions**: Specific rectangular zones are blocked off by obstructions.",
-        "load_type": "**Dynamic Load Impacts**: The payload might be dropped from a height rather than being placed statically, introducing severe impulse forces.",
-        "drop_height": "**Payload Drop Height**: The height from which payloads are dropped may vary.",
-        "spatial_force": "**Localized Force Fields**: Invisible spatial anomalies might exert powerful repulsive or attractive forces on any structure within their radius of influence.",
-        "wind": "**Atmospheric Oscillations**: Variable or oscillatory wind forces may act on the structure, inducing complex dynamic stresses.",
-        "gravity": "**Gravitational Field Strength**: The gravitational acceleration may deviate substantially from standard terrestrial values.",
-        "min_tip_height_limit": "**Sag Tolerance Threshold**: The minimum allowable vertical position for any part of the structure may differ from standard conditions."
-    }
-    mutated_keys = set()
     for stage in stages_data:
-        terrain = stage.get("terrain_config", {})
-        physics = stage.get("physics_config", {})
-        mutated_keys.update(terrain.keys())
-        mutated_keys.update(physics.keys())
-    suffix_lines = [
-        "## Environmental Anomalies Detected",
-        "Sensors indicate that this region exhibits non-standard physical properties.",
-    ]
-    for key in sorted(mutated_keys):
-        if key in variable_descriptions:
-            suffix_lines.append(f" - {variable_descriptions[key]}")
-    suffix_lines.append("")
-    suffix_lines.append("**Discovery via feedback**: Your objective is to identify the underlying physical rules of this specific environment through trial and reasoning. Initial standard solutions may fail; analyze the failure mode (e.g., where a joint breaks or how a body moves) to infer the hidden constraints and adapt your design.")
-    uniform_suffix = "\n".join(suffix_lines)
-    for stage in stages_data:
-        stage["task_description_suffix"] = uniform_suffix
+        stage["task_description_suffix"] = uniform_suffix_for_task("S_03")
     return stages_data

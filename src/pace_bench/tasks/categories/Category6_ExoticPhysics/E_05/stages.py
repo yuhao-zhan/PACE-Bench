@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pace_bench.tasks.stage_prompt import uniform_suffix_for_task
+
 import re
 
 from typing import Any, Dict, List
@@ -21,7 +23,18 @@ def _magnets_stage1() -> List[tuple]:
     return [(14.0, y, -800.0) for y in range(0, 15)]
 
 def _magnets_stage2() -> List[tuple]:
-    return [tuple(x) for x in _DEFAULT_MAGNETS]
+    curtains = (
+        (13.0, (1.0, 2.0, 6.0, 8.0)),
+        (18.0, (1.0, 3.0, 4.0, 5.0, 9.0)),
+        (23.0, (1.0, 3.0, 4.0, 5.0, 9.0)),
+    )
+    magnets = [
+        (x, y, -140.0)
+        for x, vertical_sources in curtains
+        for y in vertical_sources
+    ]
+    magnets.extend((float(x), 10.0, -140.0) for x in range(4, 39, 2))
+    return magnets
 
 def _magnets_stage3() -> List[tuple]:
     return [
@@ -52,17 +65,7 @@ def _magnets_stage4() -> List[tuple]:
     magnets.append((30.0, 8.0, 80.0))
     return magnets
 
-UNIFORM_SUFFIX = """
-
-Sensors indicate that this region exhibits non-standard physical properties.
-While the following variables **MIGHT** have changed from the initial environment, **NOT ALL** of them will necessarily be mutated in any given task. You must use active interaction and environmental feedback to deduce which specific conditions apply:
-- **Electromagnetic Fields**: The spatial layout and strength of repulsive walls or attractive nodes may differ from the source environment.
-- **Gravitational acceleration**: The gravitational field may differ from the source environment.
-- **Motion Damping**: Environmental friction and air resistance may differ from the source environment.
-- **Maximum Thrust**: The engine's thrust output limit may differ from the source environment.
-
-**Discovery via feedback**: Your objective is to identify the underlying physical rules of this specific environment through trial and reasoning. Initial standard solutions may fail; analyze the failure mode (e.g., where the body gets stuck or how it responds to thrust) to infer the hidden constraints and adapt your design.
-"""
+UNIFORM_SUFFIX = uniform_suffix_for_task("E_05")
 
 _DEFAULT_MAX_THRUST = 165.0
 
@@ -110,9 +113,12 @@ def get_e05_curriculum_stages() -> List[Dict[str, Any]]:
     return [
         {
             "stage_id": "Stage-1",
-            "title": "Electromagnetic Corridor Variant",
-            "mutation_description": "Electromagnetic layout completely replaced by an altered field configuration.",
-            "task_description_suffix": UNIFORM_SUFFIX,
+            "title": "Field Variant I",
+            "mutation_description": (
+                "This stage applies an undisclosed field configuration; exact "
+                "source locations, strengths, and mutation directions are hidden."
+            ),
+            "task_description_suffix": uniform_suffix_for_task("E_05"),
             "terrain_config": {
                 "magnets": _magnets_stage1(),
             },
@@ -120,21 +126,25 @@ def get_e05_curriculum_stages() -> List[Dict[str, Any]]:
         },
         {
             "stage_id": "Stage-2",
-            "title": "Zero-G Microgravity",
-            "mutation_description": "Gravitational acceleration changed to (0, 0.0) (originally (0, -10.0) in the source environment). Complete absence of gravity means no natural reference direction — any thrust results in unopposed acceleration, and the body drifts freely under magnetic forces alone.",
-            "task_description_suffix": UNIFORM_SUFFIX,
+            "title": "Field Variant II",
+            "mutation_description": (
+                "This stage applies an undisclosed field configuration; exact "
+                "source locations, strengths, and mutation directions are hidden."
+            ),
+            "task_description_suffix": uniform_suffix_for_task("E_05"),
             "terrain_config": {
                 "magnets": _magnets_stage2(),
             },
-            "physics_config": {
-                "gravity": (0, 0.0),
-            },
+            "physics_config": {},
         },
         {
             "stage_id": "Stage-3",
-            "title": "Viscous Abyss",
-            "mutation_description": "Gravitational acceleration changed to (0, -28.0) (originally (0, -10.0) in the source environment). Maximum thrust cap changed to 420.0 (originally 165.0 in the source environment). Linear damping coefficient changed to 8.0 (originally 0.28 in the source environment). Angular damping coefficient changed to 4.0 (originally 0.15 in the source environment). Electromagnetic field strengths intensified across all repulsive walls, oscillating gates, and pit-zone attractors. High gravity consumes most thrust for hovering, while extreme viscous drag absorbs nearly all remaining lateral thrust. Every forward movement requires precise timing with oscillating gate weak windows.",
-            "task_description_suffix": UNIFORM_SUFFIX,
+            "title": "Field Variant III",
+            "mutation_description": (
+                "Published engine limits and documented public physics readings "
+                "accompany an undisclosed field configuration."
+            ),
+            "task_description_suffix": uniform_suffix_for_task("E_05"),
             "terrain_config": {
                 "magnets": _magnets_stage3(),
                 "max_thrust": 420.0,
@@ -147,9 +157,12 @@ def get_e05_curriculum_stages() -> List[Dict[str, Any]]:
         },
         {
             "stage_id": "Stage-4",
-            "title": "Event Horizon",
-            "mutation_description": "Gravitational acceleration changed to (0, -51.0) (originally (0, -10.0) in the source environment). Maximum thrust cap changed to 580.0 (originally 165.0 in the source environment). Linear damping coefficient changed to 10.0 (originally 0.28 in the source environment). Angular damping coefficient changed to 5.0 (originally 0.15 in the source environment). Near-crushing gravity combined with magnetic down-force consumes ~95% of thrust just to stay airborne; extreme viscous drag absorbs nearly all remaining lateral thrust. Every forward centimeter requires perfect synchronization with gate cycles.",
-            "task_description_suffix": UNIFORM_SUFFIX,
+            "title": "Field Variant IV",
+            "mutation_description": (
+                "Published engine limits and documented public physics readings "
+                "accompany an undisclosed field configuration."
+            ),
+            "task_description_suffix": uniform_suffix_for_task("E_05"),
             "terrain_config": {
                 "magnets": _magnets_stage4(),
                 "max_thrust": 580.0,

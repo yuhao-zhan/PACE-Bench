@@ -1,8 +1,4 @@
-import sys
-import os
 import pygame
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../..'))
 
 from pace_bench.renderer import Renderer
 from Box2D.b2 import dynamicBody, staticBody
@@ -59,19 +55,23 @@ class F04Renderer(Renderer):
 
         # ── Identify agent bodies ──────────────────────────────────
         agent_bodies = set(getattr(sandbox, "_bodies", []) or [])
+        particle_bodies = set(
+            (getattr(sandbox, "_particles_small", []) or [])
+            + (getattr(sandbox, "_particles_medium", []) or [])
+            + (getattr(sandbox, "_particles_large", []) or [])
+        )
 
-        # ── Draw static environment bodies (non-agent) ─────────────
+        # ── Draw environment bodies (including kinematic sweepers) ─
         for body in sandbox.world.bodies:
-            if body.type == staticBody and body in agent_bodies:
+            if body in agent_bodies or body in particle_bodies:
                 continue
-            if body.type == staticBody:
-                self.draw_body(
-                    body,
-                    dynamic_color=COLOR_ENV,
-                    static_color=COLOR_ENV,
-                    outline_color=COLOR_OUTLINE,
-                    outline_width=1,
-                )
+            self.draw_body(
+                body,
+                dynamic_color=COLOR_ENV,
+                static_color=COLOR_ENV,
+                outline_color=COLOR_OUTLINE,
+                outline_width=1,
+            )
 
         # ── Draw particles: small ──────────────────────────────────
         if hasattr(sandbox, "_particles_small"):
@@ -155,7 +155,7 @@ class F04Renderer(Renderer):
 
             # Top-left: task label
             if self._font_label:
-                label = self._font_label.render("F-04 | Plow",
+                label = self._font_label.render("F-04 | Three-Way Filter",
                                                 True, COLOR_ANNOTATION)
                 self.simulator.screen.blit(label, (18, 14))
 

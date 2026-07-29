@@ -68,6 +68,9 @@ class DaVinciSandbox:
         self._step_count = 0
         self._max_reaction_force_seen = 0.0
         self._max_reaction_torque_seen = 0.0
+        self._joint_telemetry_v2 = {}
+        self._joint_observation_error_count = 0
+        self._last_joint_observation_error = None
         self._create_terrain(terrain_config)
         self._create_core(terrain_config)
     def _create_terrain(self, terrain_config: dict):
@@ -194,6 +197,13 @@ class DaVinciSandbox:
         self._joint_anchor_positions.append(tuple(anchor))
         self._joint_peak_forces.append(0.0)
         self._joint_peak_torques.append(0.0)
+        self._joint_telemetry_v2[id(j)] = {
+            'anchor': tuple(anchor),
+            'peak_force': 0.0,
+            'peak_torque': 0.0,
+            'broken': False,
+            'breach_step': None,
+        }
         return j
     def get_structure_mass(self):
         return sum(b.mass for b in self._bodies)
@@ -235,6 +245,10 @@ class DaVinciSandbox:
                     torque = abs(j.GetReactionTorque(inv_sub_dt))
                     self._max_reaction_force_seen = max(self._max_reaction_force_seen, force)
                     self._max_reaction_torque_seen = max(self._max_reaction_torque_seen, torque)
+                    telemetry = self._joint_telemetry_v2.get(id(j))
+                    if telemetry is not None:
+                        telemetry['peak_force'] = max(telemetry['peak_force'], force)
+                        telemetry['peak_torque'] = max(telemetry['peak_torque'], torque)
                     if idx < len(self._joint_peak_forces):
                         self._joint_peak_forces[idx] = max(self._joint_peak_forces[idx], force)
                     if idx < len(self._joint_peak_torques):
@@ -253,7 +267,12 @@ class DaVinciSandbox:
                             'torque': float(torque),
                         })
                         broken_joints.append(j)
-                except Exception:
+                        if telemetry is not None:
+                            telemetry['broken'] = True
+                            telemetry['breach_step'] = self._step_count
+                except Exception as exc:
+                    self._joint_observation_error_count += 1
+                    self._last_joint_observation_error = f"{type(exc).__name__}: {exc}"
                     continue
         for j in broken_joints:
             self._world.DestroyJoint(j)
@@ -295,6 +314,13 @@ class DaVinciSandbox:
                     'anchor': self._joint_anchor_positions[idx],
                 })
         return records
+    def get_joint_peak_records_v2(self):
+        return [dict(record) for record in self._joint_telemetry_v2.values()]
+    def get_joint_observation_errors(self):
+        return {
+            'count': self._joint_observation_error_count,
+            'last_error': self._last_joint_observation_error,
+        }
     def get_joint_limits(self):
         return {
             'max_joint_force': self._max_joint_force,

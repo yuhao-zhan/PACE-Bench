@@ -4,6 +4,9 @@ import Box2D
 
 from Box2D.b2 import world, polygonShape, staticBody, dynamicBody
 
+FIXED_TIME_STEP = 1.0 / 60.0
+
+
 class Sandbox:
     CRAFT_START_X = 8.0
     CRAFT_START_Y = 2.0
@@ -110,6 +113,10 @@ class Sandbox:
         craft.angularDamping = self._angular_damping
         self._terrain_bodies["craft"] = craft
     def step(self, time_step):
+        # The benchmark uses a fixed integration step.  Accept the simulator's
+        # argument for API compatibility, but do not let callers alter physics.
+        del time_step
+        time_step = FIXED_TIME_STEP
         craft = self._terrain_bodies.get("craft")
         if not craft:
             self._pending_thrust = (0.0, 0.0)
@@ -141,7 +148,11 @@ class Sandbox:
     def apply_thrust(self, fx, fy):
         if self._overheated:
             return
-        self._pending_thrust = (float(fx), float(fy))
+        fx = float(fx)
+        fy = float(fy)
+        if not math.isfinite(fx) or not math.isfinite(fy):
+            raise ValueError("Thrust components must be finite")
+        self._pending_thrust = (fx, fy)
     def get_craft_position(self):
         craft = self._terrain_bodies.get("craft")
         if craft:
@@ -170,36 +181,4 @@ class Sandbox:
                 "y_min": self.TARGET_Y_MIN,
                 "y_max": self.TARGET_Y_MAX,
             },
-        }
-    def get_ground_y(self):
-        return self._ground_y
-    def get_craft_mass(self):
-        craft = self._terrain_bodies.get("craft")
-        if craft:
-            return float(craft.mass)
-        return None
-    def get_zone_info(self):
-        craft = self._terrain_bodies.get("craft")
-        if not craft:
-            return {"craft_present": False}
-        x, y = float(craft.position.x), float(craft.position.y)
-        return {
-            "craft_present": True,
-            "craft_x": x,
-            "craft_y": y,
-            "in_drain_zone": self.DRAIN_X_LO <= x <= self.DRAIN_X_HI,
-            "in_slip_zone": self.SLIP_X_LO <= x <= self.SLIP_X_HI,
-            "in_wind_zone": self.WIND_X_LO <= x <= self.WIND_X_HI,
-            "in_gate1_x": self.GATE1_X_LO <= x <= self.GATE1_X_HI,
-            "in_gate2_x": self.GATE2_X_LO <= x <= self.GATE2_X_HI,
-        }
-    def get_zone_boundaries(self):
-        return {
-            "drain": {"x_lo": self.DRAIN_X_LO, "x_hi": self.DRAIN_X_HI},
-            "slip": {"x_lo": self.SLIP_X_LO, "x_hi": self.SLIP_X_HI},
-            "wind": {"x_lo": self.WIND_X_LO, "x_hi": self.WIND_X_HI},
-            "gate1": {"x_lo": self.GATE1_X_LO, "x_hi": self.GATE1_X_HI,
-                      "y_lo": self.GATE1_Y_LO, "y_hi": self.GATE1_Y_HI},
-            "gate2": {"x_lo": self.GATE2_X_LO, "x_hi": self.GATE2_X_HI,
-                      "y_lo": self.GATE2_Y_LO, "y_hi": self.GATE2_Y_HI},
         }

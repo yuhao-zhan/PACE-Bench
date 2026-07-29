@@ -49,6 +49,8 @@ class DaVinciSandbox:
         self._max_joint_torque = float(terrain_config.get("max_joint_torque", 1000.0))
         self._pivot_joint_destroyed = False
         self._pivot_destroyed_step = None
+        self._pivot_destroy_error_count = 0
+        self._last_pivot_destroy_error = None
         self._peak_load_abs_x = 0.0
         self._min_load_structure_dist = float('inf')
         self._event_timeline = []
@@ -211,7 +213,16 @@ class DaVinciSandbox:
                                 "ratio": float(abs(net_torque) / self._max_joint_torque) if self._max_joint_torque > 0 else float('inf'),
                                 "key": "pivot_destroyed",
                             })
-                        except: pass
+                        except Exception as exc:
+                            self._pivot_destroy_error_count += 1
+                            self._last_pivot_destroy_error = f"{type(exc).__name__}: {exc}"
+                            current_sn = int(self._step_timer / time_step) if time_step > 0 else 0
+                            self._event_timeline.append({
+                                "step": current_sn,
+                                "type": "pivot_destroy_error",
+                                "error": self._last_pivot_destroy_error,
+                                "key": f"pivot_destroy_error_{self._pivot_destroy_error_count}",
+                            })
         self._world.Step(time_step, 60, 60)
         self._step_timer += time_step
         current_step_num = int(self._step_timer / time_step) if time_step > 0 else 0
@@ -303,6 +314,8 @@ class DaVinciSandbox:
     def add_joint(self, body_a, body_b, anchor_point, type='rigid'):
         anchor_x, anchor_y = anchor_point[0], anchor_point[1]
         pivot = self._terrain_bodies.get("pivot")
+        if body_b is None:
+            body_b = pivot
         if pivot and (body_a == pivot or body_b == pivot):
             other = body_b if body_a == pivot else body_a
             if self._terrain_config.get("force_pivot_joint", False) or type == 'pivot':

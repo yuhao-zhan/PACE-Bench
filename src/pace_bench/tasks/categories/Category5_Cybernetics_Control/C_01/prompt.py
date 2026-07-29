@@ -6,8 +6,6 @@ import os
 
 import re
 
-import sys
-
 _env_path = os.path.join(os.path.dirname(__file__), "environment.py")
 
 _spec = importlib.util.spec_from_file_location("c01_environment", _env_path)
@@ -50,8 +48,6 @@ _VEL_IT = _env.WORLD_VELOCITY_ITERATIONS
 
 _POS_IT = _env.WORLD_POSITION_ITERATIONS
 
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
-
 from pace_bench.tasks.primitives_api import API_INTRO
 
 with open(os.path.join(os.path.dirname(__file__), '..', '..', 'primitives_api.json'), 'r') as f:
@@ -71,15 +67,15 @@ TASK_PROMPT = {
     "task_description": f"""
 Design a controller to maintain a pole balanced on a moving cart.
 
-- **Cart**: A body of mass {_CART_M:g} kg and dimensions 1.0m (width) x 0.5m (height) that moves along a horizontal track at y={_RAIL_Y}m (center x={_TRACK_CX:g}m, safe range ±{_SAFE_HALF:g}m inclusive).
-- **Pole**: Mass {_POLE_M:g} kg, width {_POLE_W}m. Initially upright (angle = 0° or 0rad). **Length**: {_POLE_LEN:.1f}m.
+- **Cart**: The cart has dimensions 1.0m (width) x 0.5m (height) and an undisclosed mass. It moves along a horizontal track at y={_RAIL_Y}m (center x={_TRACK_CX:g}m, safe range ±{_SAFE_HALF:g}m inclusive). Infer inertial properties from observed response rather than simulator internals.
+- **Pole**: The pole has undisclosed mass, width {_POLE_W}m, starts upright (angle = 0° or 0rad), and has visible length {_POLE_LEN:.1f}m. Mutated length and initial angle are directly visible geometry/state and are stated when changed; inertial properties remain latent.
 - **Gravity**: Gravitational acceleration is applied per the simulator’s +y-up world frame; the effective vector (magnitude and sign along y) may differ between runs—do not assume a specific value without checking behavior (see any **Environmental Anomalies** appendix on mutated runs).
 - **Contact model**: Cart, pole, and track interact through the simulator’s default rigid-body contact model unless a run overrides it.
 - **Default contact**: Engine-default friction and restitution apply to cart, pole, and track fixtures (no additional task-specific surface coefficients in the baseline configuration).
 - **Physics integrator**: Each `environment.step` runs one Box2D solve with **{_VEL_IT}** velocity iterations and **{_POS_IT}** position iterations per step (fixed for this task).
 - **Actuator Limit**: The cart force is limited to ±{_fn}N.
-- **Sensor reporting (angle)**: 0 simulation steps of delay from true state.
-- **Sensor reporting (angular velocity)**: 0 simulation steps of delay from true state.
+- **Sensor reporting (angle)**: The reported angle may have an undisclosed fixed delay from true state; infer latency from response.
+- **Sensor reporting (angular velocity)**: The reported angular velocity may have an undisclosed fixed delay from true state; infer latency from response.
 - **Goal**: Maintain the pole in the upright position (|angle| <= {_BAL_DEG}°) for at least **{_HOLD_STEPS} consecutive simulation steps** (one count per completed `environment.step` / physics integration; the harness may call the evaluator once at step index 0 before the first integration—**that call does not advance** the lock-in counter). **Scoring**: After that lock-in, the episode does not end early solely because |angle| exceeds {_BAL_DEG}°, until the pole passes horizontal (|angle| > {_FAIL_DEG}°), you leave the track, or you hit the step limit. **Final success** still requires |angle| <= {_BAL_DEG}° at the last step. Before balance lock-in, the episode does **not** end only because |angle| briefly exceeds {_BAL_DEG}°; only track exit, the step limit, or (after lock-in) |angle| > {_FAIL_DEG}° ends the run early as described above.
 - **Grading vs sensors**: All angle conditions above ({_BAL_DEG}°, {_FAIL_DEG}°, lock-in count, and terminal check) use the simulator’s **true** pole state. Values from `get_pole_angle` / `get_pole_angular_velocity` follow the **Sensor reporting** delays above and may therefore differ from the state used for scoring—design accordingly.
 - **Episode length**: At most {_MAX_STEPS} simulation steps (must hold balance until the end).

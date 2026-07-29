@@ -1,14 +1,11 @@
-import sys
-import os
 import pygame
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../..'))
-
-_c02_dir = os.path.dirname(os.path.abspath(__file__))
-if _c02_dir not in sys.path:
-    sys.path.insert(0, _c02_dir)
-
-from environment import GROUND_SLAB_HEIGHT
+try:
+    from .environment import GROUND_SLAB_HEIGHT
+except ImportError:
+    from pace_bench.tasks.categories.Category5_Cybernetics_Control.C_02.environment import (
+        GROUND_SLAB_HEIGHT,
+    )
 from pace_bench.renderer import Renderer
 from Box2D.b2 import dynamicBody, staticBody
 

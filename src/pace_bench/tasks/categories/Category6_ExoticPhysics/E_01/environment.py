@@ -19,6 +19,7 @@ class Sandbox:
     BUILD_ZONE_Y_MAX = 18.0
     MAX_STRUCTURE_MASS = 200.0
     MAX_BEAM_COUNT = 12
+    TIME_STEP = 1.0 / 60.0
     OBSTACLE1_X_MIN = 18.0
     OBSTACLE1_X_MAX = 22.0
     OBSTACLE1_Y_CENTER = 10.0
@@ -176,6 +177,10 @@ class Sandbox:
             body.angularDamping = self._default_angular_damping
             self._terrain_bodies[f"demonstrator_{i}"] = body
     def step(self, time_step):
+        if not math.isclose(float(time_step), self.TIME_STEP, rel_tol=0.0, abs_tol=1e-12):
+            raise ValueError(
+                f"E-01 requires time_step={self.TIME_STEP}, received {time_step}"
+            )
         self._time += time_step
         gx, gy = self._gravity_function(self._time)
         self._world.gravity = (float(gx), float(gy))
@@ -183,51 +188,29 @@ class Sandbox:
         self._step_count += 1
         total_ke = 0.0
         for body in self._bodies:
-            try:
-                vx, vy = body.linearVelocity.x, body.linearVelocity.y
-                omega = body.angularVelocity
-                mass = body.mass
-                inertia = body.inertia
-                v_sq = vx * vx + vy * vy
-                trans_ke = 0.5 * mass * v_sq
-                rot_ke = 0.5 * inertia * omega * omega
-                body_ke = trans_ke + rot_ke
-                total_ke += body_ke
-                v_mag = math.sqrt(v_sq)
-                if v_mag > self._peak_body_velocity:
-                    self._peak_body_velocity = v_mag
-            except Exception:
-                continue
+            vx, vy = body.linearVelocity.x, body.linearVelocity.y
+            omega = body.angularVelocity
+            v_sq = vx * vx + vy * vy
+            total_ke += 0.5 * body.mass * v_sq + 0.5 * body.inertia * omega * omega
+            self._peak_body_velocity = max(self._peak_body_velocity, math.sqrt(v_sq))
         for key, body in self._terrain_bodies.items():
             if key.startswith("demonstrator_"):
-                try:
-                    vx, vy = body.linearVelocity.x, body.linearVelocity.y
-                    omega = body.angularVelocity
-                    mass = body.mass
-                    inertia = body.inertia
-                    v_sq = vx * vx + vy * vy
-                    trans_ke = 0.5 * mass * v_sq
-                    rot_ke = 0.5 * inertia * omega * omega
-                    body_ke = trans_ke + rot_ke
-                    total_ke += body_ke
-                    v_mag = math.sqrt(v_sq)
-                    if v_mag > self._peak_body_velocity:
-                        self._peak_body_velocity = v_mag
-                except Exception:
-                    continue
+                vx, vy = body.linearVelocity.x, body.linearVelocity.y
+                omega = body.angularVelocity
+                v_sq = vx * vx + vy * vy
+                total_ke += 0.5 * body.mass * v_sq + 0.5 * body.inertia * omega * omega
+                self._peak_body_velocity = max(self._peak_body_velocity, math.sqrt(v_sq))
         self._ke_history.append({
             "step": self._step_count,
             "kinetic_energy": total_ke,
         })
         forces_this_step = []
         for j in self._joints:
-            try:
-                force = j.GetReactionForce(1.0 / time_step).length
-                forces_this_step.append(force)
-                if force > self._peak_reaction_force_ever:
-                    self._peak_reaction_force_ever = force
-            except Exception:
-                continue
+            force = j.GetReactionForce(1.0 / time_step).length
+            forces_this_step.append(force)
+            self._peak_reaction_force_ever = max(
+                self._peak_reaction_force_ever, force
+            )
         if forces_this_step:
             self._joint_tracking["joint_force_history"].append({
                 "step": self._step_count,
@@ -238,24 +221,17 @@ class Sandbox:
         if self._joint_force_limit < float('inf'):
             to_break = []
             for j in self._joints:
-                try:
-                    force = j.GetReactionForce(1.0 / time_step).length
-                    if force > self._joint_force_limit:
-                        to_break.append(j)
-                except Exception:
-                    continue
+                force = j.GetReactionForce(1.0 / time_step).length
+                if force > self._joint_force_limit:
+                    to_break.append(j)
             for j in to_break:
-                try:
-                    anchor = j.anchorA if hasattr(j, 'anchorA') else (0.0, 0.0)
-                    self._joint_tracking["joint_failure_events"].append({
-                        "step": self._step_count,
-                        "anchor_x": float(anchor[0]),
-                        "anchor_y": float(anchor[1]),
-                        "force_at_break": float(j.GetReactionForce(1.0 / time_step).length),
-                        "joint_limit": float(self._joint_force_limit),
-                    })
-                except Exception:
-                    pass
+                anchor = j.anchorA
+                self._joint_tracking["joint_failure_events"].append({
+                    "step": self._step_count,
+                    "anchor_x": float(anchor[0]),
+                    "anchor_y": float(anchor[1]),
+                    "force_at_break": float(j.GetReactionForce(1.0 / time_step).length),
+                })
                 self._world.DestroyJoint(j)
                 if j in self._joints:
                     self._joints.remove(j)
@@ -365,9 +341,6 @@ class Sandbox:
                 },
             ],
         }
-    def get_gravity_at_time(self, t=None):
-        t = t if t is not None else self._time
-        return self._gravity_function(t)
     def get_joint_force_tracking(self):
         return dict(self._joint_tracking)
     def get_kinetic_energy_history(self):
@@ -376,7 +349,3 @@ class Sandbox:
         return float(self._peak_body_velocity)
     def get_peak_reaction_force_ever(self):
         return float(self._peak_reaction_force_ever)
-    def get_linear_damping(self):
-        return float(self._default_linear_damping)
-    def get_angular_damping(self):
-        return float(self._default_angular_damping)

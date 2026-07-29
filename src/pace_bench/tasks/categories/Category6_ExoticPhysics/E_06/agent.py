@@ -41,7 +41,7 @@ def build_agent_stage_4(sandbox):
         by_i = bottom_chord[i].position.y
         ty_i = top_chord[i].position.y
         vy = (by_i + ty_i) / 2.0
-        vh = ty_i - by_i - chord_h - 0.02
+        vh = min(4.0, ty_i - by_i - chord_h - 0.02)
         if vh > 0.06:
             vert = sandbox.add_beam(xs[i], vy, web_w, vh, 0, web_density)
             sandbox.add_joint(bottom_chord[i], vert, (xs[i], by_i + chord_h / 2.0), type="rigid")
@@ -55,7 +55,7 @@ def build_agent_stage_4(sandbox):
         by_i = bottom_chord[i].position.y
         ty_ip1 = top_chord[i + 1].position.y
         dy_up = ty_ip1 - by_i
-        d_up = math.sqrt(dx * dx + dy_up * dy_up) * 0.96
+        d_up = min(4.0, math.sqrt(dx * dx + dy_up * dy_up) * 0.96)
         ang_up = math.atan2(dy_up, dx)
         cy_up = (by_i + ty_ip1) / 2.0
         diag_up = sandbox.add_beam(cx, cy_up, web_w, d_up, ang_up, web_density)
@@ -64,7 +64,7 @@ def build_agent_stage_4(sandbox):
         ty_i = top_chord[i].position.y
         by_ip1 = bottom_chord[i + 1].position.y
         dy_dn = ty_i - by_ip1
-        d_dn = math.sqrt(dx * dx + dy_dn * dy_dn) * 0.96
+        d_dn = min(4.0, math.sqrt(dx * dx + dy_dn * dy_dn) * 0.96)
         ang_dn = math.atan2(dy_dn, -dx)
         cy_dn = (ty_i + by_ip1) / 2.0
         diag_dn = sandbox.add_beam(cx, cy_dn, web_w, d_dn, math.pi - abs(ang_dn), web_density)
@@ -77,7 +77,7 @@ def build_agent_stage_4(sandbox):
     tip_by = last_b.position.y
     tip_ty = last_t.position.y
     tip_mid_y = (tip_by + tip_ty) / 2.0
-    tip_h = abs(tip_ty - tip_by) - chord_h - 0.02
+    tip_h = min(4.0, abs(tip_ty - tip_by) - chord_h - 0.02)
     if tip_h > 0.06:
         tip_close = sandbox.add_beam(tip_x, tip_mid_y, web_w, tip_h, 0, web_density)
         sandbox.add_joint(last_b, tip_close, (tip_x, tip_by + chord_h / 2.0), type="rigid")
@@ -85,8 +85,9 @@ def build_agent_stage_4(sandbox):
 
     sandbox.add_joint(bottom_chord[0], None, (5.75, 1.0), type="rigid")
     total_mass = sandbox.get_structure_mass()
-    if total_mass > 20.0:
-        raise ValueError("Mass {} exceeds 20.0".format(total_mass))
+    mass_limit = sandbox.get_structure_mass_limit()
+    if total_mass > mass_limit:
+        raise ValueError(f"Mass {total_mass} exceeds {mass_limit}")
     return bottom_chord[0]
 
 def agent_action_stage_4(sandbox, agent_body, step_count):
@@ -96,8 +97,8 @@ def build_agent_stage_3(sandbox):
     chord_density = 3.0
     chord_h = 0.55
     web_density = 1.4
-    web_w = 0.08
-    diag_w = 0.07
+    web_w = 0.1
+    diag_w = 0.1
     bottom_y = 1.55
     top_y = 6.1
     FORBIDDEN_LO = 9.7
@@ -148,7 +149,7 @@ def build_agent_stage_3(sandbox):
         by_i = bottom_chord[i].position.y
         ty_ip1 = top_chord[i + 1].position.y
         dy_up = ty_ip1 - by_i
-        d_up = math.sqrt(dx * dx + dy_up * dy_up) * 0.96
+        d_up = min(4.0, math.sqrt(dx * dx + dy_up * dy_up) * 0.96)
         ang_up = math.atan2(dy_up, dx)
         cy_up = (by_i + ty_ip1) / 2.0
         diag_up = sandbox.add_beam(cx, cy_up, diag_w, d_up, ang_up, web_density)
@@ -157,7 +158,7 @@ def build_agent_stage_3(sandbox):
         ty_i = top_chord[i].position.y
         by_ip1 = bottom_chord[i + 1].position.y
         dy_dn = ty_i - by_ip1
-        d_dn = math.sqrt(dx * dx + dy_dn * dy_dn) * 0.96
+        d_dn = min(4.0, math.sqrt(dx * dx + dy_dn * dy_dn) * 0.96)
         ang_dn = math.atan2(dy_dn, -dx)
         cy_dn = (ty_i + by_ip1) / 2.0
         diag_dn = sandbox.add_beam(cx, cy_dn, diag_w, d_dn, math.pi - abs(ang_dn), web_density)
@@ -179,179 +180,49 @@ def build_agent_stage_3(sandbox):
     ground_y = 1.0
     sandbox.add_joint(bottom_chord[0], None, (5.75, ground_y), type="rigid")
     total_mass = sandbox.get_structure_mass()
-    if total_mass > 35.0:
-        raise ValueError(f"Mass {total_mass} exceeds 35.0")
+    mass_limit = sandbox.get_structure_mass_limit()
+    if total_mass > mass_limit:
+        raise ValueError(f"Mass {total_mass} exceeds {mass_limit}")
     return bottom_chord[0]
 
 def agent_action_stage_3(sandbox, agent_body, step_count):
     pass
 
 def build_agent_stage_2(sandbox):
-    chord_density = 10.0
-    chord_h = 0.18
-    web_density = 4.5
-    web_w = 0.08
-    bottom_y = 1.75
-    top_y = 6.5
-    FORBIDDEN_LO = 9.7
-    FORBIDDEN_HI = 10.3
+    component_area = 3.0 * 4.0 * 4.0
+    density = 0.95 * sandbox.get_structure_mass_limit() / component_area
 
-    xs = [6.5, 7.6, 8.7, 9.5, 10.85, 11.95, 13.05]
-    for xv in xs:
-        if FORBIDDEN_LO <= xv <= FORBIDDEN_HI:
-            raise ValueError(f"Grid point {xv} in forbidden zone")
-    n = len(xs)
-    def seg_w(i):
-        if i < n - 1:
-            return xs[i + 1] - xs[i]
-        return 0.5
+    root_slab = sandbox.add_beam(6.5, 3.0, 4.0, 4.0, 0, density)
+    middle_slab = sandbox.add_beam(9.5, 3.0, 4.0, 4.0, 0, density)
+    tip_slab = sandbox.add_beam(13.0, 5.0, 4.0, 4.0, 0, density)
 
-    bottom_chord = []
-    for i in range(n):
-        w = seg_w(i)
-        bottom_chord.append(sandbox.add_beam(xs[i], bottom_y, w, chord_h, 0, chord_density))
-    for i in range(n - 1):
-        ax = (xs[i] + xs[i + 1]) / 2.0
-        sandbox.add_joint(bottom_chord[i], bottom_chord[i + 1], (ax, bottom_y), type="rigid")
+    sandbox.add_joint(root_slab, middle_slab, (8.0, 3.0), type="rigid")
+    sandbox.add_joint(middle_slab, tip_slab, (11.25, 4.0), type="rigid")
+    sandbox.add_joint(root_slab, None, (6.5, 1.0), type="rigid")
 
-    top_chord = []
-    for i in range(n):
-        w = seg_w(i)
-        ty = top_y - (xs[i] - xs[0]) * 0.03
-        top_chord.append(sandbox.add_beam(xs[i], ty, w, chord_h, 0, chord_density))
-    for i in range(n - 1):
-        ax = (xs[i] + xs[i + 1]) / 2.0
-        ay = (top_chord[i].position.y + top_chord[i + 1].position.y) / 2.0
-        sandbox.add_joint(top_chord[i], top_chord[i + 1], (ax, ay), type="rigid")
-
-    for i in range(n):
-        by_i = bottom_chord[i].position.y
-        ty_i = top_chord[i].position.y
-        vy = (by_i + ty_i) / 2.0
-        vh = ty_i - by_i - chord_h - 0.02
-        if vh > 0.06:
-            vert = sandbox.add_beam(xs[i], vy, web_w, vh, 0, web_density)
-            sandbox.add_joint(bottom_chord[i], vert, (xs[i], by_i + chord_h / 2.0), type="rigid")
-            sandbox.add_joint(top_chord[i], vert, (xs[i], ty_i - chord_h / 2.0), type="rigid")
-
-    for i in range(n - 1):
-        cx = (xs[i] + xs[i + 1]) / 2.0
-        if FORBIDDEN_LO <= cx <= FORBIDDEN_HI:
-            continue
-        dx = xs[i + 1] - xs[i]
-        by_i = bottom_chord[i].position.y
-        ty_ip1 = top_chord[i + 1].position.y
-        dy = ty_ip1 - by_i
-        d = math.sqrt(dx * dx + dy * dy) * 0.95
-        ang = math.atan2(dy, dx)
-        cy = (by_i + ty_ip1) / 2.0
-        diag_up = sandbox.add_beam(cx, cy, web_w, d, ang, web_density)
-        sandbox.add_joint(bottom_chord[i], diag_up, (xs[i] + 0.05, by_i + 0.02), type="rigid")
-        sandbox.add_joint(top_chord[i + 1], diag_up, (xs[i + 1] - 0.05, ty_ip1 - 0.02), type="rigid")
-        ty_i = top_chord[i].position.y
-        by_ip1 = bottom_chord[i + 1].position.y
-        dy2 = ty_i - by_ip1
-        d2 = math.sqrt(dx * dx + dy2 * dy2) * 0.95
-        ang2 = math.atan2(dy2, -dx)
-        cy2 = (ty_i + by_ip1) / 2.0
-        diag_down = sandbox.add_beam(cx, cy2, web_w, d2, math.pi - abs(ang2), web_density)
-        sandbox.add_joint(top_chord[i], diag_down, (xs[i] + 0.05, ty_i - 0.02), type="rigid")
-        sandbox.add_joint(bottom_chord[i + 1], diag_down, (xs[i + 1] - 0.05, by_ip1 + 0.02), type="rigid")
-
-    last_bottom = bottom_chord[-1]
-    last_top = top_chord[-1]
-    tip_by = last_bottom.position.y
-    tip_ty = last_top.position.y
-    tip_mid_y = (tip_by + tip_ty) / 2.0
-    tip_h = abs(tip_ty - tip_by) - chord_h - 0.02
-    if tip_h > 0.06:
-        tip_closure = sandbox.add_beam(xs[-1] + 0.2, tip_mid_y, web_w, tip_h, 0, web_density)
-        sandbox.add_joint(last_bottom, tip_closure, (xs[-1] + 0.2, tip_by + chord_h / 2.0), type="rigid")
-        sandbox.add_joint(last_top, tip_closure, (xs[-1] + 0.2, tip_ty - chord_h / 2.0), type="rigid")
-
-    ground_y = 1.0
-    sandbox.add_joint(bottom_chord[0], None, (xs[0], ground_y), type="rigid")
-    total_mass = sandbox.get_structure_mass()
-    if total_mass > 120.0:
-        raise ValueError(f"Mass {total_mass} exceeds 120.0")
-    return bottom_chord[0]
+    if sandbox.get_structure_mass() > sandbox.get_structure_mass_limit():
+        raise ValueError("Structure exceeds the available mass budget")
+    return root_slab
 
 def agent_action_stage_2(sandbox, agent_body, step_count):
     pass
 
 def build_agent_stage_1(sandbox):
-    density = 1.1
-    chord_h = 0.12
-    web_w = 0.12
-    bottom_y = 1.55
-    top_y = 5.0
-    xs = [5.75, 6.8, 7.9, 9.0, 9.5, 11.5, 13.0]
-    n = len(xs)
-    def seg_w(i):
-        if i < n - 1:
-            return max(0.30, xs[i + 1] - xs[i])
-        return 0.7
-    bottom_beams = []
-    for i in range(n):
-        w = seg_w(i)
-        bottom_beams.append(sandbox.add_beam(xs[i], bottom_y, w, chord_h, 0, density))
-    for i in range(n - 1):
-        ax = (xs[i] + xs[i + 1]) / 2.0
-        sandbox.add_joint(bottom_beams[i], bottom_beams[i + 1], (ax, bottom_y), type="rigid")
-    top_beams = []
-    for i in range(n):
-        w = seg_w(i)
-        top_beams.append(sandbox.add_beam(xs[i], top_y, w, chord_h, 0, density))
-    for i in range(n - 1):
-        ax = (xs[i] + xs[i + 1]) / 2.0
-        sandbox.add_joint(top_beams[i], top_beams[i + 1], (ax, top_y), type="rigid")
-    for i in range(n):
-        by_i = bottom_beams[i].position.y
-        ty_i = top_beams[i].position.y
-        vy = (by_i + ty_i) / 2.0
-        vh = ty_i - by_i - chord_h - 0.02
-        if vh > 0.10:
-            vert = sandbox.add_beam(xs[i], vy, web_w, vh, 0, density)
-            sandbox.add_joint(bottom_beams[i], vert, (xs[i], by_i + chord_h / 2.0), type="rigid")
-            sandbox.add_joint(top_beams[i], vert, (xs[i], ty_i - chord_h / 2.0), type="rigid")
-    for i in range(n - 1):
-        dx = xs[i + 1] - xs[i]
-        by_i = bottom_beams[i].position.y
-        ty_ip1 = top_beams[i + 1].position.y
-        dy_up = ty_ip1 - by_i
-        d_up = math.sqrt(dx * dx + dy_up * dy_up) * 0.94
-        ang_up = math.atan2(dy_up, dx)
-        cx = (xs[i] + xs[i + 1]) / 2.0
-        cy_up = (by_i + ty_ip1) / 2.0
-        diag_up = sandbox.add_beam(cx, cy_up, web_w, d_up, ang_up, density)
-        sandbox.add_joint(bottom_beams[i], diag_up, (xs[i] + 0.05, by_i + 0.02), type="rigid")
-        sandbox.add_joint(top_beams[i + 1], diag_up, (xs[i + 1] - 0.05, ty_ip1 - 0.02), type="rigid")
-        ty_i = top_beams[i].position.y
-        by_ip1 = bottom_beams[i + 1].position.y
-        dy_dn = ty_i - by_ip1
-        d_dn = math.sqrt(dx * dx + dy_dn * dy_dn) * 0.94
-        ang_dn = math.atan2(dy_dn, -dx)
-        cy_dn = (ty_i + by_ip1) / 2.0
-        diag_dn = sandbox.add_beam(cx, cy_dn, web_w, d_dn, math.pi - abs(ang_dn), density)
-        sandbox.add_joint(top_beams[i], diag_dn, (xs[i] + 0.05, ty_i - 0.02), type="rigid")
-        sandbox.add_joint(bottom_beams[i + 1], diag_dn, (xs[i + 1] - 0.05, by_ip1 + 0.02), type="rigid")
-    tip_x = xs[-1] + 0.3
-    last_b = bottom_beams[-1]
-    last_t = top_beams[-1]
-    tip_by = last_b.position.y
-    tip_ty = last_t.position.y
-    tip_mid_y = (tip_by + tip_ty) / 2.0
-    tip_h = abs(tip_ty - tip_by) - chord_h - 0.02
-    if tip_h > 0.08:
-        tip_close = sandbox.add_beam(tip_x, tip_mid_y, web_w, tip_h, 0, density)
-        sandbox.add_joint(last_b, tip_close, (tip_x, tip_by + chord_h / 2.0), type="rigid")
-        sandbox.add_joint(last_t, tip_close, (tip_x, tip_ty - chord_h / 2.0), type="rigid")
-    ground_y = 1.0
-    sandbox.add_joint(bottom_beams[0], None, (5.75, ground_y), type="rigid")
-    total_mass = sandbox.get_structure_mass()
-    if total_mass > 12.0:
-        raise ValueError(f"Mass {total_mass} exceeds 12.0")
-    return bottom_beams[0]
+    component_area = 1.2 * 3.2 + 2.0 * 1.0 + 4.0 * 4.0 + 4.0 * 4.0
+    density = 0.95 * sandbox.get_structure_mass_limit() / component_area
+    mast = sandbox.add_beam(5.75, 3.2, 1.2, 3.2, 0, density)
+    root_plate = sandbox.add_beam(6.5, 5.0, 2.0, 1.0, 0, density)
+    middle_plate = sandbox.add_beam(9.5, 5.0, 4.0, 4.0, 0, density)
+    tip_plate = sandbox.add_beam(13.0, 5.0, 4.0, 4.0, 0, density)
+
+    sandbox.add_joint(mast, root_plate, (5.75, 4.7), type="rigid")
+    sandbox.add_joint(root_plate, middle_plate, (7.5, 5.0), type="rigid")
+    sandbox.add_joint(middle_plate, tip_plate, (11.25, 5.0), type="rigid")
+    sandbox.add_joint(mast, None, (5.75, 1.0), type="rigid")
+
+    if sandbox.get_structure_mass() > sandbox.get_structure_mass_limit():
+        raise ValueError("Structure exceeds the available mass budget")
+    return mast
 
 def agent_action_stage_1(sandbox, agent_body, step_count):
     pass

@@ -1,8 +1,4 @@
-import sys
-import os
 import pygame
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../..'))
 
 from pace_bench.renderer import Renderer
 from Box2D.b2 import dynamicBody, staticBody
@@ -53,7 +49,7 @@ class C06Renderer(Renderer):
         self.clear(COLOR_BG)
 
         # ── Draw bodies ────────────────────────────────────────────
-        wheel = sandbox.get_wheel_body() if hasattr(sandbox, 'get_wheel_body') else None
+        wheel = sandbox._get_wheel_body()
 
         for body in sandbox.world.bodies:
             if body.type == staticBody:
@@ -93,7 +89,7 @@ class C06Renderer(Renderer):
 
             # Top-left: task label
             if self._font_label:
-                label = self._font_label.render("C-06 | Trajectory Tracking",
+                label = self._font_label.render("C-06 | Wheel Governor",
                                                 True, COLOR_ANNOTATION)
                 self.simulator.screen.blit(label, (18, 14))
 

@@ -1,27 +1,12 @@
 from __future__ import annotations
 
+from pace_bench.tasks.stage_prompt import uniform_suffix_for_task
+
 from typing import Any, Dict, List
 
 import re
 
-UNIFORM_SUFFIX = """
-Environmental Anomalies Detected
-Sensors indicate that this region exhibits non-standard physical properties.
-While the following variables MIGHT have changed from the initial environment, NOT ALL of them will necessarily be mutated in any given task. You must use active interaction and environmental feedback to deduce which specific conditions apply:
- - **Pivot Connection Type**: The type of connection at the central support may differ from the default.
- - **Fragile Anchor Points (Joint Torque Capacity)**: The pivot joint's static torque capacity may differ from the default.
- - **Rotational Friction**: Friction properties at the pivot point may differ from the default.
- - **Precision Thresholds (Angle Tolerance)**: The allowable angular deviation for balance may differ from the default.
- - **Balance Duration**: The required time for which balance must be continuously maintained may differ from the default.
- - **Load Mass**: The mass of the heavy load block may differ from the default.
- - **Lateral Wind Forces**: Wind forces may act on all components.
- - **Gravitational Constant**: Local gravity magnitude may differ from the default.
- - **Spatial Obstructions**: Static structural barriers may occupy parts of the workspace.
- - **Dynamic Loading**: The target mass delivery method may differ from the default.
- - **Angular Damping**: Rotational damping of bodies may differ from the default.
-
-Discovery via feedback: Your objective is to identify the underlying physical rules of this specific environment through trial and reasoning.
-"""
+UNIFORM_SUFFIX = uniform_suffix_for_task("S_04")
 
 def update_task_description_for_visible_changes(base_description: str, target_terrain_config: Dict[str, Any], base_terrain_config: Dict[str, Any]) -> str:
     description = base_description
@@ -164,33 +149,34 @@ def get_s04_curriculum_stages() -> List[Dict[str, Any]]:
     return [
         {
             "stage_id": "Stage-1",
-            "title": "The Supermassive Load",
-            "mutation_description": "The load mass is tripled to 600 kg. The standard counterweight strategy used in the initial environment is hopelessly inadequate. The challenge: discover the extreme load mass through failure feedback, calculate the precise counterweight needed, and design a structure that achieves perfect torque equilibrium to maintain balance.",
-            "task_description_suffix": UNIFORM_SUFFIX,
+            "title": "The Orthogonal Load Path",
+            "mutation_description": "The gravitational field is rotated by ninety degrees while the load and visible balance constraints remain unchanged. Horizontal left-right counterweights no longer oppose the load torque; equilibrium instead requires a vertically separated load path about the revolute pivot.",
+            "task_description_suffix": uniform_suffix_for_task("S_04"),
             "terrain_config": {
                 "force_pivot_joint": True,
                 "fragile_joints": False,
-                "load_mass": 600.0,
+                "load_mass": 200.0,
                 "max_angle_deviation_deg": 10.0,
             },
             "physics_config": {
-                "gravity": (0, -10.0),
+                "gravity": (10.0, 0.0),
                 "angular_damping": 2.0,
             },
         },
         {
             "stage_id": "Stage-2",
-            "title": "The Frictionless Oscillator",
-            "mutation_description": "Pivot friction is completely eliminated. Without damping, any imbalance causes sustained oscillation. You must achieve perfect mass distribution to avoid continuous back-and-forth swinging, combined with an extremely tight 1.5° balance tolerance.",
-            "task_description_suffix": UNIFORM_SUFFIX,
+            "title": "The Resultant-Line Pendulum",
+            "mutation_description": "An oblique gravitational field acts through a frictionless, undamped revolute support. Static balance requires the complete structure-and-load center of mass to lie on the field line through the pivot, while stable balance requires it to lie on the force-side ray. The tighter angle and endurance constraints make residual torque immediately consequential.",
+            "task_description_suffix": uniform_suffix_for_task("S_04"),
             "terrain_config": {
                 "force_pivot_joint": True,
                 "pivot_friction": 0.0,
                 "load_mass": 200.0,
-                "max_angle_deviation_deg": 1.5,
-                "balance_time": 45.0,
+                "max_angle_deviation_deg": 1.0,
+                "balance_time": 60.0,
             },
             "physics_config": {
+                "gravity": (-24.0, -24.0),
                 "angular_damping": 0.0,
             },
         },
@@ -198,7 +184,7 @@ def get_s04_curriculum_stages() -> List[Dict[str, Any]]:
             "stage_id": "Stage-3",
             "title": "The Hurricane Siege",
             "mutation_description": "Extreme gravity and hurricane-force winds combine with a fragile pivot joint. The torque threshold is set such that imperfect balance will shatter the joint. You must achieve both angle stability AND torque management in a multi-constraint environment with obstacles blocking simple solutions.",
-            "task_description_suffix": UNIFORM_SUFFIX,
+            "task_description_suffix": uniform_suffix_for_task("S_04"),
             "terrain_config": {
                 "force_pivot_joint": True,
                 "obstacle_active": True,
@@ -223,7 +209,7 @@ def get_s04_curriculum_stages() -> List[Dict[str, Any]]:
             "stage_id": "Stage-4",
             "title": "The Dirac Fulcrum",
             "mutation_description": "Sixfold gravity (g=-60), 30x hurricane winds, a hair-trigger 0.5° balance tolerance, and a brutal 180-second endurance requirement combine with high rotational damping. Three obstacles blockade the workspace. Every physical parameter is pushed to its extreme; survival demands millimetric precision in counterweight placement.",
-            "task_description_suffix": UNIFORM_SUFFIX,
+            "task_description_suffix": uniform_suffix_for_task("S_04"),
             "terrain_config": {
                 "force_pivot_joint": True,
                 "fragile_joints": False,

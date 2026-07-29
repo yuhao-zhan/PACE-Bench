@@ -1,8 +1,4 @@
-import sys
-import os
 import pygame
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../..'))
 
 from pace_bench.renderer import Renderer
 from Box2D.b2 import dynamicBody, staticBody
@@ -44,8 +40,8 @@ class E06Renderer(Renderer):
                 self.simulator.screen = pygame.Surface((600, 600))
 
         self.simulator.ppm = 25.0
-        center_x_world = 20.0
-        center_y_world = 10.0
+        center_x_world = 10.0
+        center_y_world = 5.0
         cam_x = center_x_world * self.simulator.ppm - self.simulator.screen_width / 2
         cam_y = self.simulator.screen_height / 2 - center_y_world * self.simulator.ppm
         self.set_camera_offset(cam_x, cam_y)
@@ -117,7 +113,7 @@ class E06Renderer(Renderer):
 
             # Top-left: task label
             if self._font_label:
-                label = self._font_label.render("E-06 | Reverse Gravity",
+                label = self._font_label.render("E-06 | Cantilever Endurance",
                                                 True, COLOR_ANNOTATION)
                 self.simulator.screen.blit(label, (18, 14))
 

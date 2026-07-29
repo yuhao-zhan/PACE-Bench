@@ -20,6 +20,7 @@ class Sandbox:
         self._wind_force = tuple(physics_config.get("wind_force", (0.0, 0.0)))
         self._world = world(gravity=gravity, doSleep=True)
         self._bodies = []
+        self._body_creation_positions = []
         self._joints = []
         self._terrain_bodies = {}
         self._tracked_body = None
@@ -31,6 +32,10 @@ class Sandbox:
         self._MAX_AIRBORNE_ROTATION = math.pi
         self._joint_peak_forces = {}
         self._joint_peak_torques = {}
+        self._joint_peak_force_details = {}
+        self._joint_peak_torque_details = {}
+        self._joint_ids = {}
+        self._next_joint_id = 0
         self._joint_failure_events = []
         self._joint_stress_records = []
         self._sim_step_count = 0
@@ -148,24 +153,28 @@ class Sandbox:
         self._vehicle_joints = [joint1, joint2]
     MIN_BEAM_SIZE = 0.1
     MAX_BEAM_SIZE = 10.0
+    MAX_VEHICLE_FORCE_X = 8000.0
+    MAX_VEHICLE_FORCE_Y = 20000.0
     BUILD_ZONE_X_MIN = 10.0
     BUILD_ZONE_Y_MIN = 5.0
     BUILD_ZONE_Y_MAX = 15.0
-    def add_beam(self, x, y, width, height, angle=0, density=1.0):
+    def add_beam(self, x, y, width, height, angle=0, density=1.0, friction=0.5):
         width = max(self.MIN_BEAM_SIZE, min(width, self.MAX_BEAM_SIZE))
         height = max(self.MIN_BEAM_SIZE, min(height, self.MAX_BEAM_SIZE))
+        friction = max(0.0, float(friction))
         body = self._world.CreateDynamicBody(
             position=(x, y),
             angle=angle,
             fixtures=Box2D.b2FixtureDef(
                 shape=polygonShape(box=(width/2, height/2)),
                 density=density,
-                friction=0.5,
+                friction=friction,
             )
         )
         body.linearDamping = self._default_linear_damping
         body.angularDamping = self._default_angular_damping
         self._bodies.append(body)
+        self._body_creation_positions.append((float(x), float(y)))
         return body
     def add_joint(self, body_a, body_b, anchor_point, type='rigid'):
         if body_a is None:
@@ -186,9 +195,22 @@ class Sandbox:
         else:
             raise ValueError(f"Unknown joint type: {type}")
         self._joints.append(joint)
+        self._joint_ids[joint] = self._next_joint_id
+        self._next_joint_id += 1
         return joint
     def get_structure_mass(self):
         return sum(body.mass for body in self._bodies)
+    def apply_vehicle_force(self, fx, fy):
+        fx = float(fx)
+        fy = float(fy)
+        if not math.isfinite(fx) or not math.isfinite(fy):
+            raise ValueError("Vehicle force components must be finite.")
+        fx = max(-self.MAX_VEHICLE_FORCE_X, min(fx, self.MAX_VEHICLE_FORCE_X))
+        fy = max(-self.MAX_VEHICLE_FORCE_Y, min(fy, self.MAX_VEHICLE_FORCE_Y))
+        chassis = self._terrain_bodies.get("vehicle_chassis")
+        if chassis is None:
+            raise RuntimeError("Vehicle chassis is unavailable.")
+        chassis.ApplyForceToCenter((fx, fy), True)
     def set_material_properties(self, body, restitution=0.2):
         for fixture in body.fixtures:
             fixture.restitution = float(restitution)
@@ -225,56 +247,99 @@ class Sandbox:
         joints_to_remove = []
         new_failure_events = []
         self._joint_stress_records = []
-        for joint in self._joints:
-            try:
-                if hasattr(joint, 'GetReactionForce'):
-                    force = joint.GetReactionForce(1.0 / 60.0)
-                    force_magnitude = math.sqrt(force.x**2 + force.y**2)
-                    if joint not in self._joint_peak_forces: self._joint_peak_forces[joint] = 0.0
-                    self._joint_peak_forces[joint] = max(self._joint_peak_forces[joint], force_magnitude)
-                    torque_magnitude = 0.0
-                    if hasattr(joint, 'GetReactionTorque'):
-                        torque_magnitude = abs(joint.GetReactionTorque(1.0 / 60.0))
-                        if joint not in self._joint_peak_torques: self._joint_peak_torques[joint] = 0.0
-                        self._joint_peak_torques[joint] = max(self._joint_peak_torques[joint], torque_magnitude)
-                    body_a, body_b = joint.bodyA, joint.bodyB
-                    is_anchor = (body_a.type == staticBody or body_b.type == staticBody or
-                                 body_a in self._terrain_bodies.values() or body_b in self._terrain_bodies.values())
-                    if is_anchor:
-                        max_force, max_torque = self._anchor_max_force, self._anchor_max_torque
-                    else:
-                        max_force, max_torque = self._joint_max_force, self._joint_max_torque
-                    joint_idx = self._joints.index(joint) if joint in self._joints else -1
-                    self._joint_stress_records.append({
-                        "joint_idx": joint_idx,
-                        "body_a_pos": (body_a.position.x, body_a.position.y),
-                        "body_b_pos": (body_b.position.x, body_b.position.y),
-                        "peak_force": self._joint_peak_forces[joint],
-                        "peak_torque": self._joint_peak_torques[joint],
-                        "force_limit": max_force,
-                        "torque_limit": max_torque,
-                        "is_anchor": is_anchor,
-                    })
-                    if self._joint_peak_forces[joint] > max_force or self._joint_peak_torques[joint] > max_torque:
-                        joints_to_remove.append(joint)
-                        new_failure_events.append({
-                            "step": self._sim_step_count,
-                            "body_a_pos": (body_a.position.x, body_a.position.y),
-                            "body_b_pos": (body_b.position.x, body_b.position.y),
-                            "peak_force": self._joint_peak_forces[joint],
-                            "peak_torque": self._joint_peak_torques[joint],
-                            "is_anchor": is_anchor,
-                        })
-            except Exception: continue
+        for joint_idx, joint in enumerate(self._joints):
+            force = joint.GetReactionForce(time_step)
+            force_magnitude = math.sqrt(force.x**2 + force.y**2)
+            torque_magnitude = abs(joint.GetReactionTorque(time_step))
+            body_a, body_b = joint.bodyA, joint.bodyB
+            body_a_pos = (float(body_a.position.x), float(body_a.position.y))
+            body_b_pos = (float(body_b.position.x), float(body_b.position.y))
+            anchor_a_pos = (float(joint.anchorA.x), float(joint.anchorA.y))
+            anchor_b_pos = (float(joint.anchorB.x), float(joint.anchorB.y))
+            peak_force = self._joint_peak_forces.get(joint, -math.inf)
+            if force_magnitude > peak_force:
+                self._joint_peak_forces[joint] = force_magnitude
+                self._joint_peak_force_details[joint] = {
+                    "step": self._sim_step_count,
+                    "body_a_pos": body_a_pos,
+                    "body_b_pos": body_b_pos,
+                    "anchor_a_pos": anchor_a_pos,
+                    "anchor_b_pos": anchor_b_pos,
+                }
+            peak_torque = self._joint_peak_torques.get(joint, -math.inf)
+            if torque_magnitude > peak_torque:
+                self._joint_peak_torques[joint] = torque_magnitude
+                self._joint_peak_torque_details[joint] = {
+                    "step": self._sim_step_count,
+                    "body_a_pos": body_a_pos,
+                    "body_b_pos": body_b_pos,
+                    "anchor_a_pos": anchor_a_pos,
+                    "anchor_b_pos": anchor_b_pos,
+                }
+            is_anchor = (
+                body_a.type == staticBody
+                or body_b.type == staticBody
+                or body_a in self._terrain_bodies.values()
+                or body_b in self._terrain_bodies.values()
+            )
+            if is_anchor:
+                max_force, max_torque = self._anchor_max_force, self._anchor_max_torque
+            else:
+                max_force, max_torque = self._joint_max_force, self._joint_max_torque
+            force_details = self._joint_peak_force_details[joint]
+            torque_details = self._joint_peak_torque_details[joint]
+            self._joint_stress_records.append({
+                "joint_idx": joint_idx,
+                "joint_id": self._joint_ids[joint],
+                "body_a_pos": body_a_pos,
+                "body_b_pos": body_b_pos,
+                "anchor_a_pos": anchor_a_pos,
+                "anchor_b_pos": anchor_b_pos,
+                "peak_force": self._joint_peak_forces[joint],
+                "peak_torque": self._joint_peak_torques[joint],
+                "peak_force_step": force_details["step"],
+                "peak_force_anchor_a_pos": force_details["anchor_a_pos"],
+                "peak_force_anchor_b_pos": force_details["anchor_b_pos"],
+                "peak_torque_step": torque_details["step"],
+                "peak_torque_anchor_a_pos": torque_details["anchor_a_pos"],
+                "peak_torque_anchor_b_pos": torque_details["anchor_b_pos"],
+                "force_limit": max_force,
+                "torque_limit": max_torque,
+                "is_anchor": is_anchor,
+            })
+            if (
+                self._joint_peak_forces[joint] > max_force
+                or self._joint_peak_torques[joint] > max_torque
+            ):
+                joints_to_remove.append(joint)
+                new_failure_events.append({
+                    "step": self._sim_step_count,
+                    "joint_id": self._joint_ids[joint],
+                    "body_a_pos": body_a_pos,
+                    "body_b_pos": body_b_pos,
+                    "anchor_a_pos": anchor_a_pos,
+                    "anchor_b_pos": anchor_b_pos,
+                    "peak_force": self._joint_peak_forces[joint],
+                    "peak_torque": self._joint_peak_torques[joint],
+                    "peak_force_step": force_details["step"],
+                    "peak_force_anchor_a_pos": force_details["anchor_a_pos"],
+                    "peak_force_anchor_b_pos": force_details["anchor_b_pos"],
+                    "peak_torque_step": torque_details["step"],
+                    "peak_torque_anchor_a_pos": torque_details["anchor_a_pos"],
+                    "peak_torque_anchor_b_pos": torque_details["anchor_b_pos"],
+                    "force_limit": max_force,
+                    "torque_limit": max_torque,
+                    "is_anchor": is_anchor,
+                })
         self._joint_failure_events.extend(new_failure_events)
         for joint in joints_to_remove:
-            try:
-                self._world.DestroyJoint(joint)
-                if joint in self._joints:
-                    self._joints.remove(joint)
-                    self._joint_peak_forces.pop(joint, None)
-                    self._joint_peak_torques.pop(joint, None)
-            except Exception: pass
+            self._world.DestroyJoint(joint)
+            self._joints.remove(joint)
+            self._joint_peak_forces.pop(joint, None)
+            self._joint_peak_torques.pop(joint, None)
+            self._joint_peak_force_details.pop(joint, None)
+            self._joint_peak_torque_details.pop(joint, None)
+            self._joint_ids.pop(joint, None)
     def set_tracked_body(self, body):
         self._tracked_body = body
         self._last_tracked_angle = body.angle if body else None
@@ -328,37 +393,33 @@ class Sandbox:
     def get_wind_force(self):
         return (float(self._wind_force[0]), float(self._wind_force[1]))
     def get_body_positions_and_angles(self):
-        result = []
-        for body in self._bodies:
-            try:
-                result.append((float(body.position.x), float(body.position.y), float(body.angle)))
-            except Exception:
-                pass
-        return result
+        return [
+            (float(body.position.x), float(body.position.y), float(body.angle))
+            for body in self._bodies
+        ]
+    def get_body_creation_positions(self):
+        return list(self._body_creation_positions)
     def get_anchor_positions(self):
         anchors = []
         mid_x = 10.0 + getattr(self, '_gap_width', 15.0) / 2.0
         for joint in self._joints:
-            try:
-                a_static = joint.bodyA.type == staticBody
-                b_static = joint.bodyB.type == staticBody
-                if not (a_static or b_static):
-                    continue
-                if a_static:
-                    awx = float(joint.anchorA.x)
-                    awy = float(joint.anchorA.y)
-                    dbx = float(joint.bodyB.position.x)
-                    dby = float(joint.bodyB.position.y)
-                    is_left = awx <= mid_x
-                else:
-                    awx = float(joint.anchorB.x)
-                    awy = float(joint.anchorB.y)
-                    dbx = float(joint.bodyA.position.x)
-                    dby = float(joint.bodyA.position.y)
-                    is_left = awx <= mid_x
-                anchors.append((awx, awy, dbx, dby, is_left))
-            except Exception:
-                pass
+            a_static = joint.bodyA.type == staticBody
+            b_static = joint.bodyB.type == staticBody
+            if not (a_static or b_static):
+                continue
+            if a_static:
+                awx = float(joint.anchorA.x)
+                awy = float(joint.anchorA.y)
+                dbx = float(joint.bodyB.position.x)
+                dby = float(joint.bodyB.position.y)
+                is_left = awx <= mid_x
+            else:
+                awx = float(joint.anchorB.x)
+                awy = float(joint.anchorB.y)
+                dbx = float(joint.bodyA.position.x)
+                dby = float(joint.bodyA.position.y)
+                is_left = awx <= mid_x
+            anchors.append((awx, awy, dbx, dby, is_left))
         return anchors
     def get_terrain_extents(self):
         bounds = self.get_terrain_bounds()

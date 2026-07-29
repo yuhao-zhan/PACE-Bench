@@ -43,13 +43,18 @@ def build_agent_stage_1(sandbox):
     return sandbox.get_seeker_body()
 
 def agent_action_stage_1(sandbox, agent_body, step_count):
-    if not hasattr(agent_body, 's1'):
-        tx_init, ty_init = sandbox.get_target_position()
+    if not hasattr(agent_body, "s1"):
+        tx, ty = sandbox.get_target_position()
         agent_body.s1 = {
-            'phase': 0,
-            'act_steps': 0,
-            'last_tx': tx_init, 'last_ty': ty_init,
-            'tvx': 0.0, 'tvy': 0.0,
+            "mode": "climb",
+            "activation_steps": 0,
+            "last_tx": tx,
+            "last_ty": ty,
+            "last_sample_step": step_count,
+            "tvx": 0.0,
+            "tvy": 0.0,
+            "ix": 0.0,
+            "iy": 0.0,
         }
     state = agent_body.s1
     tx, ty = sandbox.get_target_position()
@@ -57,102 +62,87 @@ def agent_action_stage_1(sandbox, agent_body, step_count):
     vx, vy = sandbox.get_seeker_velocity()
     slots = _rendezvous_slot_intervals(sandbox)
     c_lo, c_hi = sandbox.get_corridor_bounds()
-    dt = 5.0 / 60.0
-    if (tx, ty) != (state['last_tx'], state['last_ty']):
-        state['tvx'] = 0.35 * state['tvx'] + 0.65 * (tx - state['last_tx']) / max(dt, 1e-6)
-        state['tvy'] = 0.35 * state['tvy'] + 0.65 * (ty - state['last_ty']) / max(dt, 1e-6)
-        state['last_tx'], state['last_ty'] = tx, ty
-    phase1_slots = [s for s in slots if s[0] < 5500]
-    phase2_slots = [s for s in slots if s[0] >= 5500]
-    in_p1_slot = any(lo <= step_count <= hi for (lo, hi) in phase1_slots)
-    in_p2_slot = any(lo <= step_count <= hi for (lo, hi) in phase2_slots)
-    safe_margin = 1.5
-    cx_center = 0.5 * (c_lo + c_hi)
-    fx_corridor = 0.0
-    if sx < c_lo + safe_margin:
-        fx_corridor = 60.0 * (c_lo + safe_margin - sx)
-    elif sx > c_hi - safe_margin:
-        fx_corridor = -60.0 * (sx - (c_hi - safe_margin))
-    if 13.0 <= sx <= 17.0 and state['phase'] == 0:
-        state['act_steps'] += 1
-    elif state['phase'] == 0:
-        state['act_steps'] = 0
-    fx, fy = 0.0, 0.0
-    if state['phase'] == 0:
-        if state['act_steps'] >= 80:
-            state['phase'] = 1
-            state['act_steps'] = 0
-            fx, fy = 0.0, 0.0
+
+    if (tx, ty) != (state["last_tx"], state["last_ty"]):
+        elapsed = max(1, step_count - state["last_sample_step"]) / 60.0
+        raw_tvx = (tx - state["last_tx"]) / elapsed
+        raw_tvy = (ty - state["last_ty"]) / elapsed
+        if math.hypot(raw_tvx, raw_tvy) < 3.2:
+            state["tvx"] = 0.55 * state["tvx"] + 0.45 * raw_tvx
+            state["tvy"] = 0.55 * state["tvy"] + 0.45 * raw_tvy
+        state["last_tx"], state["last_ty"] = tx, ty
+        state["last_sample_step"] = step_count
+
+    phase1_slots = [slot for slot in slots if slot[0] < 5500]
+    phase2_slots = [slot for slot in slots if slot[0] >= 5500]
+    in_phase1 = any(lo <= step_count <= hi for lo, hi in phase1_slots)
+    in_phase2 = any(lo <= step_count <= hi for lo, hi in phase2_slots)
+    in_slot = in_phase1 or in_phase2
+    first_phase_done = step_count > max(hi for _, hi in phase1_slots)
+    second_phase_done = step_count > max(hi for _, hi in phase2_slots)
+
+    if state["mode"] == "climb" and sy >= 2.55:
+        state["mode"] = "activate"
+    if state["mode"] == "activate":
+        if 13.0 <= sx <= 13.35:
+            state["activation_steps"] += 1
         else:
-            gx = 14.5
-            gy = 1.35
-            dx, dy = gx - sx, gy - sy
-            if abs(dx) > 0.25:
-                fx = 35.0 * dx - 8.0 * vx
-            else:
-                fx = 6.0 * dx - 5.0 * vx
-            if abs(dy) > 0.12:
-                fy = 22.0 * dy - 5.0 * vy
-            else:
-                fy = 3.0 * dy - 3.0 * vy
-    elif state['phase'] == 1:
-        if in_p1_slot:
-            state['phase'] = 2
-            fx, fy = 0.0, 0.0
-        else:
-            if abs(sx - cx_center) > 2.5:
-                fx = 10.0 * (cx_center - sx) - 5.0 * vx
-            else:
-                fx, fy = 0.0, 0.0
-    elif state['phase'] == 2:
-        if not in_p1_slot:
-            state['phase'] = 3
-            fx, fy = 0.0, 0.0
-        else:
-            lead = 0.25
-            pred_tx = tx + state['tvx'] * lead
-            pred_ty = ty + state['tvy'] * lead
-            pred_tx = max(10.0, min(20.0, pred_tx))
-            pred_ty = max(1.5, min(3.5, pred_ty))
-            dx = pred_tx - sx
-            dy = pred_ty - sy
-            fx = 130.0 * dx + 55.0 * (state['tvx'] - vx)
-            fy = 110.0 * dy + 45.0 * (state['tvy'] - vy)
-    elif state['phase'] == 3:
-        if in_p2_slot:
-            state['phase'] = 4
-            fx, fy = 0.0, 0.0
-        else:
-            if abs(sx - cx_center) > 2.0:
-                fx = 12.0 * (cx_center - sx) - 5.0 * vx
-            else:
-                fx, fy = 0.0, 0.0
-    elif state['phase'] == 4:
-        if not in_p2_slot:
-            state['phase'] = 5
-            fx, fy = 0.0, 0.0
-        else:
-            lead = 0.20
-            pred_tx = tx + state['tvx'] * lead
-            pred_ty = ty + state['tvy'] * lead
-            pred_tx = max(10.0, min(20.0, pred_tx))
-            pred_ty = max(1.5, min(3.5, pred_ty))
-            dx = pred_tx - sx
-            dy = pred_ty - sy
-            fx = 110.0 * dx + 45.0 * (state['tvx'] - vx)
-            fy = 90.0 * dy + 35.0 * (state['tvy'] - vy)
+            state["activation_steps"] = 0
+        if state["activation_steps"] >= 95:
+            state["mode"] = "pursuit"
+
+    safe_lo = max(12.4, c_lo + 0.8)
+    safe_hi = min(17.6, c_hi - 0.8)
+    if state["mode"] == "climb":
+        goal_x, goal_y = 11.15, 2.65
+        desired_vx = 0.0
+        desired_vy = 0.9 if sy < 2.35 else 0.25
+    elif state["mode"] == "activate":
+        goal_x, goal_y = 13.18, 2.65
+        desired_vx = max(-0.7, min(0.7, 0.75 * (goal_x - sx)))
+        desired_vy = max(-0.5, min(0.5, 0.8 * (goal_y - sy)))
     else:
-        dist = math.hypot(tx - sx, ty - sy)
-        if dist > 7.0:
-            fx = 28.0 * (tx - sx) - 6.0 * vx
-            fy = 22.0 * (ty - sy) - 4.0 * vy
-        else:
-            fx, fy = 0.0, 0.0
-    fx += fx_corridor
-    mag = math.hypot(fx, fy)
-    if mag > 119.0:
-        fx, fy = fx * 119.0 / mag, fy * 119.0 / mag
-    sandbox.apply_seeker_force(fx, fy)
+        lead = 0.35 if in_slot else 0.18
+        goal_x = tx + lead * state["tvx"]
+        goal_y = ty + lead * state["tvy"]
+        goal_x = max(safe_lo, min(safe_hi, goal_x))
+        goal_y = max(2.45, min(3.05, goal_y))
+        position_gain = 0.32 if in_slot else 0.22
+        velocity_gain = 0.70 if in_slot else 0.45
+        if first_phase_done:
+            position_gain = max(position_gain, 0.26)
+            velocity_gain = max(velocity_gain, 0.55)
+        if second_phase_done:
+            goal_y = 2.55
+            position_gain = 0.15
+            velocity_gain = 0.0
+        desired_vx = position_gain * (goal_x - sx) + velocity_gain * state["tvx"]
+        desired_vy = position_gain * (goal_y - sy) + velocity_gain * state["tvy"]
+        speed_limit = 1.65 if in_slot else 1.35
+        desired_speed = math.hypot(desired_vx, desired_vy)
+        if desired_speed > speed_limit:
+            desired_vx *= speed_limit / desired_speed
+            desired_vy *= speed_limit / desired_speed
+
+    ex = goal_x - sx
+    ey = goal_y - sy
+    state["ix"] = max(-1.2, min(1.2, state["ix"] + ex / 60.0))
+    state["iy"] = max(-1.5, min(1.5, state["iy"] + ey / 60.0))
+    force_x = 34.0 * (desired_vx - vx) + 4.0 * state["ix"]
+    force_y = 34.0 * (desired_vy - vy) + 16.0 * state["iy"]
+
+    if sx < 12.2:
+        force_x += 70.0 * (12.2 - sx)
+    elif sx > 17.8:
+        force_x -= 70.0 * (sx - 17.8)
+    if sy < 2.30:
+        force_y += 55.0 * (2.30 - sy)
+
+    force_mag = math.hypot(force_x, force_y)
+    if force_mag > 88.0:
+        force_x *= 88.0 / force_mag
+        force_y *= 88.0 / force_mag
+    sandbox.apply_seeker_force(force_x, force_y)
 
 def build_agent_stage_2(sandbox):
     return sandbox.get_seeker_body()

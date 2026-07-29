@@ -1,10 +1,4 @@
-import sys
-
-import os
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../..'))
-
-from pace_bench.simulator import TIME_STEP, TARGET_FPS
+from pace_bench.simulator import TARGET_FPS
 
 from pace_bench.primitives import compute_constraint_penalty
 
@@ -30,8 +24,15 @@ class Evaluator:
         self.MAX_STEPS = int(self.MAX_TIME_SECONDS * TARGET_FPS)
     def evaluate(self, agent_body, step_count, max_steps):
         if not self.environment:
-            return True, 0.0, {"error": "Environment not available"}
-        if not self.design_constraints_checked and step_count == 0:
+            return True, 0.0, {
+                "success": False,
+                "failed": True,
+                "failure_reason": "Environment not available",
+                "error": "Environment not available",
+                "step_count": step_count,
+            }
+        self._effective_max_steps = min(int(max_steps), self.MAX_STEPS)
+        if not self.design_constraints_checked:
             violations = self._check_design_constraints()
             if violations:
                 self.design_constraints_checked = True
@@ -53,15 +54,14 @@ class Evaluator:
                     "design_constraints_checked": True,
                     "structure_broken": False,
                     "joint_count": len(self.environment._joints) if self.environment else 0,
-                    "scoop_capacity": getattr(self.environment, "SCOOP_CAPACITY", 999) if self.environment else 999,
-                    "pit_drift_force": getattr(self.environment, "PIT_DRIFT_FORCE", 0.0) if self.environment else 0.0,
+                    "observation_errors": self.environment.get_all_forensic_state().get("observation_errors", []),
                 }
             self.design_constraints_checked = True
             self.initial_joint_count = len(self.environment._joints)
         current_joint_count = len(self.environment._joints)
         if current_joint_count < self.initial_joint_count:
             self.structure_broken = True
-        effective_max_steps = min(max_steps, self.MAX_STEPS)
+        effective_max_steps = self._effective_max_steps
         done = step_count >= effective_max_steps
         if not done:
             metrics = self._collect_metrics(step_count, success=False, failed=False, failure_reason=None, agent_body=agent_body)
@@ -121,37 +121,24 @@ class Evaluator:
             "structure_broken": self.structure_broken,
             "joint_count": len(self.environment._joints),
             "max_time_seconds": self.MAX_TIME_SECONDS,
-            "max_steps": self.MAX_STEPS,
+            "max_steps": getattr(self, '_effective_max_steps', self.MAX_STEPS),
             "build_zone_x_min": self.BUILD_ZONE_X_MIN,
             "build_zone_x_max": self.BUILD_ZONE_X_MAX,
             "build_zone_y_min": self.BUILD_ZONE_Y_MIN,
             "build_zone_y_max": self.BUILD_ZONE_Y_MAX,
             "base_x": self.BASE_X,
             "base_y": self.BASE_Y,
-            "scoop_capacity": getattr(self.environment, "SCOOP_CAPACITY", 999),
-            "pit_drift_force": getattr(self.environment, "PIT_DRIFT_FORCE", 0.0),
-            "joint_max_force_limit": getattr(self.environment, "_joint_max_force", float("inf")),
-            "joint_max_torque_limit": getattr(self.environment, "_joint_max_torque", float("inf")),
             "design_constraints_checked": self.design_constraints_checked,
         }
-        try:
-            tb = self.environment.get_terrain_bounds()
-            metrics["pit_bounds"] = tb.get("pit", {})
-            metrics["hopper_bounds"] = tb.get("hopper", {})
-            metrics["hopper_valid_bounds"] = self.environment.get_hopper_valid_bounds()
-        except Exception:
-            pass
-        try:
-            fs = self.environment.get_all_forensic_state()
-            for k, v in fs.items():
-                if k not in metrics:
-                    metrics[k] = v
-        except Exception:
-            pass
-        try:
-            metrics["constraint_info"] = self.get_constraint_info()
-        except Exception:
-            pass
+        tb = self.environment.get_terrain_bounds()
+        metrics["pit_bounds"] = tb.get("pit", {})
+        metrics["hopper_bounds"] = tb.get("hopper", {})
+        metrics["hopper_valid_bounds"] = self.environment.get_hopper_valid_bounds()
+        fs = self.environment.get_all_forensic_state()
+        for key, value in fs.items():
+            if key not in metrics:
+                metrics[key] = value
+        metrics["constraint_info"] = self.get_constraint_info()
         if agent_body is not None and hasattr(agent_body, 'position'):
             metrics["agent_x"] = agent_body.position.x
             metrics["agent_y"] = agent_body.position.y

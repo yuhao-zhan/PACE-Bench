@@ -6,9 +6,9 @@ def build_agent(sandbox):
     span_left, span_right = sandbox.get_span_bounds()
     deck_cy = 2.0
     deck_h = 0.2
-    density = 0.28
+    density = 0.05
     strut_w = 0.18
-    strut_density = 0.25
+    strut_density = 0.05
     strut_h = deck_cy - ground_top
     strut_cy = ground_top + strut_h / 2
     left_span = sandbox.add_beam(
@@ -65,31 +65,60 @@ def agent_action(sandbox, agent_body, step_count):
     pass
 
 def build_agent_stage_1(sandbox):
-    L_X, R_X = 6.0, 14.0
-    deck_y = 2.5
-    density = 0.005
-    xs = [6.0, 7.5, 9.2, 11.0, 12.5, 14.0]
-    beams = []
-    for i in range(len(xs)-1):
-        w = xs[i+1] - xs[i]
-        b = sandbox.add_beam(x=(xs[i]+xs[i+1])/2, y=deck_y, width=w+0.05, height=0.1, density=density)
-        beams.append(b)
-    vs = []
-    for x in xs:
-        v = sandbox.add_beam(x=x, y=2.0, width=0.1, height=1.0, density=density)
-        vs.append(v)
-        sandbox.add_joint(v, None, (x, 1.5), type="rigid")
-    for i in range(len(xs)):
-        if i < len(beams):
-            sandbox.add_joint(vs[i], beams[i], (xs[i], deck_y), type="pivot" if i==0 else "rigid")
-        if i > 0:
-            sandbox.add_joint(vs[i], beams[i-1], (xs[i], deck_y), type="rigid")
-            dw = math.sqrt((xs[i]-xs[i-1])**2 + 0.5**2)
-            d = sandbox.add_beam(x=(xs[i]+xs[i-1])/2, y=2.25, width=dw, height=0.05,
-                                 angle=math.atan2(0.5, xs[i]-xs[i-1]), density=density)
-            sandbox.add_joint(d, vs[i-1], (xs[i-1], 2.0), type="rigid")
-            sandbox.add_joint(d, vs[i], (xs[i], deck_y), type="rigid")
-    return beams[0]
+    ground_y = sandbox.get_ground_y_top()
+    span_left, span_right = sandbox.get_span_bounds()
+    density = 0.05
+    deck_y = ground_y + 1.2
+    center_x = (span_left + span_right) / 2.0
+
+    piers = []
+    for x in (span_left, center_x, span_right):
+        pier = sandbox.add_beam(
+            x=x,
+            y=(ground_y + deck_y) / 2.0,
+            width=0.1,
+            height=deck_y - ground_y,
+            density=density,
+        )
+        piers.append(pier)
+        sandbox.add_joint(pier, None, (x, ground_y), type="pivot")
+
+    left_girder = sandbox.add_beam(
+        x=(span_left + center_x) / 2.0,
+        y=deck_y,
+        width=center_x - span_left,
+        height=0.1,
+        density=density,
+    )
+    right_girder = sandbox.add_beam(
+        x=(center_x + span_right) / 2.0,
+        y=deck_y,
+        width=span_right - center_x,
+        height=0.1,
+        density=density,
+    )
+    sandbox.add_joint(left_girder, piers[0], (span_left, deck_y), type="pivot")
+    sandbox.add_joint(left_girder, piers[1], (center_x, deck_y), type="pivot")
+    sandbox.add_joint(right_girder, piers[1], (center_x, deck_y), type="pivot")
+    sandbox.add_joint(right_girder, piers[2], (span_right, deck_y), type="pivot")
+
+    for ground_x, top_x, pier in (
+        (span_left + 0.2, center_x, piers[1]),
+        (center_x + 0.2, span_right, piers[2]),
+    ):
+        dx = top_x - ground_x
+        dy = deck_y - ground_y
+        brace = sandbox.add_beam(
+            x=(ground_x + top_x) / 2.0,
+            y=(ground_y + deck_y) / 2.0,
+            width=math.sqrt(dx * dx + dy * dy),
+            height=0.1,
+            angle=-math.atan2(dy, dx),
+            density=density,
+        )
+        sandbox.add_joint(brace, None, (ground_x, ground_y), type="pivot")
+        sandbox.add_joint(brace, pier, (top_x, deck_y), type="pivot")
+    return left_girder
 
 def agent_action_stage_1(sandbox, agent_body, step_count): pass
 
@@ -107,7 +136,7 @@ def build_agent_stage_2(sandbox):
         x1, y1 = nodes[i]; x2, y2 = nodes[i+1]
         d = math.sqrt((x2-x1)**2 + (y2-y1)**2)
         b = sandbox.add_beam(x=(x1+x2)/2, y=(y1+y2)/2, width=d+0.05, height=0.1,
-                             angle=math.atan2(y2-y1, x2-x1), density=density)
+                             angle=-math.atan2(y2-y1, x2-x1), density=density)
         arch.append(b)
         if i == 0: sandbox.add_joint(b, None, nodes[i], type="pivot")
         elif i == n-1:
@@ -143,7 +172,7 @@ def build_agent_stage_3(sandbox):
         sandbox.add_joint(v, None, (x, 1.5), type="pivot")
         lx = x - 0.5
         lb = sandbox.add_beam(x=x-0.25, y=1.75, width=math.sqrt(0.5**2+0.5**2), height=0.05,
-                              angle=math.atan2(0.5, -0.5), density=density)
+                              angle=-math.atan2(0.5, -0.5), density=density)
         sandbox.add_joint(lb, None, (lx, 1.5), type="pivot")
         sandbox.add_joint(lb, v, (x, 2.0), type="pivot")
     for i in range(n):
@@ -155,7 +184,7 @@ def build_agent_stage_3(sandbox):
         sandbox.add_joint(b, vs[i], (x1, bot_y), type="pivot")
         sandbox.add_joint(b, vs[i+1], (x2, bot_y), type="pivot")
         d = sandbox.add_beam(x=(x1+x2)/2, y=(top_y+bot_y)/2, width=math.sqrt(w**2+(top_y-bot_y)**2),
-                             height=0.05, angle=math.atan2(top_y-bot_y, w), density=density)
+                             height=0.05, angle=-math.atan2(top_y-bot_y, w), density=density)
         sandbox.add_joint(d, vs[i], (x1, bot_y), type="pivot")
         sandbox.add_joint(d, vs[i+1], (x2, top_y), type="pivot")
     sandbox.add_beam(x=6.0, y=top_y, width=0.1, height=0.1, density=density)
@@ -180,14 +209,14 @@ def build_agent_stage_4(sandbox):
         sandbox.add_joint(pylon, None, (px, 1.5), type="pivot")
         for sy in [4.0, 6.0]:
             stay = sandbox.add_beam(x=px-1.0, y=(1.5+sy)/2, width=math.sqrt(2.0**2+(sy-1.5)**2),
-                                    height=0.02, angle=math.atan2(sy-1.5, -2.0), density=density)
+                                    height=0.02, angle=-math.atan2(sy-1.5, -2.0), density=density)
             sandbox.add_joint(stay, None, (px-2.0, 1.5), type="pivot")
             sandbox.add_joint(stay, pylon, (px, sy), type="pivot")
         for i in range(n):
             dx = (L_X+(i+0.5)*w) - px
             dist = math.sqrt(dx**2 + (7.0-deck_y)**2)
             s = sandbox.add_beam(x=px+dx/2, y=(7.0+deck_y)/2, width=dist, height=0.02,
-                                 angle=math.atan2(deck_y-7.0, dx), density=density)
+                                 angle=-math.atan2(deck_y-7.0, dx), density=density)
             sandbox.add_joint(s, pylon, (px, 7.0), type="pivot")
             sandbox.add_joint(s, deck[i], (L_X+(i+0.5)*w, deck_y), type="pivot")
     sandbox.add_beam(x=6.0, y=deck_y, width=0.1, height=0.1, density=density)

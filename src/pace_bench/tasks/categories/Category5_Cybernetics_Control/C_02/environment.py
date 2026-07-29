@@ -97,8 +97,12 @@ class Sandbox:
         physics_config = physics_config or {}
         self._terrain_config = dict(terrain_config)
         self._physics_config = dict(physics_config)
-        if "random_seed" in physics_config:
-            random.seed(physics_config["random_seed"])
+        simulation_seed = int(
+            physics_config.get(
+                "random_seed", terrain_config.get("target_rng_seed", 123)
+            )
+        )
+        self._rng = random.Random(simulation_seed)
         gravity = tuple(physics_config.get("gravity", (0, -10)))
         self._default_linear_damping = float(
             physics_config.get("linear_damping", DEFAULT_LINEAR_DAMPING)
@@ -132,7 +136,7 @@ class Sandbox:
         self._spawn_x = float(terrain_config.get("spawn_x", SPAWN_X))
         self._spawn_y = float(terrain_config.get("spawn_y", SPAWN_Y))
         self._thrust_delay_steps = int(physics_config.get("thrust_delay_steps", THRUST_DELAY_STEPS))
-        qlen = max(1, self._thrust_delay_steps) + 1
+        qlen = max(1, self._thrust_delay_steps)
         self._thrust_queue = deque([(0.0, 0.0)] * qlen, maxlen=qlen)
         self._step_count = 0
         self._wind_amplitude = float(physics_config.get("wind_amplitude", WIND_AMPLITUDE))
@@ -162,6 +166,7 @@ class Sandbox:
         self._corridor_violation_kind = None
         self._corridor_violation_x = None
         self._corridor_violation_y = None
+        self._touchdown_snapshot = None
         def _barrier_param(key: str, default: float) -> float:
             if key in physics_config and physics_config[key] is not None:
                 return float(physics_config[key])
@@ -182,6 +187,20 @@ class Sandbox:
         self._max_episode_steps = int(
             physics_config.get("max_episode_steps", MAX_EPISODE_STEPS)
         )
+        self._last_applied_thrust = 0.0
+        self._last_applied_torque = 0.0
+        self._peak_abs_applied_thrust = 0.0
+        self._peak_abs_applied_torque = 0.0
+        self._thrust_saturation_steps = 0
+        self._torque_saturation_steps = 0
+        self._first_thrust_saturation_step = None
+        self._first_torque_saturation_step = None
+        self._applied_main_impulse = 0.0
+        self._motion_peaks = {
+            "abs_vx": {"value": 0.0, "step": 0},
+            "abs_vy": {"value": 0.0, "step": 0},
+            "abs_angular_velocity": {"value": 0.0, "step": 0},
+        }
     def _create_ground(self, terrain_config: dict):
         ground_len = float(terrain_config.get("ground_length", GROUND_LENGTH))
         ground_h = float(terrain_config.get("ground_slab_height", GROUND_SLAB_HEIGHT))
@@ -238,29 +257,72 @@ class Sandbox:
             return 0.0
         return lander.angularVelocity
     def apply_thrust(self, main_thrust, steering_torque):
-        self._main_thrust = max(-self._max_thrust, min(self._max_thrust, float(main_thrust)))
+        main_thrust = float(main_thrust)
+        steering_torque = float(steering_torque)
+        if not math.isfinite(main_thrust) or not math.isfinite(steering_torque):
+            raise ValueError("Thrust and steering commands must be finite")
+        self._main_thrust = max(0.0, min(self._max_thrust, main_thrust))
         self._steering_torque = max(
-            -self._max_torque, min(self._max_torque, float(steering_torque))
+            -self._max_torque, min(self._max_torque, steering_torque)
         )
     def get_remaining_fuel(self):
         return max(0.0, self._remaining_fuel)
     def get_thrust_delay_steps(self):
         return self._thrust_delay_steps
+    def get_actuation_diagnostics(self):
+        return {
+            "last_applied_thrust": self._last_applied_thrust,
+            "last_applied_torque": self._last_applied_torque,
+            "peak_abs_applied_thrust": self._peak_abs_applied_thrust,
+            "peak_abs_applied_torque": self._peak_abs_applied_torque,
+            "thrust_saturation_steps": self._thrust_saturation_steps,
+            "torque_saturation_steps": self._torque_saturation_steps,
+            "first_thrust_saturation_step": self._first_thrust_saturation_step,
+            "first_torque_saturation_step": self._first_torque_saturation_step,
+            "applied_main_impulse": self._applied_main_impulse,
+        }
+    def get_motion_diagnostics(self):
+        return {
+            key: dict(value) for key, value in self._motion_peaks.items()
+        }
+    def get_touchdown_snapshot(self):
+        return (
+            dict(self._touchdown_snapshot)
+            if self._touchdown_snapshot is not None
+            else None
+        )
     def step(self, time_step):
+        if abs(float(time_step) - self._time_step) > 1e-12:
+            raise ValueError(
+                f"C-02 requires dt={self._time_step}, received {time_step}"
+            )
         lander = self._terrain_bodies.get("lander")
+        pre_step_state = None
         if lander is not None:
+            pre_step_state = {
+                "x": float(lander.position.x),
+                "y": float(lander.position.y),
+                "vx": float(lander.linearVelocity.x),
+                "vy": float(lander.linearVelocity.y),
+                "angle": float(lander.angle),
+                "omega": float(lander.angularVelocity),
+            }
             t = self._sim_time
             wind_fx = self._wind_amplitude * (
                 math.sin(2.0 * math.pi * t / self._wind_period1) * 0.6
                 + math.sin(2.0 * math.pi * t / self._wind_period2) * 0.4
             )
-            if random.random() < self._gust_prob:
-                wind_fx += (random.random() * 2 - 1) * self._gust_amplitude
+            if self._rng.random() < self._gust_prob:
+                wind_fx += (self._rng.random() * 2 - 1) * self._gust_amplitude
             lander.ApplyForceToCenter((wind_fx, 0.0), True)
-            thrust_to_use = self._thrust_queue[0][0]
-            torque_to_use = self._thrust_queue[0][1]
-            self._thrust_queue.popleft()
-            self._thrust_queue.append((self._main_thrust, self._steering_torque))
+            if self._thrust_delay_steps == 0:
+                thrust_to_use = self._main_thrust
+                torque_to_use = self._steering_torque
+            else:
+                thrust_to_use, torque_to_use = self._thrust_queue.popleft()
+                self._thrust_queue.append(
+                    (self._main_thrust, self._steering_torque)
+                )
             self._main_thrust = 0.0
             self._steering_torque = 0.0
             impulse_cost = abs(thrust_to_use) * time_step
@@ -271,16 +333,134 @@ class Sandbox:
                 thrust_to_use *= scale
                 impulse_cost = self._remaining_fuel
             self._remaining_fuel -= impulse_cost
+            self._last_applied_thrust = float(thrust_to_use)
+            self._last_applied_torque = float(torque_to_use)
+            self._applied_main_impulse += float(impulse_cost)
+            abs_thrust = abs(float(thrust_to_use))
+            abs_torque = abs(float(torque_to_use))
+            self._peak_abs_applied_thrust = max(
+                self._peak_abs_applied_thrust, abs_thrust
+            )
+            self._peak_abs_applied_torque = max(
+                self._peak_abs_applied_torque, abs_torque
+            )
+            if abs_thrust >= self._max_thrust - 1e-9:
+                self._thrust_saturation_steps += 1
+                if self._first_thrust_saturation_step is None:
+                    self._first_thrust_saturation_step = self._step_count
+            if abs_torque >= self._max_torque - 1e-9:
+                self._torque_saturation_steps += 1
+                if self._first_torque_saturation_step is None:
+                    self._first_torque_saturation_step = self._step_count
+            a = float(lander.angle)
+            fx = -thrust_to_use * math.sin(a)
+            fy = thrust_to_use * math.cos(a)
+            mass = float(lander.mass)
+            inertia = float(lander.inertia)
+            projected_vx = (
+                pre_step_state["vx"]
+                + (wind_fx + fx) / mass * time_step
+            ) / (1.0 + time_step * float(lander.linearDamping))
+            projected_vy = (
+                pre_step_state["vy"]
+                + (float(self._world.gravity.y) + fy / mass) * time_step
+            ) / (1.0 + time_step * float(lander.linearDamping))
+            projected_omega = (
+                pre_step_state["omega"] + torque_to_use / inertia * time_step
+            ) / (1.0 + time_step * float(lander.angularDamping))
+            pre_step_state.update(
+                {
+                    "projected_x": pre_step_state["x"] + projected_vx * time_step,
+                    "projected_y": pre_step_state["y"] + projected_vy * time_step,
+                    "projected_vy": projected_vy,
+                    "projected_angle": pre_step_state["angle"]
+                    + projected_omega * time_step,
+                }
+            )
             if thrust_to_use != 0.0:
-                a = lander.angle
-                fx = -thrust_to_use * math.sin(a)
-                fy = thrust_to_use * math.cos(a)
                 lander.ApplyForceToCenter((fx, fy), True)
             if torque_to_use != 0.0:
                 lander.ApplyTorque(torque_to_use, True)
         self._world.Step(time_step, 10, 10)
         self._sim_time += time_step
         self._step_count += 1
+        if lander is not None:
+            observed_motion = {
+                "abs_vx": abs(float(lander.linearVelocity.x)),
+                "abs_vy": abs(float(lander.linearVelocity.y)),
+                "abs_angular_velocity": abs(float(lander.angularVelocity)),
+            }
+            for key, value in observed_motion.items():
+                if math.isfinite(value) and value > self._motion_peaks[key]["value"]:
+                    self._motion_peaks[key] = {
+                        "value": value,
+                        "step": self._step_count,
+                    }
+            if (
+                self._touchdown_snapshot is None
+                and self.get_lander_bottom_y()
+                <= self._ground_y_top + self._land_tolerance
+                and pre_step_state is not None
+            ):
+                hw, hh = self._lander_half_width, self._lander_half_height
+                corners = ((-hw, -hh), (hw, -hh), (hw, hh), (-hw, hh))
+
+                def _transformed(state_x, state_y, state_angle):
+                    return [
+                        (
+                            state_x
+                            + math.cos(state_angle) * bx
+                            - math.sin(state_angle) * by,
+                            state_y
+                            + math.sin(state_angle) * bx
+                            + math.cos(state_angle) * by,
+                        )
+                        for bx, by in corners
+                    ]
+
+                before = _transformed(
+                    pre_step_state["x"],
+                    pre_step_state["y"],
+                    pre_step_state["angle"],
+                )
+                projected = _transformed(
+                    pre_step_state["projected_x"],
+                    pre_step_state["projected_y"],
+                    pre_step_state["projected_angle"],
+                )
+                before_bottom = min(point[1] for point in before)
+                projected_bottom = min(point[1] for point in projected)
+                threshold = self._ground_y_top + self._land_tolerance
+                denominator = before_bottom - projected_bottom
+                if denominator > 1e-12:
+                    fraction = max(
+                        0.0,
+                        min(1.0, (before_bottom - threshold) / denominator),
+                    )
+                else:
+                    fraction = 1.0
+                x = pre_step_state["x"] + fraction * (
+                    pre_step_state["projected_x"] - pre_step_state["x"]
+                )
+                y = pre_step_state["y"] + fraction * (
+                    pre_step_state["projected_y"] - pre_step_state["y"]
+                )
+                angle = pre_step_state["angle"] + fraction * (
+                    pre_step_state["projected_angle"] - pre_step_state["angle"]
+                )
+                vy = pre_step_state["vy"] + fraction * (
+                    pre_step_state["projected_vy"] - pre_step_state["vy"]
+                )
+                transformed = _transformed(x, y, angle)
+                bottom_x = [transformed[0][0], transformed[1][0]]
+                self._touchdown_snapshot = {
+                    "step": self._step_count,
+                    "x": x,
+                    "vy": vy,
+                    "angle": angle,
+                    "x_lo": min(bottom_x),
+                    "x_hi": max(bottom_x),
+                }
         if self._gravity_mutation:
             at_step = self._gravity_mutation.get("at_step")
             if at_step is not None and self._step_count >= int(at_step):
@@ -416,14 +596,8 @@ class Sandbox:
         x, y = lander.position.x, lander.position.y
         a = lander.angle
         hw, hh = self._lander_half_width, self._lander_half_height
-        corners = ((-hw, -hh), (hw, -hh), (hw, hh), (-hw, hh))
-        wx_list, wy_list = [], []
-        for bx, by in corners:
+        wx_list = []
+        for bx, by in ((-hw, -hh), (hw, -hh)):
             wx = x + math.cos(a) * bx - math.sin(a) * by
-            wy = y + math.sin(a) * bx + math.cos(a) * by
             wx_list.append(wx)
-            wy_list.append(wy)
-        min_y = min(wy_list)
-        eps = 1e-4
-        xs_at_bottom = [wx_list[i] for i in range(4) if wy_list[i] <= min_y + eps]
-        return (min(xs_at_bottom), max(xs_at_bottom))
+        return (min(wx_list), max(wx_list))

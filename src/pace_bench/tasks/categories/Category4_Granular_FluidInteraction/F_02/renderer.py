@@ -1,11 +1,7 @@
-import sys
-import os
 import pygame
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../..'))
-
 from pace_bench.renderer import Renderer
-from Box2D.b2 import dynamicBody, staticBody
+from Box2D.b2 import staticBody
 
 # ── Academic palette ──────────────────────────────────────────────
 COLOR_BG          = (254, 252, 248)
@@ -88,22 +84,6 @@ class F02Renderer(Renderer):
                     outline_width=1,
                 )
 
-        # ── EMP zone ───────────────────────────────────────────────
-        if hasattr(sandbox, "_emp_zone") and sandbox._emp_zone is not None:
-            ex1, ex2 = sandbox._emp_zone
-            self.draw_rect(ex1, 0, ex2 - ex1, 8, COLOR_BOUNDARY)
-
-        # ── Corrosive line ─────────────────────────────────────────
-        if hasattr(sandbox, "_corrosive_y") and sandbox._corrosive_y < 1000:
-            cy = sandbox._corrosive_y
-            self.draw_line(0, cy, 35, cy, COLOR_TARGET, 4)
-
-        # ── Whirlpool zone ─────────────────────────────────────────
-        if hasattr(sandbox, "_whirlpool") and sandbox._whirlpool is not None:
-            wx = float(sandbox._whirlpool.get("x", 17.0))
-            ww = float(sandbox._whirlpool.get("width", 2.0))
-            self.draw_rect(wx - ww / 2.0, 0, ww, 2, COLOR_BOUNDARY)
-
         # ── TARGET_X marker ────────────────────────────────────────
         if hasattr(sandbox, "TARGET_X"):
             tx = sandbox.TARGET_X
@@ -127,7 +107,7 @@ class F02Renderer(Renderer):
 
             # Top-left: task label
             if self._font_label:
-                label = self._font_label.render("F-02 | Sediment Transport",
+                label = self._font_label.render("F-02 | Amphibian Crossing",
                                                 True, COLOR_ANNOTATION)
                 self.simulator.screen.blit(label, (18, 14))
 

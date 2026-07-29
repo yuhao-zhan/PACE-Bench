@@ -1,11 +1,5 @@
 import math
 
-import sys
-
-import os
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../..'))
-
 from pace_bench.simulator import TIME_STEP
 
 from pace_bench.primitives import compute_constraint_penalty
@@ -33,9 +27,11 @@ class Evaluator:
         failed = False
         failure_reason = None
         min_body_y = 100.0
+        max_body_y = None
         if self.environment._bodies:
             for body in self.environment._bodies:
                 min_body_y = min(min_body_y, body.position.y)
+                max_body_y = body.position.y if max_body_y is None else max(max_body_y, body.position.y)
         max_joint_force_limit = float(self.terrain_bounds.get("max_joint_force", 1e12))
         max_joint_torque_limit = float(self.terrain_bounds.get("max_joint_torque", 1e12))
         if max_joint_force_limit < 1e11 or max_joint_torque_limit < 1e11:
@@ -111,6 +107,7 @@ class Evaluator:
             'joint_breach_anchor': first_breach_anchor,
             'joints_broken_count': joints_broken_count,
             'joint_peak_records': joint_peak_records,
+            'joint_peak_records_v2': env.get_joint_peak_records_v2() if hasattr(env, 'get_joint_peak_records_v2') else [],
             'numerical_instability_count': numerical_instability_count,
             'core_dodge_vs_collapse': core_dodge_vs_collapse,
             'joint_failure_events': env.get_joint_breach_events() if env and hasattr(env, 'get_joint_breach_events') else [],
@@ -118,6 +115,8 @@ class Evaluator:
             'max_body_velocity': env.get_max_body_velocity() if env and hasattr(env, 'get_max_body_velocity') else 0.0,
             'core_force_step': env.get_core_force_step() if env and hasattr(env, 'get_core_force_step') else None,
             'collapse_threshold': 0.3,
+            'max_body_y': max_body_y,
+            'joint_observation_errors': env.get_joint_observation_errors() if hasattr(env, 'get_joint_observation_errors') else {},
         }
         return done, score, metrics
     def compute_score_with_penalty(self, score: float, metrics: dict) -> float:

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pace_bench.tasks.stage_prompt import uniform_suffix_for_task
+
 import math
 
 from typing import Any, Dict, List
@@ -24,143 +26,89 @@ def update_task_description_for_visible_changes(
         base_physics_config = {}
     target_physics_config = target_physics_config or {}
     base_physics_config = base_physics_config or {}
-    default_y_max = 25.0
-    target_y_max = target_terrain_config.get("build_zone_y_max", default_y_max)
-    base_y_max = base_terrain_config.get("build_zone_y_max", default_y_max)
+
+    def replace_once(text: str, old: str, new: str, label: str) -> str:
+        matches = text.count(old)
+        if matches != 1:
+            raise ValueError(f"K_02 {label} update expected 1 replacement, got {matches}")
+        return text.replace(old, new, 1)
+
+    target_y_max = float(target_terrain_config.get("build_zone_y_max", 25.0))
+    base_y_max = float(base_terrain_config.get("build_zone_y_max", 25.0))
     if target_y_max != base_y_max:
-        build_zone_pattern = r"(y=\[0, )(\d+\.?\d*)(\])"
-        if re.search(build_zone_pattern, description):
-            description = re.sub(
-                build_zone_pattern,
-                f"\\g<1>{target_y_max:.1f}\\g<3> (originally y=[0, {base_y_max:.1f}] in the source environment)",
-                description
-            )
-    default_min_mass = 0.0
-    target_min_mass = target_terrain_config.get("min_structure_mass", default_min_mass)
-    base_min_mass = base_terrain_config.get("min_structure_mass", default_min_mass)
-    if target_min_mass != base_min_mass:
-        min_mass_pattern = r"(Total structure mass must be at least )(\d+\.?\d*)( kg and less than )(\d+\.?\d*)( kg\.)"
-        if re.search(min_mass_pattern, description):
-            description = re.sub(
-                min_mass_pattern,
-                f"\\g<1>{target_min_mass:.1f} kg (originally {base_min_mass:.1f} kg in the source environment) and less than \\g<4>\\g<5>",
-                description
-            )
-    default_max_mass = 50.0
-    target_max_mass = target_terrain_config.get("max_structure_mass", default_max_mass)
-    base_max_mass = base_terrain_config.get("max_structure_mass", default_max_mass)
-    if target_max_mass != base_max_mass:
-        max_mass_pattern = r"( and less than )(\d+\.?\d*)( kg\.)"
-        if re.search(max_mass_pattern, description):
-            description = re.sub(
-                max_mass_pattern,
-                f"\\g<1>{target_max_mass:.0f} kg (originally {base_max_mass:.0f} kg in the source environment).",
-                description
-            )
+        old = f"- **Build Zone**: x=[0, 5], y=[0, {base_y_max:g}]. All structure components must be placed within this zone."
+        new = f"- **Build Zone**: x=[0, 5], y=[0, {target_y_max:g}] (originally y=[0, {base_y_max:g}]). All structure components must be placed within this zone."
+        description = replace_once(description, old, new, "build-zone")
+
+    target_min_mass = float(target_terrain_config.get("min_structure_mass", 0.0))
+    base_min_mass = float(base_terrain_config.get("min_structure_mass", 0.0))
+    target_max_mass = float(target_terrain_config.get("max_structure_mass", 50.0))
+    base_max_mass = float(base_terrain_config.get("max_structure_mass", 50.0))
+    if target_min_mass != base_min_mass or target_max_mass != base_max_mass:
+        old = f"- **Mass Budget**: Total structure mass must be at least {base_min_mass:g} kg and less than {base_max_mass:g} kg."
+        min_text = f"{target_min_mass:g} kg"
+        max_text = f"{target_max_mass:g} kg"
+        if target_min_mass != base_min_mass:
+            min_text += f" (originally {base_min_mass:g} kg)"
+        if target_max_mass != base_max_mass:
+            max_text += f" (originally {base_max_mass:g} kg)"
+        new = f"- **Mass Budget**: Total structure mass must be at least {min_text} and less than {max_text}."
+        description = replace_once(description, old, new, "mass-budget")
+
     inf_val = float("inf")
-    default_joint_force = inf_val
-    default_joint_torque = inf_val
-    target_joint_force = target_physics_config.get("max_joint_force", default_joint_force)
-    target_joint_torque = target_physics_config.get("max_joint_torque", default_joint_torque)
-    base_joint_force = base_physics_config.get("max_joint_force", default_joint_force)
-    base_joint_torque = base_physics_config.get("max_joint_torque", default_joint_torque)
-    force_changed = target_joint_force != base_joint_force and target_joint_force != inf_val
-    torque_changed = target_joint_torque != base_joint_torque and target_joint_torque != inf_val
+    target_joint_force = float(target_physics_config.get("max_joint_force", inf_val))
+    target_joint_torque = float(target_physics_config.get("max_joint_torque", inf_val))
+    force_changed = math.isfinite(target_joint_force)
+    torque_changed = math.isfinite(target_joint_torque)
     if force_changed or torque_changed:
-        joint_strength_pattern = r"(- \*\*Joint strength\*\*: )(Maximum joint reaction force and maximum joint torque are unlimited in the default environment \(joints do not break\)\.)"
-        base_force_str = "unlimited" if base_joint_force == inf_val else f"{base_joint_force:.1f} N"
-        base_torque_str = "unlimited" if base_joint_torque == inf_val else f"{base_joint_torque:.1f} N·m"
-        if force_changed and torque_changed:
-            new_str = (
-                f"Maximum joint reaction force is limited to {target_joint_force:.1f} N and maximum joint torque "
-                f"to {target_joint_torque:.1f} N·m (joints break if exceeded; originally unlimited in the default environment)."
-            )
-        elif force_changed:
-            new_str = (
-                f"Maximum joint reaction force is limited to {target_joint_force:.1f} N (joints break if exceeded; "
-                f"maximum joint torque {base_torque_str}; originally unlimited in the default environment)."
-            )
-        else:
-            new_str = (
-                f"Maximum joint torque is limited to {target_joint_torque:.1f} N·m (joints break if exceeded; "
-                f"maximum joint reaction force {base_force_str}; originally unlimited in the default environment)."
-            )
-        if re.search(joint_strength_pattern, description):
-            description = re.sub(joint_strength_pattern, r"\g<1>" + new_str, description)
-    target_sz = target_terrain_config.get("suction_zones") if target_terrain_config else None
-    base_sz = base_terrain_config.get("suction_zones") if base_terrain_config else None
-    sz_changed = target_sz != base_sz
-    if sz_changed and target_sz is not None:
-        bands_str = ", ".join(f"[{z[0]:.0f}, {z[1]:.0f}]" for z in target_sz)
-        if base_sz is None:
-            orig_sz_str = "everywhere (no gaps in the default environment)"
-        else:
-            orig_bands_str = ", ".join(f"[{z[0]:.0f}, {z[1]:.0f}]" for z in base_sz)
-            orig_sz_str = f"bands: {orig_bands_str} in the source environment"
-        description += (
-            f"\n- **Wall adhesion bands**: Adhesive pads may only engage in these altitude ranges (m): {bands_str} "
-            f"({orig_sz_str}). Outside these bands, wall adhesion may not behave as in the default environment.\n"
-        )
+        old = "- **Joint strength**: Maximum joint reaction force and maximum joint torque are unlimited in the default environment (joints do not break)."
+        parts = []
+        if force_changed:
+            parts.append(f"maximum joint reaction force {target_joint_force:g} N")
+        if torque_changed:
+            parts.append(f"maximum joint torque {target_joint_torque:g} N·m")
+        new = f"- **Joint strength**: {'; '.join(parts)} (originally unlimited; joints break if a stated limit is exceeded)."
+        description = replace_once(description, old, new, "joint-strength")
     return description
 
 def update_success_criteria_for_visible_changes(base_success_criteria: str, target_terrain_config: Dict[str, Any], base_terrain_config: Dict[str, Any]) -> str:
     criteria = base_success_criteria
-    default_y_max = 25.0
-    target_y_max = target_terrain_config.get("build_zone_y_max", default_y_max)
-    base_y_max = base_terrain_config.get("build_zone_y_max", default_y_max)
+    target_terrain_config = target_terrain_config or {}
+    base_terrain_config = base_terrain_config or {}
+
+    def replace_once(text: str, old: str, new: str, label: str) -> str:
+        matches = text.count(old)
+        if matches != 1:
+            raise ValueError(f"K_02 criteria {label} update expected 1 replacement, got {matches}")
+        return text.replace(old, new, 1)
+
+    target_y_max = float(target_terrain_config.get("build_zone_y_max", 25.0))
+    base_y_max = float(base_terrain_config.get("build_zone_y_max", 25.0))
     if target_y_max != base_y_max:
-        build_zone_pattern = r"(y=\[0, )(\d+\.?\d*)(\])"
-        if re.search(build_zone_pattern, criteria):
-            criteria = re.sub(
-                build_zone_pattern,
-                f"\\g<1>{target_y_max:.1f}\\g<3> (originally y=[0, {base_y_max:.1f}] in the source environment)",
-                criteria
-            )
-    default_min_mass = 0.0
-    target_min_mass = target_terrain_config.get("min_structure_mass", default_min_mass)
-    base_min_mass = base_terrain_config.get("min_structure_mass", default_min_mass)
-    if target_min_mass != base_min_mass:
-        min_mass_criteria_pattern = r"(Minimum )(\d+\.?\d*)( kg, maximum)"
-        if re.search(min_mass_criteria_pattern, criteria):
-            criteria = re.sub(
-                min_mass_criteria_pattern,
-                f"\\g<1>{target_min_mass:.1f} kg (originally {base_min_mass:.1f} kg in the source environment), maximum",
-                criteria
-            )
-    default_max_mass = 50.0
-    target_max_mass = target_terrain_config.get("max_structure_mass", default_max_mass)
-    base_max_mass = base_terrain_config.get("max_structure_mass", default_max_mass)
-    if target_max_mass != base_max_mass:
-        max_mass_criteria_pattern = r"(maximum < )(\d+\.?\d*)( kg\.)"
-        if re.search(max_mass_criteria_pattern, criteria):
-            criteria = re.sub(
-                max_mass_criteria_pattern,
-                f"\\g<1>{target_max_mass:.0f} kg (originally {base_max_mass:.0f} kg in the source environment).",
-                criteria
-            )
+        old = f"- **Build zone**: x=[0, 5], y=[0, {base_y_max:g}]."
+        new = f"- **Build zone**: x=[0, 5], y=[0, {target_y_max:g}] (originally y=[0, {base_y_max:g}])."
+        criteria = replace_once(criteria, old, new, "build-zone")
+
+    target_min = float(target_terrain_config.get("min_structure_mass", 0.0))
+    base_min = float(base_terrain_config.get("min_structure_mass", 0.0))
+    target_max = float(target_terrain_config.get("max_structure_mass", 50.0))
+    base_max = float(base_terrain_config.get("max_structure_mass", 50.0))
+    if target_min != base_min or target_max != base_max:
+        old = f"- **Mass Budget**: Minimum {base_min:g} kg, maximum < {base_max:g} kg."
+        min_text = f"{target_min:g} kg" + (f" (originally {base_min:g} kg)" if target_min != base_min else "")
+        max_text = f"{target_max:g} kg" + (f" (originally {base_max:g} kg)" if target_max != base_max else "")
+        new = f"- **Mass Budget**: Minimum {min_text}, maximum < {max_text}."
+        criteria = replace_once(criteria, old, new, "mass-budget")
     return criteria
 
 def get_k02_curriculum_stages() -> List[Dict[str, Any]]:
-    task_description_suffix = """
-
-Sensors indicate that this region exhibits non-standard physical properties.
-While the following variables MIGHT have changed from the initial environment, NOT ALL of them will necessarily be mutated in any given task. You must use active interaction and environmental feedback to deduce which specific conditions apply:
- - **Build Zone (Vertical Extent)**: May differ from the default.
- - **Structural Integrity Thresholds (Joint Force/Torque)**: May differ from the default.
- - **Gravitational Acceleration**: May differ from the default.
- - **Surface Adhesion Gaps (Suction Zones)**: May differ from the default.
- - **Mass Budget Constraints (Min/Max Mass)**: May differ from the default.
- - **Atmospheric Turbulence (Wind/Vortex)**: May differ from the default.
- - **Rotational Damping**: May differ from the default.
-
-Discovery via feedback: Your objective is to identify the underlying physical rules of this specific environment through trial and reasoning. Initial standard solutions may fail; analyze the failure mode to infer the hidden constraints and adapt your design.
-"""
+    task_description_suffix = uniform_suffix_for_task("K_02")
     return [
         {
             "stage_id": "Stage-1",
             "title": "Fragile Structural Integrity",
             "mutation_description": "Near-zero joint strength thresholds — only molecular-scale structures survive. Joints shatter under even minimal load.",
-            "task_description_suffix": task_description_suffix,
+            "task_description_suffix": uniform_suffix_for_task("K_02"),
             "terrain_config": {
                 "build_zone_y_max": 5.0,
             },
@@ -173,7 +121,7 @@ Discovery via feedback: Your objective is to identify the underlying physical ru
             "stage_id": "Stage-2",
             "title": "Gravitational Flux & Void Zones",
             "mutation_description": "Stronger gravity that increases over time, combined with a 3m suction gap. Forces high-power, long-reach climbing.",
-            "task_description_suffix": task_description_suffix,
+            "task_description_suffix": uniform_suffix_for_task("K_02"),
             "terrain_config": {
                 "build_zone_y_max": 8.0,
                 "suction_zones": [(0, 16), (19, 35)],
@@ -185,28 +133,29 @@ Discovery via feedback: Your objective is to identify the underlying physical ru
         },
         {
             "stage_id": "Stage-3",
-            "title": "Resonant Interference Phase",
-            "mutation_description": "Extreme gravity, ultra-narrow mass budget, fragile joints, and relentless lateral wind. The climber faces a web of conflicting constraints: dense builds break joints, light builds violate mass thresholds, and gravity intensifies rapidly.",
-            "task_description_suffix": task_description_suffix,
+            "title": "Discontinuous Adhesion Corridor",
+            "mutation_description": "Two separated wall-adhesion gaps combine with a narrow mass interval, limited joints, evolving gravity, lateral wind, and rotational damping. A compact alternating crawler loses both anchors in each gap; a viable climber must span a gap while balancing the full structure through the remaining adhesion point.",
+            "task_description_suffix": uniform_suffix_for_task("K_02"),
             "terrain_config": {
                 "build_zone_y_max": 5.0,
                 "min_structure_mass": 41.0,
-                "max_structure_mass": 44.0,
-                "wind_force": -18.0,
+                "max_structure_mass": 43.0,
+                "wind_force": -40.0,
+                "suction_zones": [(0, 8), (11, 16), (19, 35)],
             },
             "physics_config": {
-                "max_joint_force": 2200.0,
-                "max_joint_torque": 640.0,
-                "gravity": (0, -24.0),
-                "gravity_evolution": -0.25,
-                "angular_damping": 6.0,
+                "max_joint_force": 1650.0,
+                "max_joint_torque": 250.0,
+                "gravity": (0, -26.0),
+                "gravity_evolution": -0.35,
+                "angular_damping": 8.0,
             },
         },
         {
             "stage_id": "Stage-4",
             "title": "The Resonant Singularity",
             "mutation_description": "Extreme suction adhesion gaps combined with lateral wind and height-triggered vortex forces. Forces ultra-long-reach precision.",
-            "task_description_suffix": task_description_suffix,
+            "task_description_suffix": uniform_suffix_for_task("K_02"),
             "terrain_config": {
                 "build_zone_y_max": 5.0,
                 "min_structure_mass": 25.0,

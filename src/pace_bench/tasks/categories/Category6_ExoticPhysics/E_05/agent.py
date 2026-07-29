@@ -130,38 +130,30 @@ def agent_action_stage_2(sandbox, agent_body, step_count):
     if pos is None: return
     x, y = pos
     vx, vy = sandbox.get_body_velocity() or (0.0, 0.0)
-    step = sandbox.get_step_count() if hasattr(sandbox, 'get_step_count') else step_count
-    max_t = 165.0
-    corridor_y = 8.95
-    if x < 11.5:
-        fx = 125.0
-        fy = 30.0 * (corridor_y - y) - 10.0 * vy
-    elif x < 17.0:
-        if _gate1_weak(step):
-            fx = 145.0
-        else:
-            fx = -10.0 * vx
-        fy = 15.0 * (corridor_y - y) - 10.0 * vy
-    elif x < 20.5:
-        if _gate2_weak(step):
-            fx = 145.0
-        else:
-            fx = -10.0 * vx
-        fy = 15.0 * (corridor_y - y) - 10.0 * vy
-    elif x < 26.0:
-        if _keyhole_weak(step):
-            fx = 22.0 * (28.0 - x) - 10.0 * vx
-            fy = 22.0 * (6.75 - y) - 10.0 * vy
-        else:
-            fx = -10.0 * vx
-            fy = 15.0 * (corridor_y - y) - 10.0 * vy
+    physics = sandbox.get_physics_params()
+    gravity_compensation = -9.6 * float(physics.get("gravity_y", -10.0))
+    max_thrust = float(physics.get("max_thrust", 165.0))
+    if x < 13.4:
+        target_x, target_y = 14.2, 4.0
+        gain_x, gain_y, velocity_gain = 28.0, 32.0, 16.0
+    elif x < 15.7 and y < 6.9:
+        target_x, target_y = 14.6, 7.5
+        gain_x, gain_y, velocity_gain = 32.0, 42.0, 20.0
+    elif x < 18.4:
+        target_x, target_y = 19.2, 7.4
+        gain_x, gain_y, velocity_gain = 28.0, 36.0, 18.0
+    elif x < 23.4:
+        target_x, target_y = 24.2, 7.0
+        gain_x, gain_y, velocity_gain = 28.0, 34.0, 18.0
     else:
-        fx = 22.0 * (30.0 - x) - 10.0 * vx
-        fy = 22.0 * (8.0 - y) - 10.0 * vy
-    f = math.sqrt(fx*fx + fy*fy)
-    if f > max_t:
-        fx = fx * max_t / f
-        fy = fy * max_t / f
+        target_x, target_y = 30.0, 7.5
+        gain_x, gain_y, velocity_gain = 22.0, 28.0, 18.0
+    fx = gain_x * (target_x - x) - velocity_gain * vx
+    fy = gravity_compensation + gain_y * (target_y - y) - velocity_gain * vy
+    f = math.sqrt(fx * fx + fy * fy)
+    if f > max_thrust:
+        fx = fx * max_thrust / f
+        fy = fy * max_thrust / f
     sandbox.apply_thrust(fx, fy)
 
 def build_agent_stage_3(sandbox):

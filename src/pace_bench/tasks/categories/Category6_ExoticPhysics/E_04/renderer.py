@@ -1,11 +1,7 @@
-import sys
-import os
 import pygame
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../..'))
-
 from pace_bench.renderer import Renderer
-from Box2D.b2 import dynamicBody, staticBody
+from Box2D.b2 import dynamicBody
 
 # ── Academic palette ──────────────────────────────────────────────
 COLOR_BG          = (254, 252, 248)  # near-white background
@@ -41,9 +37,9 @@ class E04Renderer(Renderer):
             if self.simulator.can_display:
                 self.simulator.screen = pygame.Surface((600, 600))
 
-        self.simulator.ppm = 25.0
-        center_x_world = 20.0
-        center_y_world = 10.0
+        self.simulator.ppm = 50.0
+        center_x_world = 10.0
+        center_y_world = 4.75
         cam_x = center_x_world * self.simulator.ppm - self.simulator.screen_width / 2
         cam_y = self.simulator.screen_height / 2 - center_y_world * self.simulator.ppm
         self.set_camera_offset(cam_x, cam_y)
@@ -88,7 +84,7 @@ class E04Renderer(Renderer):
 
             # Top-left: task label
             if self._font_label:
-                label = self._font_label.render("E-04 | Magnetic Field",
+                label = self._font_label.render("E-04 | Variable Mass",
                                                 True, COLOR_ANNOTATION)
                 self.simulator.screen.blit(label, (18, 14))
 

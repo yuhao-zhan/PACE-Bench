@@ -29,6 +29,8 @@ class Sandbox:
         self._springs = []
         self._spring_metadata = []
         self._terrain_bodies = {}
+        self._observation_error_count = 0
+        self._last_observation_error = None
         self.world = self._world
         self.bodies = self._bodies
         self.joints = self._joints
@@ -153,7 +155,8 @@ class Sandbox:
         defn.collideConnected = False
         try:
             defn.frequencyHz = min(10.0, math.sqrt(stiffness / 10.0) / (2 * math.pi))
-        except Exception:
+        except Exception as exc:
+            self._record_observation_error("add_spring.frequency", exc)
             defn.frequencyHz = 4.0
         defn.dampingRatio = max(0.0, min(1.0, damping_ratio))
         joint = self._world.CreateJoint(defn)
@@ -214,6 +217,7 @@ class Sandbox:
         states = []
         for i, spring in enumerate(self._springs):
             try:
+                metadata = self._spring_metadata[i] if i < len(self._spring_metadata) else {}
                 wa_x = float(spring.anchorA.x)
                 wa_y = float(spring.anchorA.y)
                 wb_x = float(spring.anchorB.x)
@@ -222,16 +226,15 @@ class Sandbox:
                     (wb_x - wa_x) ** 2 + (wb_y - wa_y) ** 2
                 )
                 rest_length = float(spring.length)
-                freq = float(spring.frequency)
-                stiffness_est = ((2.0 * math.pi * freq) ** 2) * 10.0
-                stiffness_est = max(1.0, min(stiffness_est, 100000.0))
+                stiffness = float(metadata.get('stiffness', 0.0))
                 dl = current_length - rest_length
-                pe = 0.5 * stiffness_est * dl * dl
+                pe = 0.5 * stiffness * dl * dl
                 eps = 0.001
                 ratio = rest_length / max(eps, current_length)
-                compressed = rest_length < current_length - eps
-                slack = rest_length >= current_length - eps
-                force_est = stiffness_est * abs(dl)
+                compressed = current_length < rest_length - eps
+                tensioned = current_length > rest_length + eps
+                slack = not compressed and not tensioned
+                force_est = stiffness * abs(dl)
                 states.append({
                     'index': i,
                     'anchor_a': (wa_x, wa_y),
@@ -239,16 +242,18 @@ class Sandbox:
                     'current_length': current_length,
                     'rest_length': rest_length,
                     'compression_ratio': ratio,
-                    'stiffness_est': stiffness_est,
+                    'stiffness': stiffness,
                     'damping_ratio': float(spring.dampingRatio),
                     'elastic_pe': pe,
                     'force_est': force_est,
                     'is_compressed': compressed,
+                    'is_tensioned': tensioned,
                     'is_slack': slack,
                 })
-            except Exception:
+            except Exception as exc:
+                self._record_observation_error("get_spring_states", exc)
                 states.append({
-                    'index': i, 'error': 'Failed to read spring state',
+                    'index': i, 'error': f'{type(exc).__name__}: {exc}',
                 })
         return states
     def get_joint_topology(self):
@@ -272,9 +277,10 @@ class Sandbox:
                     'projectile_connected': proj_connected,
                     'anchor': anchor,
                 })
-            except Exception:
+            except Exception as exc:
+                self._record_observation_error("get_joint_topology", exc)
                 joints_info.append({
-                    'index': i, 'error': 'Failed to read joint info',
+                    'index': i, 'error': f'{type(exc).__name__}: {exc}',
                 })
         return joints_info
     def get_arm_state(self):
@@ -316,7 +322,8 @@ class Sandbox:
                 'awake': bool(arm.awake),
                 'pivot': pivot,
             }
-        except Exception:
+        except Exception as exc:
+            self._record_observation_error("get_arm_state", exc)
             return None
     def get_contacts_involving(self, body_a, body_b=None):
         results = []
@@ -342,8 +349,8 @@ class Sandbox:
                                 'x': float(pt.localPoint.x),
                                 'y': float(pt.localPoint.y),
                             })
-                        except Exception:
-                            pass
+                        except Exception as exc:
+                            self._record_observation_error("get_contacts_involving.point", exc)
                     results.append({
                         'body_a': id(ba),
                         'body_b': id(bb),
@@ -351,9 +358,12 @@ class Sandbox:
                         'enabled': contact.contact.enabled,
                         'manifold_points': num_pts,
                     })
-        except Exception:
-            pass
+        except Exception as exc:
+            self._record_observation_error("get_contacts_involving", exc)
         return results
+    def _record_observation_error(self, source, exc):
+        self._observation_error_count += 1
+        self._last_observation_error = f"{source}: {type(exc).__name__}: {exc}"
     def get_physics_config(self):
         return {
             'gravity': (

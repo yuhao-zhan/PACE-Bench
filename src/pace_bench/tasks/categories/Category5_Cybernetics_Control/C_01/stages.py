@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pace_bench.tasks.stage_prompt import uniform_suffix_for_task
+
 import importlib.util
 
 import math
@@ -564,31 +566,175 @@ def update_success_criteria_for_visible_changes(
     )
     return description
 
-UNIFORM_SUFFIX = """
+def _visible_physics_config(
+    target_physics_config: Optional[Dict[str, Any]],
+    stage: Optional[Dict[str, Any]],
+) -> Dict[str, Any]:
+    """Return target settings without exposing hidden dynamics in prompt text."""
+    if stage is not None:
+        return dict(stage.get("physics_config") or {})
+    return dict(target_physics_config or {})
 
-Sensors indicate that this region exhibits non-standard physical properties.
-While the following variables **MIGHT** have changed from the initial environment, **NOT ALL** of them will necessarily be mutated in any given task. You must use active interaction and environmental feedback to deduce which specific conditions apply:
- - **Sensor delay**: Latency in measurement acquisition may affect how reported state tracks the true dynamics.
- - **Gravitational acceleration**: Vertical loads may be significantly different, affecting the system's dynamic response.
- - **Pole and cart mass**: The distribution of inertia within the assembly may be altered.
- - **Pole length**: The pendulum arm length may differ, changing the system's natural frequency and stability characteristics.
- - **Track center position**: The horizontal center of the safe balancing zone may have been relocated.
- - **Safe zone width**: The half-width of the safe balancing zone may differ.
- - **Episode length**: The required duration of the stability task may be significantly different.
- - **Actuator force range**: The maximum magnitude of force the cart can apply may differ.
- - **Pole initial angle**: The pole may not start perfectly upright, requiring active stabilization from the very first simulation step.
- - **Rail height**: The vertical position of the horizontal track may be altered, changing the apparent geometry of the balancing assembly.
- - **Balance angle threshold**: The maximum pole deviation accepted as "upright" for lock-in counting and terminal success may be significantly tighter.
 
-**Discovery via feedback**: Your objective is to identify the underlying physical rules of this specific environment through trial and reasoning. Initial standard solutions may fail; analyze the failure mode (e.g., cart position, pole angle trends, or loss of stability) to infer the hidden constraints and adapt your design.
-"""
+def _replace_once(text: str, pattern: str, replacement: str, label: str) -> str:
+    updated, count = re.subn(pattern, replacement, text, count=1)
+    if count != 1:
+        raise RuntimeError(f"C-01 prompt sync: expected exactly one {label}, found {count}.")
+    return updated
+
+
+# These later definitions intentionally supersede the legacy broad synchronizers above.
+# Grading/build constraints and directly visible geometry/state are synchronized;
+# masses, gravity, and sensor latency remain undisclosed.
+def update_task_description_for_visible_changes(
+    base_description: str,
+    target_terrain_config: Dict[str, Any],
+    base_terrain_config: Dict[str, Any],
+    target_physics_config: Optional[Dict[str, Any]] = None,
+    base_physics_config: Optional[Dict[str, Any]] = None,
+    *,
+    stage: Optional[Dict[str, Any]] = None,
+) -> str:
+    del target_terrain_config, base_terrain_config, base_physics_config
+    description = base_description
+    config = _visible_physics_config(target_physics_config, stage)
+
+    track_center = float(config.get("track_center_x", _BASE_TRACK_CENTER_X))
+    safe_half = float(config.get("safe_half_range", _BASE_SAFE_HALF_RANGE))
+    rail_y = float(config.get("cart_rail_center_y", _BASE_CART_RAIL_CENTER_Y))
+    max_steps = int(config.get("max_steps", _BASE_MAX_STEPS))
+    force_limit = float(config.get("cart_force_limit_newtons", _BASE_CART_FORCE_LIMIT_NEWTONS))
+    balance_deg = float(config.get("balance_angle_deg", _BASE_BALANCE_ANGLE_DEG))
+    pole_length = float(config.get("pole_length", _BASE_POLE_LENGTH))
+    pole_start_angle = float(config.get("pole_start_angle", _BASE_POLE_START_ANGLE))
+
+    if not math.isclose(track_center, _BASE_TRACK_CENTER_X):
+        description = _replace_once(
+            description,
+            rf"center x={_BASE_TRACK_CENTER_X:g}m",
+            f"center x={track_center:g}m (source center {_BASE_TRACK_CENTER_X:g}m)",
+            "track center",
+        )
+    if not math.isclose(safe_half, _BASE_SAFE_HALF_RANGE):
+        description = _replace_once(
+            description,
+            rf"safe range ±{_BASE_SAFE_HALF_RANGE:g}m inclusive",
+            f"safe range ±{safe_half:g}m inclusive (source half-range ±{_BASE_SAFE_HALF_RANGE:g}m)",
+            "safe half-range",
+        )
+    if not math.isclose(rail_y, _BASE_CART_RAIL_CENTER_Y):
+        description = _replace_once(
+            description,
+            rf"horizontal track at y={_BASE_CART_RAIL_CENTER_Y:g}(?:\.0+)?m",
+            f"horizontal track at y={rail_y:g}m (source y={_BASE_CART_RAIL_CENTER_Y:g}m)",
+            "rail height",
+        )
+    if not math.isclose(pole_length, _BASE_POLE_LENGTH):
+        description = _replace_once(
+            description,
+            rf"visible length {_BASE_POLE_LENGTH:g}(?:\.0+)?m",
+            (
+                f"visible length {pole_length:g}m "
+                f"(originally {_BASE_POLE_LENGTH:g}m in the source environment)"
+            ),
+            "pole length",
+        )
+    if not math.isclose(pole_start_angle, _BASE_POLE_START_ANGLE):
+        angle_degrees = math.degrees(pole_start_angle)
+        description = _replace_once(
+            description,
+            r"starts upright \(angle = 0° or 0rad\)",
+            (
+                f"starts at angle {angle_degrees:g}° ({pole_start_angle:g} rad) "
+                "(originally upright at 0°/0 rad in the source environment)"
+            ),
+            "pole initial angle",
+        )
+    if max_steps != _BASE_MAX_STEPS:
+        description = _replace_once(
+            description,
+            rf"At most {_BASE_MAX_STEPS} simulation steps",
+            f"At most {max_steps} simulation steps (source limit {_BASE_MAX_STEPS})",
+            "episode length",
+        )
+    if not math.isclose(force_limit, _BASE_CART_FORCE_LIMIT_NEWTONS):
+        description = _replace_once(
+            description,
+            rf"limited to ±{_BASE_CART_FORCE_LIMIT_NEWTONS:g}N",
+            f"limited to ±{force_limit:g}N (source limit ±{_BASE_CART_FORCE_LIMIT_NEWTONS:g}N)",
+            "actuator limit",
+        )
+    if not math.isclose(balance_deg, _BASE_BALANCE_ANGLE_DEG):
+        description = re.sub(
+            rf"\|angle\| <= {_BASE_BALANCE_ANGLE_DEG:g}°",
+            f"|angle| <= {balance_deg:g}° (source threshold {_BASE_BALANCE_ANGLE_DEG:g}°)",
+            description,
+        )
+    return description
+
+
+def update_success_criteria_for_visible_changes(
+    base_success_criteria: str,
+    target_terrain_config: Dict[str, Any],
+    base_terrain_config: Dict[str, Any],
+    target_physics_config: Optional[Dict[str, Any]] = None,
+    base_physics_config: Optional[Dict[str, Any]] = None,
+    *,
+    stage: Optional[Dict[str, Any]] = None,
+) -> str:
+    del target_terrain_config, base_terrain_config, base_physics_config
+    criteria = base_success_criteria
+    config = _visible_physics_config(target_physics_config, stage)
+
+    track_center = float(config.get("track_center_x", _BASE_TRACK_CENTER_X))
+    safe_half = float(config.get("safe_half_range", _BASE_SAFE_HALF_RANGE))
+    max_steps = int(config.get("max_steps", _BASE_MAX_STEPS))
+    force_limit = float(config.get("cart_force_limit_newtons", _BASE_CART_FORCE_LIMIT_NEWTONS))
+    balance_deg = float(config.get("balance_angle_deg", _BASE_BALANCE_ANGLE_DEG))
+
+    if not math.isclose(track_center, _BASE_TRACK_CENTER_X) or not math.isclose(
+        safe_half, _BASE_SAFE_HALF_RANGE
+    ):
+        criteria = _replace_once(
+            criteria,
+            rf"\|x - {_BASE_TRACK_CENTER_X:g}\| ≤ {_BASE_SAFE_HALF_RANGE:g}m",
+            (
+                f"|x - {track_center:g}| ≤ {safe_half:g}m "
+                f"(source zone |x - {_BASE_TRACK_CENTER_X:g}| ≤ {_BASE_SAFE_HALF_RANGE:g}m)"
+            ),
+            "success track limits",
+        )
+    if max_steps != _BASE_MAX_STEPS:
+        criteria = _replace_once(
+            criteria,
+            rf"At most {_BASE_MAX_STEPS} simulation steps",
+            f"At most {max_steps} simulation steps (source limit {_BASE_MAX_STEPS})",
+            "success episode length",
+        )
+    if not math.isclose(force_limit, _BASE_CART_FORCE_LIMIT_NEWTONS):
+        criteria = _replace_once(
+            criteria,
+            rf"must not exceed ±{_BASE_CART_FORCE_LIMIT_NEWTONS:g}N",
+            f"must not exceed ±{force_limit:g}N (source limit ±{_BASE_CART_FORCE_LIMIT_NEWTONS:g}N)",
+            "success actuator limit",
+        )
+    if not math.isclose(balance_deg, _BASE_BALANCE_ANGLE_DEG):
+        criteria = re.sub(
+            rf"\|angle\| <= {_BASE_BALANCE_ANGLE_DEG:g}°",
+            f"|angle| <= {balance_deg:g}° (source threshold {_BASE_BALANCE_ANGLE_DEG:g}°)",
+            criteria,
+        )
+    return criteria
+
+
+UNIFORM_SUFFIX = uniform_suffix_for_task("C_01")
 
 def curriculum_stages() -> List[Dict[str, Any]]:
     return [
         {
             "stage_id": "Stage-1",
             "title": "Curriculum stage 1",
-            "task_description_suffix": UNIFORM_SUFFIX,
+            "task_description_suffix": uniform_suffix_for_task("C_01"),
             "physics_config": {
                 "track_center_x": 50.0,
                 "pole_start_angle": 0.16580627893946121,
@@ -599,7 +745,7 @@ def curriculum_stages() -> List[Dict[str, Any]]:
         {
             "stage_id": "Stage-2",
             "title": "Curriculum stage 2",
-            "task_description_suffix": UNIFORM_SUFFIX,
+            "task_description_suffix": uniform_suffix_for_task("C_01"),
             "physics_config": {
                 "track_center_x": 50.0,
                 "cart_force_limit_newtons": 0.5,
@@ -614,7 +760,7 @@ def curriculum_stages() -> List[Dict[str, Any]]:
         {
             "stage_id": "Stage-3",
             "title": "Curriculum stage 3",
-            "task_description_suffix": UNIFORM_SUFFIX,
+            "task_description_suffix": uniform_suffix_for_task("C_01"),
             "physics_config": {
                 "track_center_x": 50.0,
                 "gravity": 22.0,
@@ -632,7 +778,7 @@ def curriculum_stages() -> List[Dict[str, Any]]:
         {
             "stage_id": "Stage-4",
             "title": "Curriculum stage 4",
-            "task_description_suffix": UNIFORM_SUFFIX,
+            "task_description_suffix": uniform_suffix_for_task("C_01"),
             "physics_config": {
                 "track_center_x": 50.0,
                 "gravity": 35.0,

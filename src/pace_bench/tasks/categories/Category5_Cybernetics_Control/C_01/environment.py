@@ -78,54 +78,15 @@ class Sandbox:
         self._omega_buffer = deque(maxlen=max(1, self._sensor_delay_omega_steps + 1))
         self._prime_sensor_delay_buffers()
         self._consecutive_upright_sim_steps = 0
-    def _snapshot_cart_pole(self):
-        snap = []
-        for key in ("cart", "pole"):
-            b = self._terrain_bodies[key]
-            p, lv = b.position, b.linearVelocity
-            snap.append(
-                (
-                    float(p.x),
-                    float(p.y),
-                    float(b.angle),
-                    float(lv.x),
-                    float(lv.y),
-                    float(b.angularVelocity),
-                )
-            )
-        return snap
-    def _restore_cart_pole(self, snap):
-        for key, state in zip(("cart", "pole"), snap):
-            b = self._terrain_bodies[key]
-            x, y, ang, vx, vy, av = state
-            b.position = (x, y)
-            b.angle = ang
-            b.linearVelocity = (vx, vy)
-            b.angularVelocity = av
     def _prime_sensor_delay_buffers(self):
         da = self._sensor_delay_angle_steps
         dw = self._sensor_delay_omega_steps
-        n = max(da, dw, 0)
-        if n == 0:
-            self._angle_buffer.append(self.get_true_pole_angle())
-            self._omega_buffer.append(self.get_true_pole_angular_velocity())
-            return
-        snap = self._snapshot_cart_pole()
-        angles = []
-        omegas = []
-        for _ in range(n + 1):
-            angles.append(self.get_true_pole_angle())
-            omegas.append(self.get_true_pole_angular_velocity())
-            cart = self._terrain_bodies["cart"]
-            cart.ApplyForce((self._last_applied_force, 0), cart.position, True)
-            self.world.Step(TIME_STEP, WORLD_VELOCITY_ITERATIONS, WORLD_POSITION_ITERATIONS)
-        self._restore_cart_pole(snap)
-        tail_a = angles[-(da + 1) :] if da > 0 else [self.get_true_pole_angle()]
-        tail_w = omegas[-(dw + 1) :] if dw > 0 else [self.get_true_pole_angular_velocity()]
-        for v in tail_a:
-            self._angle_buffer.append(v)
-        for v in tail_w:
-            self._omega_buffer.append(v)
+        angle = self.get_true_pole_angle()
+        omega = self.get_true_pole_angular_velocity()
+        for _ in range(max(0, da) + 1):
+            self._angle_buffer.append(angle)
+        for _ in range(max(0, dw) + 1):
+            self._omega_buffer.append(omega)
     def _apply_configs(self):
         pc = self.physics_config
         if "gravity" in pc:
@@ -178,15 +139,14 @@ class Sandbox:
     def step(self, dt):
         if not math.isclose(float(dt), TIME_STEP, rel_tol=0.0, abs_tol=1e-12):
             raise ValueError(
+                f"C-01 requires dt={TIME_STEP}, received {dt}"
             )
-        true_angle = self.get_true_pole_angle()
-        true_omega = self.get_true_pole_angular_velocity()
-        self._angle_buffer.append(true_angle)
-        self._omega_buffer.append(true_omega)
         self._step_count += 1
         cart = self._terrain_bodies["cart"]
         cart.ApplyForce((self._last_applied_force, 0), cart.position, True)
         self.world.Step(TIME_STEP, WORLD_VELOCITY_ITERATIONS, WORLD_POSITION_ITERATIONS)
+        self._angle_buffer.append(self.get_true_pole_angle())
+        self._omega_buffer.append(self.get_true_pole_angular_velocity())
         if abs(self.get_true_pole_angle()) <= self._balance_lock_angle_rad:
             self._consecutive_upright_sim_steps += 1
         else:

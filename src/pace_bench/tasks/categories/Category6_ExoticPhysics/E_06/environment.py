@@ -4,9 +4,13 @@ import random
 
 import Box2D
 
-from Box2D.b2 import world, polygonShape, staticBody, dynamicBody, weldJoint, revoluteJoint
+from Box2D.b2 import polygonShape, world
+
+TIME_STEP = 1.0 / 60.0
+INV_TIME_STEP = 1.0 / TIME_STEP
 
 class Sandbox:
+    MAX_STEPS = 500
     BUILD_ZONE_X_MIN = 5.0
     BUILD_ZONE_X_MAX = 15.0
     BUILD_ZONE_Y_MIN = 1.5
@@ -28,19 +32,19 @@ class Sandbox:
     SUPPORT_CENTER_X = 5.75
     DISTANCE_SCALE_FACTOR = 0.6
     NOISE_STRENGTH = 42.0
-    JOINT_BREAK_FORCE = 78.0
-    JOINT_BREAK_TORQUE = 115.0
-    DAMAGE_FORCE_THRESH = 12.0
-    DAMAGE_TORQUE_THRESH = 18.0
-    DAMAGE_FORCE_RATE = 2.9
-    DAMAGE_TORQUE_RATE = 2.1
+    JOINT_BREAK_FORCE = 280800.0
+    JOINT_BREAK_TORQUE = 414000.0
+    DAMAGE_FORCE_THRESH = 43200.0
+    DAMAGE_TORQUE_THRESH = 64800.0
+    DAMAGE_FORCE_RATE = 2.9 / 3750.0
+    DAMAGE_TORQUE_RATE = 2.1 / 3750.0
     DAMAGE_LIMIT = 100.0
     CASCADE_SHOCK_DAMAGE = 26.0
     CASCADE_RADIUS = 2.2
-    GROUND_DAMAGE_FORCE_THRESH = 6.0
-    GROUND_DAMAGE_TORQUE_THRESH = 10.0
-    GROUND_DAMAGE_FORCE_RATE = 4.8
-    GROUND_DAMAGE_TORQUE_RATE = 3.5
+    GROUND_DAMAGE_FORCE_THRESH = 21600.0
+    GROUND_DAMAGE_TORQUE_THRESH = 36000.0
+    GROUND_DAMAGE_FORCE_RATE = 4.8 / 3750.0
+    GROUND_DAMAGE_TORQUE_RATE = 3.5 / 3750.0
     BEAM_ANGVEL_THRESH = 2.2
     BEAM_ANGVEL_TOLERANCE_STEPS = 10
     PHASED_STORM_START = 100
@@ -54,6 +58,7 @@ class Sandbox:
         physics_config = physics_config or {}
         self._terrain_config = dict(terrain_config)
         self._physics_config = dict(physics_config)
+        self._rng = random.Random(int(physics_config.get("random_seed", 123)))
         gravity = tuple(physics_config.get("gravity", (0, -10)))
         self._linear_damping = float(physics_config.get("linear_damping", 0.0))
         self._angular_damping = float(physics_config.get("angular_damping", 1.6))
@@ -108,6 +113,9 @@ class Sandbox:
         self._joint_fail_step = {}
         self._joint_fail_pos  = {}
         self._joint_fail_type = {}
+        self._joint_fail_force = {}
+        self._joint_fail_torque = {}
+        self._joint_fail_damage = {}
         self._body_destroy_step  = {}
         self._body_destroy_pos   = {}
         self._body_destroy_reason = {}
@@ -142,7 +150,7 @@ class Sandbox:
         if self._burst_remaining > 0:
             self._burst_remaining -= 1
             return 3.8
-        if self._step_counter > 0 and random.random() < getattr(self, "_burst_prob", 0.026):
+        if self._step_counter > 0 and self._rng.random() < getattr(self, "_burst_prob", 0.026):
             self._burst_remaining = 12
         mult = 1.0
         if self.PHASED_STORM_START <= self._step_counter <= self.PHASED_STORM_END:
@@ -165,56 +173,58 @@ class Sandbox:
             dx = body.position.x - self.SUPPORT_CENTER_X
             dist_mult = 1.0 + self.DISTANCE_SCALE_FACTOR * max(0, dx) / max(span, 0.1)
             s = sigma * dist_mult
-            if random.random() < 0.28:
+            if self._rng.random() < 0.28:
                 if i % 2 == 0:
-                    fx = random.gauss(0, s) + 1.6 * s
-                    fy = random.gauss(0, s * 0.8)
+                    fx = self._rng.gauss(0, s) + 1.6 * s
+                    fy = self._rng.gauss(0, s * 0.8)
                 else:
-                    fx = random.gauss(0, s) - 1.6 * s
-                    fy = random.gauss(0, s * 0.8)
+                    fx = self._rng.gauss(0, s) - 1.6 * s
+                    fy = self._rng.gauss(0, s * 0.8)
             else:
-                fx = random.gauss(0, s)
-                fy = random.gauss(0, s)
+                fx = self._rng.gauss(0, s)
+                fy = self._rng.gauss(0, s)
             body.ApplyForceToCenter((fx * mass_factor, fy * mass_factor), wake=True)
     def _get_joint_anchor_pos(self, joint):
         return self._joint_anchor.get(joint, (0, 0))
+    def _record_and_destroy_joint(self, joint, fail_reason):
+        ax, ay = self._get_joint_anchor_pos(joint)
+        self._joint_fail_step[joint] = self._step_counter
+        self._joint_fail_pos[joint] = (ax, ay)
+        self._joint_fail_type[joint] = fail_reason
+        self._joint_fail_force[joint] = self._joint_peak_forces.get(joint, 0.0)
+        self._joint_fail_torque[joint] = self._joint_peak_torques.get(joint, 0.0)
+        self._joint_fail_damage[joint] = self._joint_damage.get(joint, 0.0)
+        self._world.DestroyJoint(joint)
+        self._joints.remove(joint)
+        self._joint_peak_forces.pop(joint, None)
+        self._joint_peak_torques.pop(joint, None)
+        self._joint_damage.pop(joint, None)
+        if self._joint_is_ground.get(joint):
+            self._ground_anchor_count = max(0, self._ground_anchor_count - 1)
+            anchor_x = self._joint_anchor.get(joint, (0, 0))[0]
+            if anchor_x in self._ground_anchor_x:
+                self._ground_anchor_x.remove(anchor_x)
+        self._joint_is_ground.pop(joint, None)
+        self._joint_anchor.pop(joint, None)
+        return ax, ay
     def _destroy_body_and_joints(self, body, fail_reason="orphan"):
         to_remove = [j for j in self._joints if j.bodyA == body or j.bodyB == body]
-        for j in to_remove:
-            try:
-                ax, ay = self._get_joint_anchor_pos(j)
-                self._joint_fail_step[j] = self._step_counter
-                self._joint_fail_pos[j] = (ax, ay)
-                self._joint_fail_type[j] = fail_reason
-                self._world.DestroyJoint(j)
-                self._joints.remove(j)
-                self._joint_peak_forces.pop(j, None)
-                self._joint_peak_torques.pop(j, None)
-                self._joint_damage.pop(j, None)
-                if self._joint_is_ground.get(j):
-                    self._ground_anchor_count = max(0, self._ground_anchor_count - 1)
-                    ax0 = self._joint_anchor.get(j, (0, 0))[0]
-                    if ax0 in self._ground_anchor_x:
-                        self._ground_anchor_x.remove(ax0)
-                self._joint_is_ground.pop(j, None)
-                self._joint_anchor.pop(j, None)
-            except Exception:
-                pass
-        try:
-            bx, by = body.position.x, body.position.y
-            self._body_destroy_step[body] = self._step_counter
-            self._body_destroy_pos[body] = (bx, by)
-            self._body_destroy_reason[body] = fail_reason
-            if fail_reason == "spin":
-                self._num_bodies_destroyed_spin += 1
-            else:
-                self._num_bodies_destroyed_orphan += 1
-            self._world.DestroyBody(body)
-            self._bodies.remove(body)
-        except Exception:
-            pass
+        for joint in to_remove:
+            self._record_and_destroy_joint(joint, fail_reason)
+        bx, by = body.position.x, body.position.y
+        self._body_destroy_step[body] = self._step_counter
+        self._body_destroy_pos[body] = (bx, by)
+        self._body_destroy_reason[body] = fail_reason
+        if fail_reason == "spin":
+            self._num_bodies_destroyed_spin += 1
+        else:
+            self._num_bodies_destroyed_orphan += 1
+        self._world.DestroyBody(body)
+        self._bodies.remove(body)
         self._beam_high_spin_steps.pop(body, None)
     def step(self, time_step):
+        if not math.isclose(float(time_step), TIME_STEP, rel_tol=0.0, abs_tol=1e-12):
+            raise ValueError(f"E_06 requires a fixed time step of {TIME_STEP}")
         self._step_counter += 1
         sigma_mult = self._get_noise_multiplier()
         self._apply_impulses(sigma_mult)
@@ -239,74 +249,55 @@ class Sandbox:
                 self._beam_high_spin_steps[body] = 0
         joints_to_remove = []
         for joint in list(self._joints):
-            try:
-                if not hasattr(joint, "GetReactionForce"):
-                    continue
-                force = joint.GetReactionForce(1.0 / 60.0)
-                force_mag = math.sqrt(force.x**2 + force.y**2)
-                torque_mag = abs(joint.GetReactionTorque(1.0 / 60.0)) if hasattr(joint, "GetReactionTorque") else 0.0
-                self._joint_peak_forces[joint] = max(self._joint_peak_forces.get(joint, 0.0), force_mag)
-                self._joint_peak_torques[joint] = max(self._joint_peak_torques.get(joint, 0.0), torque_mag)
-                if force_mag > self.JOINT_BREAK_FORCE or torque_mag > self.JOINT_BREAK_TORQUE:
-                    joints_to_remove.append((joint, "force_torque"))
-                    continue
-                is_ground = self._joint_is_ground.get(joint, False)
-                f_thresh = self.GROUND_DAMAGE_FORCE_THRESH if is_ground else self.DAMAGE_FORCE_THRESH
-                t_thresh = self.GROUND_DAMAGE_TORQUE_THRESH if is_ground else self.DAMAGE_TORQUE_THRESH
-                f_rate = self.GROUND_DAMAGE_FORCE_RATE if is_ground else self.DAMAGE_FORCE_RATE
-                t_rate = self.GROUND_DAMAGE_TORQUE_RATE if is_ground else self.DAMAGE_TORQUE_RATE
-                jx, jy = self._get_joint_anchor_pos(joint)
-                hotspot_mult = (
-                    self.DAMAGE_HOTSPOT_MULT
-                    if self.DAMAGE_HOTSPOT_X_LO <= jx <= self.DAMAGE_HOTSPOT_X_HI
-                    else 1.0
-                )
-                damage = self._joint_damage.get(joint, 0.0)
-                if force_mag > f_thresh:
-                    damage += (force_mag - f_thresh) * f_rate * 0.016 * hotspot_mult
-                if torque_mag > t_thresh:
-                    damage += (torque_mag - t_thresh) * t_rate * 0.016 * hotspot_mult
-                self._joint_damage[joint] = damage
-                if damage >= self.DAMAGE_LIMIT:
-                    joints_to_remove.append((joint, "damage"))
-            except Exception:
+            force = joint.GetReactionForce(INV_TIME_STEP)
+            force_mag = math.hypot(force.x, force.y)
+            torque_mag = abs(joint.GetReactionTorque(INV_TIME_STEP))
+            self._joint_peak_forces[joint] = max(
+                self._joint_peak_forces.get(joint, 0.0), force_mag
+            )
+            self._joint_peak_torques[joint] = max(
+                self._joint_peak_torques.get(joint, 0.0), torque_mag
+            )
+            if force_mag > self.JOINT_BREAK_FORCE or torque_mag > self.JOINT_BREAK_TORQUE:
+                joints_to_remove.append((joint, "force_torque"))
                 continue
+            is_ground = self._joint_is_ground.get(joint, False)
+            f_thresh = self.GROUND_DAMAGE_FORCE_THRESH if is_ground else self.DAMAGE_FORCE_THRESH
+            t_thresh = self.GROUND_DAMAGE_TORQUE_THRESH if is_ground else self.DAMAGE_TORQUE_THRESH
+            f_rate = self.GROUND_DAMAGE_FORCE_RATE if is_ground else self.DAMAGE_FORCE_RATE
+            t_rate = self.GROUND_DAMAGE_TORQUE_RATE if is_ground else self.DAMAGE_TORQUE_RATE
+            joint_x, _ = self._get_joint_anchor_pos(joint)
+            hotspot_mult = (
+                self.DAMAGE_HOTSPOT_MULT
+                if self.DAMAGE_HOTSPOT_X_LO <= joint_x <= self.DAMAGE_HOTSPOT_X_HI
+                else 1.0
+            )
+            damage = self._joint_damage.get(joint, 0.0)
+            if force_mag > f_thresh:
+                damage += (force_mag - f_thresh) * f_rate * TIME_STEP * hotspot_mult
+            if torque_mag > t_thresh:
+                damage += (torque_mag - t_thresh) * t_rate * TIME_STEP * hotspot_mult
+            self._joint_damage[joint] = damage
+            if damage >= self.DAMAGE_LIMIT:
+                joints_to_remove.append((joint, "damage"))
         for entry in joints_to_remove:
             joint, fail_reason = entry
-            try:
-                ax, ay = self._get_joint_anchor_pos(joint)
-                self._joint_fail_step[joint] = self._step_counter
-                self._joint_fail_pos[joint] = (ax, ay)
-                self._joint_fail_type[joint] = fail_reason
-                if fail_reason == "damage":
-                    self._num_joints_removed_damage += 1
-                else:
-                    self._num_joints_removed_force_torque += 1
-                self._world.DestroyJoint(joint)
-                self._joints.remove(joint)
-                self._joint_peak_forces.pop(joint, None)
-                self._joint_peak_torques.pop(joint, None)
-                d = self._joint_damage.pop(joint, None)
-                if self._joint_is_ground.get(joint):
-                    self._ground_anchor_count = max(0, self._ground_anchor_count - 1)
-                    ax0 = self._joint_anchor.get(joint, (0, 0))[0]
-                    if ax0 in self._ground_anchor_x:
-                        self._ground_anchor_x.remove(ax0)
-                self._joint_is_ground.pop(joint, None)
-                self._joint_anchor.pop(joint, None)
-                for j in list(self._joints):
-                    try:
-                        jx, jy = self._get_joint_anchor_pos(j)
-                        dist = math.sqrt((jx - ax)**2 + (jy - ay)**2)
-                        if dist <= self.CASCADE_RADIUS and dist > 0.01:
-                            self._joint_damage[j] = min(
-                                self.DAMAGE_LIMIT,
-                                self._joint_damage.get(j, 0) + self.CASCADE_SHOCK_DAMAGE
-                            )
-                    except Exception:
-                        pass
-            except Exception:
-                pass
+            if fail_reason == "damage":
+                self._num_joints_removed_damage += 1
+            else:
+                self._num_joints_removed_force_torque += 1
+            anchor_x, anchor_y = self._record_and_destroy_joint(joint, fail_reason)
+            for neighbor in list(self._joints):
+                neighbor_x, neighbor_y = self._get_joint_anchor_pos(neighbor)
+                distance = math.hypot(
+                    neighbor_x - anchor_x, neighbor_y - anchor_y
+                )
+                if 0.01 < distance <= self.CASCADE_RADIUS:
+                    self._joint_damage[neighbor] = min(
+                        self.DAMAGE_LIMIT,
+                        self._joint_damage.get(neighbor, 0.0)
+                        + self.CASCADE_SHOCK_DAMAGE,
+                    )
     def add_beam(self, x, y, width, height, angle=0, density=1.0):
         if len(self._bodies) >= self.MAX_BEAMS:
             raise ValueError(f"Maximum {self.MAX_BEAMS} beams allowed")
@@ -314,8 +305,19 @@ class Sandbox:
             raise ValueError(
                 f"Forbidden zone: beam center x={x:.2f} falls in [{self._forbidden_zone_x_lo}, {self._forbidden_zone_x_hi}]"
             )
-        width = max(self.MIN_BEAM_SIZE, min(width, self.MAX_BEAM_SIZE))
-        height = max(self.MIN_BEAM_SIZE, min(height, self.MAX_BEAM_SIZE))
+        values = (x, y, width, height, angle, density)
+        if not all(math.isfinite(float(value)) for value in values):
+            raise ValueError("Beam parameters must all be finite")
+        if not self.MIN_BEAM_SIZE <= width <= self.MAX_BEAM_SIZE:
+            raise ValueError(
+                f"Beam width must be in [{self.MIN_BEAM_SIZE}, {self.MAX_BEAM_SIZE}]"
+            )
+        if not self.MIN_BEAM_SIZE <= height <= self.MAX_BEAM_SIZE:
+            raise ValueError(
+                f"Beam height must be in [{self.MIN_BEAM_SIZE}, {self.MAX_BEAM_SIZE}]"
+            )
+        if density <= 0.0:
+            raise ValueError("Beam density must be positive")
         body = self._world.CreateDynamicBody(
             position=(x, y),
             angle=angle,
@@ -336,6 +338,12 @@ class Sandbox:
         if body_a is None:
             raise ValueError("add_joint: body_a cannot be None.")
         anchor_x, anchor_y = anchor_point[0], anchor_point[1]
+        if not math.isfinite(float(anchor_x)) or not math.isfinite(float(anchor_y)):
+            raise ValueError("Joint anchor coordinates must be finite")
+        if body_a not in self._bodies:
+            raise ValueError("add_joint: body_a must be an active agent beam")
+        if body_b is not None and body_b not in self._bodies:
+            raise ValueError("add_joint: body_b must be an active agent beam or None")
         is_ground = body_b is None
         if is_ground:
             if self._ground_anchor_count >= self._max_ground_anchors:
@@ -343,6 +351,12 @@ class Sandbox:
             if not (self._allowed_anchor_x_lo <= anchor_x <= self._allowed_anchor_x_hi):
                 raise ValueError(
                     f"Ground anchor x={anchor_x:.2f} outside allowed zone [{self._allowed_anchor_x_lo}, {self._allowed_anchor_x_hi}]"
+                )
+            if not math.isclose(
+                float(anchor_y), self._ground_y, rel_tol=0.0, abs_tol=1e-9
+            ):
+                raise ValueError(
+                    f"Ground-anchor y must equal the ground surface y={self._ground_y}"
                 )
             for gx in self._ground_anchor_x:
                 if abs(anchor_x - gx) < self.MIN_ANCHOR_SPACING:
@@ -375,14 +389,11 @@ class Sandbox:
         return joint
     def get_structure_mass(self):
         return sum(b.mass for b in self._bodies)
-    def set_material_properties(self, body, restitution=0.2):
-        for fixture in body.fixtures:
-            fixture.restitution = float(restitution)
     def get_build_zone(self):
         return (self.BUILD_ZONE_X_MIN, self.BUILD_ZONE_X_MAX, self.BUILD_ZONE_Y_MIN, self.BUILD_ZONE_Y_MAX)
     def get_structure_mass_limit(self):
         return self._max_structure_mass
-    def get_per_body_angvel_data(self):
+    def _get_per_body_angvel_data(self):
         result = []
         seen_body_ids = set()
         for body in self._bodies:
@@ -428,7 +439,7 @@ class Sandbox:
             })
         result.sort(key=lambda d: d["peak_angvel"], reverse=True)
         return result
-    def get_per_joint_stress_data(self):
+    def _get_per_joint_stress_data(self):
         result = []
         for joint in self._joints:
             anchor = self._joint_anchor.get(joint, (0.0, 0.0))
@@ -453,10 +464,13 @@ class Sandbox:
                 "dist_from_support": dx,
                 "fail_step": step,
                 "fail_type": ftype,
+                "peak_force": self._joint_fail_force.get(joint, 0.0),
+                "peak_torque": self._joint_fail_torque.get(joint, 0.0),
+                "damage": self._joint_fail_damage.get(joint, 0.0),
                 "status": "failed",
             })
         return result
-    def get_failure_event_timeline(self):
+    def _get_failure_event_timeline(self):
         events = []
         for j, step in self._joint_fail_step.items():
             pos = self._joint_fail_pos.get(j, (0.0, 0.0))
@@ -469,6 +483,9 @@ class Sandbox:
                 "pos_y": pos[1],
                 "dist_from_support": dx,
                 "fail_type": ftype,
+                "peak_force": self._joint_fail_force.get(j, 0.0),
+                "peak_torque": self._joint_fail_torque.get(j, 0.0),
+                "damage": self._joint_fail_damage.get(j, 0.0),
             })
         for b, step in self._body_destroy_step.items():
             pos = self._body_destroy_pos.get(b, (0.0, 0.0))
@@ -484,7 +501,7 @@ class Sandbox:
             })
         events.sort(key=lambda e: e["step"])
         return events
-    def get_forensic_summary(self):
+    def _get_forensic_summary(self):
         first_joint_fail_step = None
         first_joint_fail_pos  = None
         first_joint_fail_type = None
@@ -512,7 +529,13 @@ class Sandbox:
                 worst_spin_body   = body
                 worst_spin_consec = self._beam_high_spin_steps.get(body, 0)
         if worst_spin_body is not None:
-            worst_spin_pos = (worst_spin_body.position.x, worst_spin_body.position.y)
+            if worst_spin_body in self._bodies:
+                worst_spin_pos = (
+                    worst_spin_body.position.x,
+                    worst_spin_body.position.y,
+                )
+            else:
+                worst_spin_pos = self._body_destroy_pos.get(worst_spin_body)
         beam_angvel_thresh = self.BEAM_ANGVEL_THRESH
         beam_angvel_tol    = self.BEAM_ANGVEL_TOLERANCE_STEPS
         return {
@@ -538,26 +561,9 @@ class Sandbox:
             "worst_spin_consec_steps": worst_spin_consec,
             "current_phase":          self._current_phase,
             "step_counter":           self._step_counter,
-            "joint_fail_steps":  dict(self._joint_fail_step),
-            "joint_fail_types":  dict(self._joint_fail_type),
-            "joint_fail_positions": {j: pos for j, pos in self._joint_fail_pos.items()},
-            "body_destroy_steps":  dict(self._body_destroy_step),
-            "body_destroy_reasons": dict(self._body_destroy_reason),
-            "body_destroy_positions": {b: pos for b, pos in self._body_destroy_pos.items()},
-            "failure_event_timeline": self.get_failure_event_timeline(),
-            "per_body_angvel_data": self.get_per_body_angvel_data(),
-            "per_joint_stress_data": self.get_per_joint_stress_data(),
-            "noise_strength": self._noise_strength,
-            "coherent_pulse_interval": self.COHERENT_PULSE_INTERVAL,
-            "coherent_pulse_force": self.COHERENT_PULSE_FORCE,
-            "coherent_moment_base": self.COHERENT_MOMENT_BASE,
-            "phased_storm_mult": self.PHASED_STORM_MULT,
-            "phased_storm_start": self.PHASED_STORM_START,
-            "phased_storm_end": self.PHASED_STORM_END,
-            "linear_damping": self._linear_damping,
-            "angular_damping": self._angular_damping,
-            "beam_angvel_thresh": beam_angvel_thresh,
-            "beam_angvel_tolerance_steps": beam_angvel_tol,
+            "failure_event_timeline": self._get_failure_event_timeline(),
+            "per_body_angvel_data": self._get_per_body_angvel_data(),
+            "per_joint_stress_data": self._get_per_joint_stress_data(),
         }
     def get_terrain_bounds(self):
         return {

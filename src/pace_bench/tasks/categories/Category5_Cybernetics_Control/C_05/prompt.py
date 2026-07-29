@@ -2,18 +2,9 @@ import os
 
 import json
 
-import sys
-
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
-
 from pace_bench.simulator import TIME_STEP
 
 from pace_bench.tasks.primitives_api import API_INTRO
-
-from pace_bench.tasks.categories.Category5_Cybernetics_Control.C_05.environment import (
-    REPULSION_STRONG_THRESHOLD,
-
-)
 
 with open(os.path.join(os.path.dirname(__file__), '..', '..', 'primitives_api.json'), 'r') as f:
     _api_data = json.load(f)
@@ -41,8 +32,8 @@ Design a controller for an agent to trigger a "Logic Lock" by activating switche
 - **Temporal window B to C**: Zone C only counts stay-steps if the agent was in zone B within the last 400 steps.
 - **C altitude requirement**: Zone C only counts stay-steps if the agent's maximum y over the retained y-history window (length up to 150 simulation steps; shorter early in the episode) is at least 2.9 m (approach from elevated path).
 - **Force limit inside zone**: Applying **controller** force with magnitude above 60 N (Newtons) while inside a zone resets that zone's progress. Diagonal inputs near the per-axis cap can exceed this limit.
-- **Repulsion**: Repulsive forces near B and C are anchored at each zone **center** (not zone edges). The field extends to a radius of 1.5 m. The **peak repulsion scale** at each zone center is 22.0 N (Newtons); strength decreases linearly with distance to zero at the field edge—**this characterizes the radial component**. The **peak tangential (swirling) scale** at each zone center is not disclosed; rely on observed dwell behavior to infer whether such forces are present. The agent must navigate these fields (B until A triggered, C until B triggered). Run feedback may report intense repulsion when peak radial scale is **≥ {REPULSION_STRONG_THRESHOLD} N** (Newtons).
-- **Agent**: Spawn at (0.5, 1.95) m; radius 0.2 m; mass 3.0 kg. Linear damping and angular damping are applied to the agent body (Box2D). Other simulator-side motion details not listed here may still require inference from observations.
+- **Repulsion**: Repulsive forces may act near B and C. Their range, radial strength, and any tangential component are latent; infer the field from observed motion. The agent must navigate these fields (B until A triggered, C until B triggered).
+- **Agent**: Spawn at (0.5, 1.95) m; visible radius 0.2 m; mass and damping are latent. Infer inertial and resistance effects from observations.
 - **Agent max applied force**: The controller can apply at most 50.0 N (Newtons) per axis per step (same convention as **apply_agent_force** in the API below).
 - **Collision and unstated dynamics**: Contacts use zero restitution (no bounce). Friction coefficients for terrain, agent, and barrier are not enumerated here; infer them from observed acceleration behavior. Any other simulator-side influences on motion not enumerated here may require inference from observations.
 - **Ambient wind / lateral forcing**: Time-varying lateral body forces may or may not be present; amplitude and period are not stated here—treat unexpected drift as a cue to infer such forcing from observations.
@@ -68,7 +59,7 @@ Design a control loop that:
 - **Barrier delay**: 70 steps after A before gate opens.
 - **Temporal windows**: A to B within 160 steps; B to C within 400 steps.
 - **C altitude history**: Rolling window of up to 150 simulation steps (TRIGGER_STAY_STEPS = 25, C_HIGH_HISTORY = 150).
-- **Repulsion**: Peak scale (radial component) 22.0 N at zone centers; peak tangential (swirling) scale not disclosed (infer from behavior); field radius 1.5 m (linear falloff). Fields near B until A triggers; near C until B triggers. Intense repulsion in feedback when peak radial scale ≥ {REPULSION_STRONG_THRESHOLD} N.
+- **Repulsion**: Field range and radial/tangential strengths are latent; infer them from observed motion. Fields may act near B until A triggers and near C until B triggers.
 - **Agent max applied force**: At most 50.0 N per axis per simulation step (**apply_agent_force**), matching the task API.
 - **APIs**: Use only the primitives documented below.
 """,

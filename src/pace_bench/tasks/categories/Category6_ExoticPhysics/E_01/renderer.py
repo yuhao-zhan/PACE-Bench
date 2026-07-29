@@ -1,8 +1,4 @@
-import sys
-import os
 import pygame
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../..'))
 
 from pace_bench.renderer import Renderer
 from Box2D.b2 import dynamicBody, staticBody
@@ -108,7 +104,7 @@ class E01Renderer(Renderer):
 
             # Bottom-left: task label (moved from top-left — arena objects block top)
             if self._font_label:
-                label = self._font_label.render("E-01 | Zero-G Assembly",
+                label = self._font_label.render("E-01 | Gravity Containment",
                                                 True, COLOR_ANNOTATION)
                 self.simulator.screen.blit(label, (18, _sh - 60))
 

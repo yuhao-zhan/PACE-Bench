@@ -213,24 +213,8 @@ def _format_load_distribution(metrics: Dict[str, Any], moment_num: int) -> List[
         if prev_tc is not None and abs(_safe_float(torque_cap) - _safe_float(prev_tc)) < 0.001:
             lines.append("Load profile unchanged from previous moment.")
             return lines
-    lever_arm = ta.get('lever_arm_m')
-    tip_force = ta.get('tip_force_available_n')
-    force_per_particle = ta.get('force_per_particle_n')
-    deficit_pct = ta.get('deficit_pct')
-    severity = ta.get('severity', 'unknown')
     parts = [f"Torque cap: {torque_cap:.2f} N·m"]
-    if lever_arm is not None:
-        parts.append(f"lever arm: {lever_arm:.3f}m")
-    if tip_force is not None:
-        parts.append(f"tip force: {tip_force:.3f} N")
-    if force_per_particle is not None:
-        parts.append(f"particle resistance: {force_per_particle:.3f} N")
     lines.append(" · ".join(parts))
-    if deficit_pct is not None and deficit_pct > 0:
-        adequacy = ta.get('adequity_ratio')
-        if adequacy is None:
-            adequacy = ta.get('adequacy_ratio')
-        lines.append(f"Assessment: {severity.upper()}" + (f" — force deficit {deficit_pct:.1f}%" if deficit_pct > 0 else ""))
     torque_capped = snap.get('torque_capped', False)
     torque_requested = snap.get('last_torque_requested')
     if torque_capped and torque_cap is not None and torque_requested is not None:
@@ -424,6 +408,13 @@ def _format_numerical_health(metrics: Dict[str, Any]) -> List[str]:
         m = _safe_float(mass)
         if m == 0.0:
             lines.append("  Mass anomaly: structure mass = 0.00 kg — structure may have disintegrated")
+    for key in ('cleaning_percentage', 'structure_mass', 'wiper_x', 'wiper_y'):
+        if key in metrics and metrics[key] is not None:
+            try:
+                if not math.isfinite(float(metrics[key])):
+                    lines.append(f"  Non-finite metric: {key}={metrics[key]}")
+            except (TypeError, ValueError):
+                lines.append(f"  Non-numeric metric: {key}={metrics[key]}")
     return lines
 
 def _format_execution_summary(metrics: Dict[str, Any]) -> List[str]:
@@ -517,12 +508,8 @@ def format_task_metrics(metrics: Dict[str, Any]) -> List[str]:
     if metrics.get('error'):
         parts.append(f"**Evaluation error**: {metrics['error']}")
         return parts
-    moment_num = _detect_and_update_moment(metrics)
-    if moment_num > 1:
-        parts.append(_section_header("Delta"))
-        parts.extend(_format_delta(metrics, moment_num))
-    if moment_num <= 1:
-        parts.append(_section_header("Execution Summary"))
+    moment_num = 1
+    parts.append(_section_header("Execution Summary"))
     parts.extend(_format_execution_summary(metrics))
     events = metrics.get('temporal_events') or []
     if events or moment_num <= 1:
@@ -556,38 +543,6 @@ def get_improvement_suggestions(
     error: str = None,
 
 ) -> List[str]:
-    suggestions = []
     if error:
-        error_lower = error.lower()
-        if "syntax" in error_lower:
-            suggestions.append("- Fix syntax errors in the generated code")
-        elif "sandbox" in error_lower and "not defined" in error_lower:
-            suggestions.append("- Move all code using 'sandbox' inside the build_agent function")
-        else:
-            suggestions.append("- Review the error details above to identify the specific issue")
-        return suggestions
-    mass = metrics.get('structure_mass')
-    max_mass = metrics.get('max_structure_mass')
-    if mass is not None and max_mass is not None:
-        m, mm = _safe_float(mass), _safe_float(max_mass)
-        if mm > 0 and m > mm:
-            over = m - mm
-            suggestions.append(f"- Reduce structure mass by {over:.2f} kg to meet the {mm:.2f} kg budget")
-    failure_reason_lower = (failure_reason or '').lower()
-    if 'build zone' in failure_reason_lower:
-        suggestions.append("- Ensure all structure components are placed within x=[0,12], y=[2,10]")
-        suggestions.append("- Consider raising the structure above y=2.0 to avoid bottom-edge violations")
-    clean = metrics.get('cleaning_percentage')
-    max_res = metrics.get('max_residual_percent')
-    if clean is not None and max_res is not None:
-        cp = _safe_float(clean)
-        mr = _safe_float(max_res)
-        if cp < (100.0 - mr):
-            suggestions.append(f"- Increase cleaning from {cp:.1f}% to at least {100.0 - mr:.0f}%")
-    snap = metrics.get('forensic_snapshot') or {}
-    if snap.get('torque_capped'):
-        suggestions.append("- Motor torque is being capped by the environment; adapt the design to work within the available torque")
-    rra = metrics.get('removal_rate_analysis') or {}
-    if rra.get('saturated'):
-        suggestions.append(f"- Removal rate has saturated — remaining particles may be outside wiper sweep reach")
-    return suggestions
+        return ["- Code execution failed. Review the reported exception and traceback."]
+    return []

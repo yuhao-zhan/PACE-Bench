@@ -35,6 +35,11 @@ class Evaluator:
             getattr(self.sandbox, "balance_hold_steps_required", BALANCE_HOLD_STEPS_REQUIRED)
         )
         self._balance_achieved = False
+        self._balance_achieved_step = None
+        self._peak_abs_reported_angle_deg = 0.0
+        self._peak_abs_reported_omega = 0.0
+        self._minimum_track_margin = float("inf")
+        self._force_saturation_steps = 0
     def evaluate(self, agent_body: Any, step_count: int, max_steps: int) -> tuple[bool, float, dict]:
         pole_angle_true = self.sandbox.get_true_pole_angle()
         pole_omega_true = self.sandbox.get_true_pole_angular_velocity()
@@ -47,19 +52,31 @@ class Evaluator:
         dist_from_center = abs(cart_pos - track_center)
         env_limit = getattr(self.sandbox, "MAX_STEPS", max_steps)
         step_limit = min(max_steps, env_limit)
-        _force_limit = getattr(self.sandbox, "cart_force_limit_newtons", 450.0)
-        _applied_force = getattr(self.sandbox, "_last_applied_force", 0.0)
-        _pole_mass_val = getattr(self.sandbox, "_pole_mass", 1.0)
-        _cart_mass_val = getattr(self.sandbox, "_cart_mass", 10.0)
-        _pole_length_val = getattr(self.sandbox, "_pole_length", 2.0)
-        _sensor_delay_a = getattr(self.sandbox, "_sensor_delay_angle_steps", 0)
-        _sensor_delay_w = getattr(self.sandbox, "_sensor_delay_omega_steps", 0)
-        _grav_y = float(self.sandbox.world.gravity[1]) if hasattr(self.sandbox, "world") else -10.0
+        _force_limit = self.sandbox.get_cart_force_limit()
+        _applied_force = self.sandbox.get_last_applied_force()
+        reported_angle_deg = math.degrees(pole_angle_reported)
+        if math.isfinite(reported_angle_deg):
+            self._peak_abs_reported_angle_deg = max(
+                self._peak_abs_reported_angle_deg, abs(reported_angle_deg)
+            )
+        if math.isfinite(pole_omega_reported):
+            self._peak_abs_reported_omega = max(
+                self._peak_abs_reported_omega, abs(pole_omega_reported)
+            )
+        track_margin = safe_range - dist_from_center
+        if math.isfinite(track_margin):
+            self._minimum_track_margin = min(self._minimum_track_margin, track_margin)
+        if (
+            step_count > 0
+            and math.isfinite(_force_limit)
+            and _force_limit > 0.0
+            and math.isfinite(_applied_force)
+            and abs(_applied_force) >= _force_limit - 1e-9
+        ):
+            self._force_saturation_steps += 1
         metrics = {
-            "pole_angle_deg": math.degrees(pole_angle_reported),
+            "pole_angle_deg": reported_angle_deg,
             "pole_angular_velocity": pole_omega_reported,
-            "pole_angle_true_deg": math.degrees(pole_angle_true),
-            "pole_angular_velocity_true": pole_omega_true,
             "cart_x": cart_pos,
             "cart_velocity_x": cart_vel,
             "dist_from_center": dist_from_center,
@@ -78,12 +95,15 @@ class Evaluator:
             ),
             "force_limit": float(_force_limit),
             "applied_force": float(_applied_force),
-            "pole_mass": float(_pole_mass_val),
-            "cart_mass": float(_cart_mass_val),
-            "pole_length": float(_pole_length_val),
-            "sensor_delay_angle_steps": int(_sensor_delay_a),
-            "sensor_delay_omega_steps": int(_sensor_delay_w),
-            "gravity_y": float(_grav_y),
+            "peak_abs_reported_angle_deg": self._peak_abs_reported_angle_deg,
+            "peak_abs_reported_angular_velocity": self._peak_abs_reported_omega,
+            "minimum_track_margin": (
+                self._minimum_track_margin
+                if math.isfinite(self._minimum_track_margin)
+                else None
+            ),
+            "force_saturation_steps": self._force_saturation_steps,
+            "balance_achieved_step": self._balance_achieved_step,
             "success": False,
             "failed": False
         }
@@ -96,7 +116,9 @@ class Evaluator:
                 n_up = self.sandbox.get_consecutive_upright_sim_steps()
                 if n_up >= self._balance_hold_required:
                     self._balance_achieved = True
+                    self._balance_achieved_step = step_count
                     metrics["balance_achieved"] = True
+                    metrics["balance_achieved_step"] = self._balance_achieved_step
             else:
                 if abs(pole_angle_true) > self.failure_angle_rad:
                     metrics.update(
@@ -135,6 +157,8 @@ class Evaluator:
         return {
             "task_name": "Cart-Pole Balance",
             "description": (
+                "Keep the cart within its safe track and finish with the pole in the "
+                "upright grading band after satisfying the consecutive hold requirement."
             ),
             "metrics": {
                 "balance_achieved": f"≥{int(BALANCE_HOLD_EVALS_REQUIRED)} consecutive in-band (≤{int(BALANCE_ANGLE_DEG)}°) true-angle steps",

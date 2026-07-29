@@ -1,6 +1,6 @@
 import Box2D
 
-from Box2D.b2 import (world, polygonShape, circleShape, staticBody, dynamicBody, weldJoint)
+from Box2D.b2 import world, polygonShape, circleShape
 
 import math
 
@@ -59,6 +59,7 @@ class Sandbox:
         self.FORCE_BUDGET_PER_STEP = float(physics_config.get("force_budget", 12000.0))
         self._force_budget_used = 0.0
         self._peak_budget_used = 0.0
+        self._last_step_budget_used = 0.0
         self._hazard_loss_counts = {
             "pit1": 0, "pit2": 0, "pit3": 0,
             "headwind": 0, "gravwell": 0,
@@ -69,6 +70,24 @@ class Sandbox:
             "headwind": [], "gravwell": [],
         }
         self._budget_used_history = []
+        self._transport_timeline = {
+            "first_source_exit_step": None,
+            "first_build_zone_entry_step": None,
+            "first_target_entry_step": None,
+            "peak_particles_in_target": 0,
+            "peak_particles_in_target_step": None,
+        }
+        self._first_hazard_loss_steps = {
+            "pit1": None,
+            "pit2": None,
+            "pit3": None,
+            "out_of_bounds": None,
+            "floor": None,
+        }
+        self._first_hazard_exposure_steps = {
+            "headwind": None,
+            "gravwell": None,
+        }
         if "max_steps" in physics_config:
             self.MAX_STEPS = int(physics_config["max_steps"])
         else:
@@ -121,10 +140,16 @@ class Sandbox:
         density = float(fluid_config.get("density", 800.0))
         viscosity = float(fluid_config.get("viscosity", 0.25))
         seed = int(fluid_config.get("seed", 42))
-        random.seed(seed)
+        rng = random.Random(seed)
         for _ in range(num_particles):
-            x = random.uniform(self.SOURCE_X_MIN + particle_radius, self.SOURCE_X_MAX - particle_radius)
-            y = random.uniform(self.SOURCE_Y_MIN + particle_radius, self.SOURCE_Y_MAX - particle_radius)
+            x = rng.uniform(
+                self.SOURCE_X_MIN + particle_radius,
+                self.SOURCE_X_MAX - particle_radius,
+            )
+            y = rng.uniform(
+                self.SOURCE_Y_MIN + particle_radius,
+                self.SOURCE_Y_MAX - particle_radius,
+            )
             mass = density * (math.pi * particle_radius ** 2)
             body = self._world.CreateDynamicBody(
                 position=(x, y),
@@ -181,6 +206,47 @@ class Sandbox:
         for fixture in body.fixtures:
             fixture.restitution = float(restitution)
     _PARTICLE_RADIUS = 0.10
+    def _record_hazard_loss(self, name, x=None, y=None):
+        self._hazard_loss_counts[name] += 1
+        if name in self._hazard_loss_positions and x is not None and y is not None:
+            self._hazard_loss_positions[name].append((x, y))
+        if name in self._first_hazard_loss_steps:
+            if self._first_hazard_loss_steps[name] is None:
+                self._first_hazard_loss_steps[name] = self._step_counter
+
+    def _record_transport_diagnostics(self):
+        active_positions = [
+            (p.position.x, p.position.y)
+            for p in self._fluid_particles
+            if p is not None and p.active
+        ]
+        timeline = self._transport_timeline
+        if timeline["first_source_exit_step"] is None and any(
+            not (
+                self.SOURCE_X_MIN <= x <= self.SOURCE_X_MAX
+                and self.SOURCE_Y_MIN <= y <= self.SOURCE_Y_MAX
+            )
+            for x, y in active_positions
+        ):
+            timeline["first_source_exit_step"] = self._step_counter
+        if timeline["first_build_zone_entry_step"] is None and any(
+            self.BUILD_ZONE_X_MIN <= x <= self.BUILD_ZONE_X_MAX
+            and self.BUILD_ZONE_Y_MIN <= y <= self.BUILD_ZONE_Y_MAX
+            for x, y in active_positions
+        ):
+            timeline["first_build_zone_entry_step"] = self._step_counter
+        in_target = sum(
+            1
+            for x, y in active_positions
+            if self.TARGET_X_MIN <= x <= self.TARGET_X_MAX
+            and self.TARGET_Y_MIN <= y <= self.TARGET_Y_MAX
+        )
+        if timeline["first_target_entry_step"] is None and in_target > 0:
+            timeline["first_target_entry_step"] = self._step_counter
+        if in_target > timeline["peak_particles_in_target"]:
+            timeline["peak_particles_in_target"] = in_target
+            timeline["peak_particles_in_target_step"] = self._step_counter
+
     def step(self, time_step):
         self._step_counter += 1
         self._world.Step(time_step, 20, 20)
@@ -192,7 +258,7 @@ class Sandbox:
                     vx = p.linearVelocity.x
                     p.linearVelocity = (vx, 0.0)
                 if x < -5.0 or x > 30.0 or y < -10.0:
-                    self._hazard_loss_counts["out_of_bounds"] += 1
+                    self._record_hazard_loss("out_of_bounds", x, y)
                     p.active = False
         headwind_fx = self.HEADWIND_FX_BASE + 60.0 * math.sin(self._step_counter / 50.0)
         for p in self._fluid_particles:
@@ -201,29 +267,31 @@ class Sandbox:
             x, y = p.position.x, p.position.y
             if (self.PIT3_X_MIN <= x <= self.PIT3_X_MAX and
                     self.PIT3_Y_MIN <= y <= self.PIT3_Y_MAX):
-                self._hazard_loss_counts["pit3"] += 1
-                self._hazard_loss_positions["pit3"].append((x, y))
+                self._record_hazard_loss("pit3", x, y)
                 p.active = False
                 continue
             if (self.PIT_X_MIN <= x <= self.PIT_X_MAX and
                     self.PIT_Y_MIN <= y <= self.PIT_Y_MAX):
-                self._hazard_loss_counts["pit1"] += 1
-                self._hazard_loss_positions["pit1"].append((x, y))
+                self._record_hazard_loss("pit1", x, y)
                 p.active = False
                 continue
             if (self.PIT2_X_MIN <= x <= self.PIT2_X_MAX and
                     self.PIT2_Y_MIN <= y <= self.PIT2_Y_MAX):
-                self._hazard_loss_counts["pit2"] += 1
-                self._hazard_loss_positions["pit2"].append((x, y))
+                self._record_hazard_loss("pit2", x, y)
                 p.active = False
                 continue
             if y > self.HEADWIND_Y_THRESHOLD:
                 p.ApplyForceToCenter((headwind_fx, 0), wake=True)
                 self._hazard_loss_counts["headwind"] += 1
+                if self._first_hazard_exposure_steps["headwind"] is None:
+                    self._first_hazard_exposure_steps["headwind"] = self._step_counter
             if (self.GRAVWELL_X_MIN <= x <= self.GRAVWELL_X_MAX and
                     self.GRAVWELL_Y_MIN <= y <= self.GRAVWELL_Y_MAX):
                 p.ApplyForceToCenter((0, self.GRAVWELL_FY), wake=True)
                 self._hazard_loss_counts["gravwell"] += 1
+                if self._first_hazard_exposure_steps["gravwell"] is None:
+                    self._first_hazard_exposure_steps["gravwell"] = self._step_counter
+        self._record_transport_diagnostics()
         self._peak_budget_used = max(self._peak_budget_used, self._force_budget_used)
         self._last_step_budget_used = self._force_budget_used
         if self._step_counter % 100 == 0:
@@ -313,6 +381,31 @@ class Sandbox:
         return dict(self._hazard_loss_counts)
     def get_hazard_loss_positions(self):
         return {k: list(v) for k, v in self._hazard_loss_positions.items()}
+    def get_hazard_zone_bounds(self):
+        return {
+            "pit1": {
+                "x_min": self.PIT_X_MIN, "x_max": self.PIT_X_MAX,
+                "y_min": self.PIT_Y_MIN, "y_max": self.PIT_Y_MAX,
+            },
+            "pit2": {
+                "x_min": self.PIT2_X_MIN, "x_max": self.PIT2_X_MAX,
+                "y_min": self.PIT2_Y_MIN, "y_max": self.PIT2_Y_MAX,
+            },
+            "pit3": {
+                "x_min": self.PIT3_X_MIN, "x_max": self.PIT3_X_MAX,
+                "y_min": self.PIT3_Y_MIN, "y_max": self.PIT3_Y_MAX,
+            },
+            "headwind": {"y_threshold": self.HEADWIND_Y_THRESHOLD},
+            "gravwell": {
+                "x_min": self.GRAVWELL_X_MIN, "x_max": self.GRAVWELL_X_MAX,
+                "y_min": self.GRAVWELL_Y_MIN, "y_max": self.GRAVWELL_Y_MAX,
+            },
+        }
+    def get_transport_timeline(self):
+        result = dict(self._transport_timeline)
+        result["first_hazard_loss_steps"] = dict(self._first_hazard_loss_steps)
+        result["first_hazard_exposure_steps"] = dict(self._first_hazard_exposure_steps)
+        return result
     def get_closest_particle_to_target(self):
         best_dist = float('inf')
         best_pos = (0.0, 0.0)
@@ -333,7 +426,7 @@ class Sandbox:
     def get_force_budget_utilization(self):
         budget = self.FORCE_BUDGET_PER_STEP
         return {
-            "last_step_used": self._force_budget_used,
+            "last_step_used": self._last_step_budget_used,
             "peak_used": self._peak_budget_used,
             "budget": budget,
             "peak_utilization_pct": (self._peak_budget_used / budget * 100.0) if budget > 0 else 0.0,

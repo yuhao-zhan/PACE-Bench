@@ -94,12 +94,12 @@ class Sandbox:
         self._particle_mass = particle_mass
         self._particle_radius = particle_radius
         self._particle_count = num_particles
-        random.seed(particle_seed)
+        rng = random.Random(particle_seed)
         glass_start_x = 1.0
         glass_end_x = 11.0
         use_filter = terrain_config.get("wiper_ignore_glass_collision", True)
         for i in range(num_particles):
-            x = random.uniform(glass_start_x, glass_end_x)
+            x = rng.uniform(glass_start_x, glass_end_x)
             y = self._glass_y + particle_radius
             density = particle_mass / (math.pi * particle_radius * particle_radius)
             pfd = Box2D.b2FixtureDef(

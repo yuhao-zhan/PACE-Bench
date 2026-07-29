@@ -16,6 +16,7 @@ from typing import Any
 
 from pace_bench.errors import TaskContractError, TaskNotFoundError
 from pace_bench.paths import TASK_CATEGORIES_ROOT, TASK_DEMOS_ROOT, repository_root
+from pace_bench.tasks.stage_prompt import uniform_suffix_for_task
 from pace_bench.types import EnvironmentId, EnvironmentPair, TaskId
 
 CATEGORIES: dict[int, tuple[str, str, str]] = {
@@ -326,6 +327,7 @@ class TaskRegistry:
             )
         ]
         seen = {"Initial"}
+        expected_suffix = uniform_suffix_for_task(task.name)
         for raw in raw_stages:
             stage_id = str(raw.get("stage_id", "")).strip()
             if stage_id == "Base":
@@ -336,6 +338,12 @@ class TaskRegistry:
                     f"{task.full_name}: duplicate stage {environment_id}"
                 )
             seen.add(environment_id.value)
+            stage_suffix = str(raw.get("task_description_suffix") or "")
+            if stage_suffix != expected_suffix:
+                raise TaskContractError(
+                    f"{task.full_name}/{environment_id}: task_description_suffix "
+                    "must use uniform_suffix_for_task()"
+                )
             terrain = dict(raw.get("terrain_config") or {})
             terrain.setdefault("target_rng_seed", 123)
             environments.append(
@@ -344,9 +352,7 @@ class TaskRegistry:
                     title=str(raw.get("title") or environment_id),
                     terrain_config=terrain,
                     physics_config=dict(raw.get("physics_config") or {}),
-                    task_description_suffix=str(
-                        raw.get("task_description_suffix") or ""
-                    ),
+                    task_description_suffix=stage_suffix,
                     raw=dict(raw),
                 )
             )

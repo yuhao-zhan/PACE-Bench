@@ -1,11 +1,5 @@
 import math
 
-import sys
-
-import os
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../..'))
-
 from pace_bench.simulator import TIME_STEP
 
 from pace_bench.primitives import compute_constraint_penalty
@@ -260,8 +254,8 @@ class Evaluator:
         constraint_profile.append({
             'name': 'Grasp',
             'status': 'PASS' if self.object_grasped else 'FAIL',
-            'value': contact_details_res.get('bodies_touching', 0),
-            'limit': '≥1', 'margin': None, 'unit': 'bodies',
+            'value': bool(self.object_grasped),
+            'limit': 'evaluator grasp proxy true', 'margin': None, 'unit': '',
         })
         held_steps = self.steps_with_object_above_target
         required_steps = max(1, int(self.min_simulation_time / TIME_STEP))
@@ -306,6 +300,8 @@ class Evaluator:
             'object_height': obj_info.get('height') if obj_info else None,
             'object_radius': obj_info.get('radius') if obj_info else None,
             'object_friction': obj_info.get('friction') if obj_info else None,
+            'score': score,
+            'time_step': TIME_STEP,
             'object_mass': obj_info.get('mass') if obj_info else None,
             'platform_top_y': platform_top_y_val,
             'finger_joint_states': finger_joint_states,
@@ -328,6 +324,8 @@ class Evaluator:
             'build_zone_y_min': self.BUILD_ZONE_Y_MIN,
             'build_zone_y_max': self.BUILD_ZONE_Y_MAX,
             'initial_object_y': self.initial_object_y,
+            'observation_error_count': getattr(self.environment, '_observation_error_count', 0),
+            'last_observation_error': getattr(self.environment, '_last_observation_error', None),
         }
         return success or failed, score, metrics
     def _check_design_constraints(self):

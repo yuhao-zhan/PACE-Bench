@@ -50,12 +50,6 @@ def _is_joint_limit_finite(metrics: Dict[str, Any]) -> bool:
     jtl = _fv(metrics.get("max_joint_torque_limit"))
     return (jfl < 1e19 and jfl > 0) or (jtl < 1e19 and jtl > 0)
 
-def _suction_band_at(y: float, zones: list) -> Optional[tuple]:
-    for (y_lo, y_hi) in zones:
-        if y_lo <= y <= y_hi:
-            return (y_lo, y_hi)
-    return None
-
 def _section_outcome(metrics: Dict[str, Any]) -> List[str]:
     lines: List[str] = []
     lines.append("### Outcome Summary")
@@ -92,11 +86,12 @@ def _section_spatial(metrics: Dict[str, Any]) -> List[str]:
     cy = metrics.get("climber_y")
     cx = metrics.get("climber_x")
     target = metrics.get("target_y")
-    init_y = _fv(metrics.get("initial_y", 1.5))
+    init_y = float(metrics["initial_y"]) if _fin(metrics.get("initial_y")) else None
     if _fin(cy):
         y = float(cy)
-        lines.append(f"**Altitude**: y = {y:.2f} m (spawn at y = {init_y:.1f} m)")
-        if _fin(target):
+        spawn_text = f" (initial y = {init_y:.1f} m)" if init_y is not None else ""
+        lines.append(f"**Altitude**: y = {y:.2f} m{spawn_text}")
+        if _fin(target) and init_y is not None:
             ty = float(target)
             diff = y - ty
             pct = max(0.0, min(100.0, (y - init_y) / max(ty - init_y, 0.01) * 100.0))
@@ -108,37 +103,19 @@ def _section_spatial(metrics: Dict[str, Any]) -> List[str]:
             pk = f"{_fv(mh):.2f}" if _fin(mh) else "—"
             lo = f"{_fv(mn):.2f}" if _fin(mn) else "—"
             lines.append(f"  - Peak: {pk} m  |  Min: {lo} m")
-    if _fin(cx):
+    if _fin(cx) and _fin(metrics.get("wall_contact_x_lo")) and _fin(metrics.get("wall_contact_x_hi")):
         x = float(cx)
-        wlo = _fv(metrics.get("wall_contact_x_lo"), 3.5)
-        whi = _fv(metrics.get("wall_contact_x_hi"), 7.5)
+        wlo = float(metrics["wall_contact_x_lo"])
+        whi = float(metrics["wall_contact_x_hi"])
         m_lo = x - wlo
         m_hi = whi - x
         in_band = wlo <= x <= whi
         icon = "✅" if in_band else "❌"
         lines.append(f"**Wall Contact (x)**: {icon} x = {x:.2f} m [{wlo:.1f}, {whi:.1f}] "
                      f"(margins: {m_lo:+.2f} / {m_hi:+.2f})")
-    sz = metrics.get("suction_zones")
-    if sz and _fin(cy):
-        yv = float(cy)
-        zones_str = ", ".join(f"[{z[0]:.1f}, {z[1]:.1f}]" for z in sz)
-        lines.append(f"**Suction Zones**: {zones_str}")
-        in_band = _suction_band_at(yv, sz)
-        if in_band is not None:
-            ylo, yhi = in_band
-            lines.append(f"  ✅ Inside band [{ylo:.1f}, {yhi:.1f}] "
-                         f"(margins: {yv - ylo:.2f} to lower, {yhi - yv:.2f} to upper)")
-        else:
-            above = min((ylo for (ylo, _) in sz if ylo > yv), default=None)
-            below = max((yhi for (_, yhi) in sz if yhi < yv), default=None)
-            if above is not None:
-                lines.append(f"  ❌ In gap — next band starts at y = {above:.1f} m "
-                             f"({above - yv:.2f} m above)")
-            elif below is not None:
-                lines.append(f"  ❌ In gap — last band ended at y = {below:.1f} m "
-                             f"({yv - below:.2f} m below)")
-            else:
-                lines.append(f"  ❌ Not in any active band")
+    gap_y = metrics.get("pad_suction_gap_y")
+    if _fin(gap_y):
+        lines.append(f"**Adhesion observation**: an active pad failed to hold near y={float(gap_y):.2f} m")
     lines.append("")
     return lines
 
@@ -274,27 +251,20 @@ def _section_load_stress(metrics: Dict[str, Any]) -> List[str]:
 def _section_energy(metrics: Dict[str, Any]) -> List[str]:
     lines: List[str] = []
     ke_cur = metrics.get("physics_total_ke")
-    pe_cur = metrics.get("physics_total_pe")
     ke_peak = metrics.get("peak_total_ke")
-    pe_peak = metrics.get("peak_total_pe")
-    has_current = _fin(ke_cur) or _fin(pe_cur)
+    has_current = _fin(ke_cur)
     peak_ke_val = _fv(ke_peak) if _fin(ke_peak) else 0.0
-    peak_pe_val = _fv(pe_peak) if _fin(pe_peak) else 0.0
-    has_meaningful_peak = peak_ke_val > 0.001 or peak_pe_val > 0.001
+    has_meaningful_peak = peak_ke_val > 0.001
     if not has_current and not has_meaningful_peak:
         return lines
     lines.append("### 4. Energy & Power")
     if has_current:
         ke = _fv(ke_cur)
-        pe = _fv(pe_cur)
-        te = ke + pe
-        lines.append(f"**Current**: KE = {ke:.3f} J, PE = {pe:.3f} J, Total = {te:.3f} J")
+        lines.append(f"**Current kinetic energy**: {ke:.3f} J")
     if has_meaningful_peak:
         pk_parts = []
         if peak_ke_val > 0.001:
             pk_parts.append(f"Peak KE: {peak_ke_val:.3f} J")
-        if peak_pe_val > 0.001:
-            pk_parts.append(f"Peak PE: {peak_pe_val:.3f} J")
         if pk_parts:
             lines.append(f"**Peaks**: {'  |  '.join(pk_parts)}")
     lines.append("")
@@ -338,12 +308,11 @@ def _section_constraints(metrics: Dict[str, Any]) -> List[str]:
         bzy_max = _fv(metrics.get("build_zone_y_max", 25.0))
         build_items.append(f"  ❌ Build zone: x=[{bzx_min:.1f}, {bzx_max:.1f}], "
                            f"y=[{bzy_min:.1f}, {bzy_max:.1f}] [FAIL]")
-    wlo = _fv(metrics.get("wall_contact_x_lo"), 3.5)
-    whi = _fv(metrics.get("wall_contact_x_hi"), 7.5)
-    ft_val = _fv(metrics.get("fell_height_threshold", 0.5))
+    wlo = _fv(metrics.get("wall_contact_x_lo")) if _fin(metrics.get("wall_contact_x_lo")) else None
+    whi = _fv(metrics.get("wall_contact_x_hi")) if _fin(metrics.get("wall_contact_x_hi")) else None
+    ft_val = _fv(metrics.get("fell_height_threshold")) if _fin(metrics.get("fell_height_threshold")) else None
     target = metrics.get("target_y")
-    sz = metrics.get("suction_zones")
-    if _fin(metrics.get("climber_x")):
+    if _fin(metrics.get("climber_x")) and wlo is not None and whi is not None:
         cxv = _fv(metrics.get("climber_x"))
         wc_status = _constraint_status(cxv, wlo, whi)
         constraints_evaluated.append(("Wall Contact", wc_status))
@@ -353,7 +322,7 @@ def _section_constraints(metrics: Dict[str, Any]) -> List[str]:
                 f"  {icon} Wall contact x: {cxv:.2f} [{wlo:.1f}, {whi:.1f}] "
                 f"(margins: {cxv - wlo:+.2f} / {whi - cxv:+.2f}) [{wc_status}]"
             )
-    if _fin(metrics.get("climber_y")):
+    if _fin(metrics.get("climber_y")) and ft_val is not None:
         cyv = _fv(metrics.get("climber_y"))
         fell_status = _constraint_status(cyv, ft_val, None)
         constraints_evaluated.append(("Fell Threshold", fell_status))
@@ -365,7 +334,7 @@ def _section_constraints(metrics: Dict[str, Any]) -> List[str]:
     if _fin(target) and _fin(metrics.get("climber_y")):
         ty = float(target)
         cyv = _fv(metrics.get("climber_y"))
-        init_y = _fv(metrics.get("initial_y", 1.5))
+        init_y = _fv(metrics.get("initial_y")) if _fin(metrics.get("initial_y")) else cyv
         pct = max(0.0, min(100.0, (cyv - init_y) / max(ty - init_y, 0.01) * 100.0))
         achieved = cyv >= ty
         constraints_evaluated.append(("Target Height", "PASS" if achieved else "IN PROGRESS"))
@@ -405,31 +374,12 @@ def _section_constraints(metrics: Dict[str, Any]) -> List[str]:
             runtime_items.append(
                 f"  ⏳ Duration: {sv}/{rv} steps ({sv / rv * 100:.1f}%) [NOT MET]"
             )
-    if sz and _fin(metrics.get("climber_y")):
-        cyv = _fv(metrics.get("climber_y"))
-        in_band = _suction_band_at(cyv, sz)
-        sz_status = "PASS" if in_band is not None else "FAIL"
-        constraints_evaluated.append(("Suction Zone", sz_status))
-        if sz_status != "PASS":
-            runtime_items.append(f"  ❌ Suction zone: not in any active band [FAIL]")
     if build_items:
         lines.append("**Build-Time**:")
         lines.extend(build_items)
     if runtime_items:
         lines.append("**Runtime**:")
         lines.extend(runtime_items)
-    vortex_y = _fv(metrics.get("vortex_y"), 100.0)
-    if vortex_y < 100.0:
-        lines.append("**Environment**:")
-        cyv2 = _fv(metrics.get("climber_y"))
-        active = cyv2 > vortex_y
-        vfx = _fv(metrics.get("vortex_force_x"))
-        vfy = _fv(metrics.get("vortex_force_y"))
-        v_status = "ACTIVE" if active else "INACTIVE (climber below threshold)"
-        lines.append(f"  Vortex: threshold y={vortex_y:.2f} m, "
-                     f"force=({vfx:.2f}, {vfy:.2f}) N [{v_status}]")
-        if not active and cyv2 > 0:
-            lines.append(f"    Distance to vortex threshold: {vortex_y - cyv2:.2f} m")
     pass_count = sum(1 for _, s in constraints_evaluated if s == "PASS")
     near_count = sum(1 for _, s in constraints_evaluated if s == "NEAR-LIMIT")
     fail_count = sum(1 for _, s in constraints_evaluated if s in ("FAIL", "NOT MET"))
@@ -458,6 +408,15 @@ def _section_numerical_health(metrics: Dict[str, Any]) -> List[str]:
         flags.append("Inf detected in climber position")
     if metrics.get("extreme_speed_flag"):
         flags.append("Extreme body velocity (>100 m/s or >100 rad/s)")
+    for key in ("climber_x", "climber_y", "structure_mass"):
+        if key in metrics and metrics[key] is not None and not _fin(metrics[key]):
+            flags.append(f"Non-finite or non-numeric metric: {key}={metrics[key]}")
+    obs_errors = metrics.get("observation_error_count", 0)
+    if isinstance(obs_errors, (int, float)) and obs_errors > 0:
+        flags.append(
+            f"Observation API errors: {int(obs_errors)}; "
+            f"last={metrics.get('last_observation_error') or 'details unavailable'}"
+        )
     if flags:
         lines.append("### 6. Numerical Health")
         for f in flags:
@@ -487,31 +446,6 @@ def get_improvement_suggestions(
     error: Optional[str] = None,
 
 ) -> List[str]:
-    suggestions: List[str] = []
-    if failed:
-        ft = metrics.get("failure_type", "")
-        if ft == "fell":
-            suggestions.append(
-            )
-        elif ft == "lost_contact":
-            suggestions.append(
-            )
-        elif ft in ("mass_above", "mass_below"):
-            suggestions.append(
-            )
-        elif ft == "build_zone":
-            suggestions.append(
-            )
-    if not success and not failed:
-        suggestions.append(
-        )
-    jb = metrics.get("joints_broken", 0)
-    if isinstance(jb, (int, float)) and jb > 0:
-        suggestions.append(
-            f"- {int(jb)} joint(s) broke during this run. "
-        )
-    gap_y = metrics.get("pad_suction_gap_y")
-    if _fin(gap_y) and _fv(gap_y) > 0:
-        suggestions.append(
-        )
-    return suggestions
+    if error:
+        return ["- Code execution failed. Review the reported exception and traceback."]
+    return []

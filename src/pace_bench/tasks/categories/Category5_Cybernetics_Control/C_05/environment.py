@@ -156,6 +156,8 @@ class Sandbox:
         self._create_agent(terrain_config)
         self._force_x = 0.0
         self._force_y = 0.0
+        self._last_force_x = 0.0
+        self._last_force_y = 0.0
         self._dwell_reset_zone_change = 0
         self._dwell_reset_speed = 0
         self._dwell_reset_force = 0
@@ -404,6 +406,8 @@ class Sandbox:
         max_f = float(self._max_agent_force)
         self._force_x = max(-max_f, min(max_f, float(force_x)))
         self._force_y = max(-max_f, min(max_f, float(force_y)))
+        self._last_force_x = self._force_x
+        self._last_force_y = self._force_y
     def _wind_force(self):
         phase = 2.0 * math.pi * self._step_count / max(1, int(self._wind_period))
         return (float(self._wind_amp) * math.sin(phase), 0.0)
@@ -425,6 +429,8 @@ class Sandbox:
         agent = self._terrain_bodies.get("agent")
         if agent is not None:
             x, y = agent.position.x, agent.position.y
+            self._last_force_x = self._force_x
+            self._last_force_y = self._force_y
             wx, wy = self._wind_force()
             rx, ry = self._repulsion_force(x, y)
             total_fx = self._force_x + wx + rx
@@ -504,7 +510,11 @@ class Sandbox:
             "blocked_cooldown": self._dwell_blocked_cooldown,
         }
     def get_last_applied_force(self):
-        return (self._force_x, self._force_y, math.sqrt(self._force_x**2 + self._force_y**2))
+        return (
+            self._last_force_x,
+            self._last_force_y,
+            math.hypot(self._last_force_x, self._last_force_y),
+        )
     def get_agent_y_history_stats(self):
         ch = int(self._c_high_history)
         relevant = self._agent_y_history[-ch:] if self._agent_y_history else []
@@ -528,7 +538,6 @@ class Sandbox:
         return {
             "magnitude": float(self._repulsion_mag),
             "range": float(self._repulsion_range),
-            "tangential": float(self._repulsion_tangential_mag),
         }
     def get_trigger_stay_steps(self):
         return int(self._trigger_stay_steps)

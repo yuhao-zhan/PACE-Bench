@@ -4,9 +4,6 @@ CART_FORCE_LIMIT_NEWTONS = 450.0
 
 INITIAL_REF_TRACK_CENTER_X = 10.0
 
-def _vertical_gravity_magnitude(sandbox):
-    return abs(float(sandbox.world.gravity.y))
-
 def normalize_angle(theta):
     return math.atan2(math.sin(theta), math.cos(theta))
 
@@ -18,34 +15,13 @@ def agent_action(sandbox, cart, step_count):
     x, v = sandbox.get_cart_position(), sandbox.get_cart_velocity()
     target_x = INITIAL_REF_TRACK_CENTER_X
     force = -4200.0 * theta - 1050.0 * omega - 62.0 * (x - target_x) - 155.0 * v
-    lim = getattr(sandbox, "cart_force_limit_newtons", CART_FORCE_LIMIT_NEWTONS)
+    lim = CART_FORCE_LIMIT_NEWTONS
     sandbox.apply_cart_force(max(-lim, min(lim, force)))
-
-def robust_control(sandbox, l, m_p, m_c, delay_steps=0, kx=150.0, kv=400.0):
-    g = _vertical_gravity_magnitude(sandbox)
-    theta = normalize_angle(sandbox.get_pole_angle())
-    omega = sandbox.get_pole_angular_velocity()
-    x, v = sandbox.get_cart_position(), sandbox.get_cart_velocity()
-    target_x = sandbox.TRACK_CENTER_X
-    dt = 1.0/60.0
-    theta_p = normalize_angle(theta + omega * delay_steps * dt)
-    scale_g = g / 10.0
-    scale_m = (m_p + m_c) / 11.0
-    force = -6000.0 * scale_g * scale_m * theta_p - 1500.0 * scale_g * scale_m * omega
-    force += -kx * scale_g * scale_m * (x - target_x) - kv * scale_g * scale_m * v
-    limit = getattr(sandbox, "cart_force_limit_newtons", CART_FORCE_LIMIT_NEWTONS)
-    sandbox.apply_cart_force(max(-limit, min(limit, force)))
 
 def build_agent_stage_1(sandbox): return sandbox.get_cart_body()
 
 def agent_action_stage_1(sandbox, cart, step_count):
-    g = _vertical_gravity_magnitude(sandbox)
-    pole_len = float(getattr(sandbox, '_pole_length', 2.0))
-    m_p = float(getattr(sandbox, '_pole_mass', 1.0))
-    m_c = float(getattr(sandbox, '_cart_mass', 10.0))
-    delay_steps = int(getattr(sandbox, '_sensor_delay_angle_steps', 10))
-    F_lim = float(getattr(sandbox, 'cart_force_limit_newtons', 450.0))
-    safe_half = float(sandbox.SAFE_HALF_RANGE)
+    g, pole_len, delay_steps, F_lim = 10.0, 2.0, 10, 450.0
     target_x = sandbox.TRACK_CENTER_X
     theta = normalize_angle(sandbox.get_pole_angle())
     omega = sandbox.get_pole_angular_velocity()
@@ -53,51 +29,42 @@ def agent_action_stage_1(sandbox, cart, step_count):
     v = sandbox.get_cart_velocity()
     dt = 1.0 / 60.0
 
-    M_tot = m_p + m_c
-    omega0_sq = max((6.0 * g * M_tot) / (pole_len * (7.0 * m_c + 4.0 * m_p)), 1e-6)
-    omega0 = math.sqrt(omega0_sq)
-    T_delay = delay_steps * dt
-    max_exp_arg = 20.0
-    arg = min(omega0 * T_delay, max_exp_arg)
-    ch = math.cosh(arg)
-    sh = math.sinh(arg)
-    theta_p = theta * ch + omega / max(omega0, 1e-9) * sh
-
-    if step_count < delay_steps + 5:
-        theta_p = max(-0.30, min(0.30, theta_p))
-
-    scale_g = g / 10.0
-    scale_m = M_tot / 11.0
-
-    force = -130.0 * scale_g * scale_m * theta_p - 15.0 * scale_g * scale_m * omega
-
-    if not hasattr(cart, '_angle_integral_s1'):
-        cart._angle_integral_s1 = 0.0
-    ki_angle = 150.0 * scale_g * scale_m
-    cart._angle_integral_s1 += theta_p * 0.003
-    cart._angle_integral_s1 = max(-0.08, min(0.08, cart._angle_integral_s1))
-    force += -ki_angle * cart._angle_integral_s1
+    # Reconstruct the present pole state from delayed measurements.  Cart
+    # velocity is an allowed live observation, so its stored finite differences
+    # provide the pivot acceleration over the ten delayed intervals.  The
+    # history is controller memory only; no simulator state is changed.
+    history = list(getattr(cart, "_velocity_history_s1", ()))
+    history.append(float(v))
+    history = history[-(delay_steps + 1):]
+    cart._velocity_history_s1 = history
+    if len(history) == delay_steps + 1:
+        for previous_v, next_v in zip(history, history[1:]):
+            cart_acceleration = (next_v - previous_v) / dt
+            angular_acceleration = (
+                0.8 * (1.5 / pole_len) * math.cos(theta) * cart_acceleration
+                + (1.5 * g / pole_len) * math.sin(theta)
+            )
+            omega += angular_acceleration * dt
+            theta += omega * dt
+    else:
+        horizon = delay_steps * dt
+        natural_rate = math.sqrt(1.5 * g / pole_len)
+        argument = natural_rate * horizon
+        ch, sh = math.cosh(argument), math.sinh(argument)
+        theta, omega = (
+            theta * ch + omega * sh / natural_rate,
+            theta * natural_rate * sh + omega * ch,
+        )
 
     pos_err = x - target_x
-    force += -0.15 * scale_g * scale_m * pos_err - 2.0 * scale_g * scale_m * v
-
-    margin = safe_half - abs(pos_err)
-    moving_outward = (pos_err > 0.0 and v > 0.001) or (pos_err < 0.0 and v < -0.001)
-    if margin < safe_half * 0.45 and moving_outward:
-        sandbox.apply_cart_force(-F_lim if pos_err > 0.0 else F_lim)
-        return
+    force = -380.0 * theta - 15.0 * omega - 0.05 * pos_err - 0.5 * v
 
     sandbox.apply_cart_force(max(-F_lim, min(F_lim, force)))
 
 def build_agent_stage_2(sandbox): return sandbox.get_cart_body()
 
 def agent_action_stage_2(sandbox, cart, step_count):
-    g = _vertical_gravity_magnitude(sandbox)
-    pole_len = float(getattr(sandbox, '_pole_length', 2.0))
-    m_p = float(getattr(sandbox, '_pole_mass', 1.0))
-    m_c = float(getattr(sandbox, '_cart_mass', 10.0))
-    delay_steps = int(getattr(sandbox, '_sensor_delay_angle_steps', 10))
-    F_lim = float(getattr(sandbox, 'cart_force_limit_newtons', 450.0))
+    g, pole_len, m_p, m_c, delay_steps, F_lim = 12.0, 2.0, 1.0, 10.0, 10, 0.5
     safe_half = float(sandbox.SAFE_HALF_RANGE)
     target_x = sandbox.TRACK_CENTER_X
     theta = normalize_angle(sandbox.get_pole_angle())
@@ -153,12 +120,7 @@ def agent_action_stage_2(sandbox, cart, step_count):
 def build_agent_stage_3(sandbox): return sandbox.get_cart_body()
 
 def agent_action_stage_3(sandbox, cart, step_count):
-    g = _vertical_gravity_magnitude(sandbox)
-    l = float(getattr(sandbox, '_pole_length', 2.0))
-    m_p = float(getattr(sandbox, '_pole_mass', 5.0))
-    m_c = float(getattr(sandbox, '_cart_mass', 3.0))
-    delay_steps = int(getattr(sandbox, '_sensor_delay_angle_steps', 4))
-    F_lim = float(getattr(sandbox, 'cart_force_limit_newtons', 4.0))
+    g, m_p, m_c, delay_steps, F_lim = 22.0, 5.0, 3.0, 3, 4.0
     theta = normalize_angle(sandbox.get_pole_angle())
     omega = sandbox.get_pole_angular_velocity()
     x = sandbox.get_cart_position()
@@ -193,12 +155,7 @@ def agent_action_stage_3(sandbox, cart, step_count):
 def build_agent_stage_4(sandbox): return sandbox.get_cart_body()
 
 def agent_action_stage_4(sandbox, cart, step_count):
-    g = _vertical_gravity_magnitude(sandbox)
-    pole_len = float(getattr(sandbox, '_pole_length', 0.5))
-    m_p = float(getattr(sandbox, '_pole_mass', 12.0))
-    m_c = float(getattr(sandbox, '_cart_mass', 2.0))
-    F_lim = float(getattr(sandbox, 'cart_force_limit_newtons', 50.0))
-    delay_steps = int(getattr(sandbox, '_sensor_delay_angle_steps', 3))
+    g, pole_len, m_p, m_c, F_lim, delay_steps = 35.0, 0.5, 12.0, 2.0, 50.0, 3
     theta = normalize_angle(sandbox.get_pole_angle())
     omega = sandbox.get_pole_angular_velocity()
     x = sandbox.get_cart_position()

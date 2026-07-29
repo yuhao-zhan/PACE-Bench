@@ -23,7 +23,9 @@ def _fmt_val(v: Any, decimals: int = 3) -> str:
 def _check_tag(passed: bool) -> str:
     return "PASS" if passed else "FAIL"
 
-def _phase_label(step: int, phase_1: int, phase_2: int) -> str:
+def _phase_label(step: int, phase_1: int | None, phase_2: int | None) -> str:
+    if phase_1 is None or phase_2 is None:
+        return "[phase unavailable]"
     if step < phase_1:
         return "[pre-load]"
     elif step < phase_2:
@@ -39,32 +41,52 @@ def _build_temporal_chronology(metrics: Dict[str, Any]) -> List[str]:
     first_warning_step = metrics.get("first_warning_step")
     step_count = metrics.get("step_count")
     final_step = int(step_count) if _is_valid_number(step_count) else 0
+    time_step = metrics.get("time_step")
+    seconds_per_step = float(time_step) if _is_valid_number(time_step) and float(time_step) > 0 else None
     has_events = (
         (_is_valid_number(first_failure_step) and int(first_failure_step) >= 0)
         or (_is_valid_number(first_warning_step) and int(first_warning_step) >= 0)
         or (joint_failure_records and len(joint_failure_records) > 0)
     )
     if not has_events:
-        parts.append(f"  No failures or stress warnings. Simulation stopped at step {final_step} (~{final_step / 60:.2f}s).\n")
+        elapsed = final_step * seconds_per_step if seconds_per_step is not None else None
+        parts.append(
+            f"  No failures or stress warnings. Simulation stopped at step {final_step}"
+            + (f" (~{elapsed:.2f}s).\n" if elapsed is not None else ".\n")
+        )
         return parts
     load_attach_time = metrics.get("load_attach_time")
     load_2_attach_time = metrics.get("load_2_attach_time")
-    lat = float(load_attach_time) if _is_valid_number(load_attach_time) else 5.0
-    lat2 = float(load_2_attach_time) if _is_valid_number(load_2_attach_time) else 15.0
-    phase_1_step = int(lat * 60)
-    phase_2_step = int(lat2 * 60)
+    phase_1_step = (
+        int(float(load_attach_time) / seconds_per_step)
+        if seconds_per_step is not None and _is_valid_number(load_attach_time)
+        else None
+    )
+    phase_2_step = (
+        int(float(load_2_attach_time) / seconds_per_step)
+        if seconds_per_step is not None and _is_valid_number(load_2_attach_time)
+        else None
+    )
     if _is_valid_number(first_warning_step) and int(first_warning_step) >= 0:
         fws = int(first_warning_step)
-        sim_t = fws / 60.0
+        sim_t = fws * seconds_per_step if seconds_per_step is not None else None
         phase = _phase_label(fws, phase_1_step, phase_2_step)
-        parts.append(f"**First stress warning (>90% limit):** step {fws} (~{sim_t:.2f}s) {phase}")
+        time_text = f" (~{sim_t:.2f}s)" if sim_t is not None else ""
+        warning_fraction = metrics.get("joint_warning_fraction")
+        warning_text = (
+            f">{100.0 * float(warning_fraction):.0f}% limit"
+            if _is_valid_number(warning_fraction)
+            else "threshold crossed"
+        )
+        parts.append(f"**First stress warning ({warning_text}):** step {fws}{time_text} {phase}")
     else:
         parts.append("**First stress warning:** not triggered")
     if _is_valid_number(first_failure_step) and int(first_failure_step) >= 0:
         ffs = int(first_failure_step)
-        sim_t = ffs / 60.0
+        sim_t = ffs * seconds_per_step if seconds_per_step is not None else None
         phase = _phase_label(ffs, phase_1_step, phase_2_step)
-        parts.append(f"**First joint failure:** step {ffs} (~{sim_t:.2f}s) {phase}")
+        time_text = f" (~{sim_t:.2f}s)" if sim_t is not None else ""
+        parts.append(f"**First joint failure:** step {ffs}{time_text} {phase}")
     else:
         parts.append("**First joint failure:** none")
     parts.append("")
@@ -80,7 +102,7 @@ def _build_temporal_chronology(metrics: Dict[str, Any]) -> List[str]:
             lf = rec.get("limit_force", 0.0)
             lt = rec.get("limit_torque", 0.0)
             fs = rec.get("fail_step", -1)
-            sim_t = fs / 60.0 if fs >= 0 else -1.0
+            sim_t = fs * seconds_per_step if fs >= 0 and seconds_per_step is not None else None
             phase = _phase_label(fs, phase_1_step, phase_2_step)
             exceeded = []
             if lf > 0 and pf > lf:
@@ -92,12 +114,16 @@ def _build_temporal_chronology(metrics: Dict[str, Any]) -> List[str]:
             exceed_str = "; ".join(exceeded) if exceeded else "limit data missing"
             parts.append(
                 f"  #{idx}: [{jtype}] at ({_fmt_val(ax, 2)}, {_fmt_val(ay, 2)}) m | "
-                f"step {fs} (~{sim_t:.2f}s) {phase} | Exceeded: {exceed_str}"
+                f"step {fs}{f' (~{sim_t:.2f}s)' if sim_t is not None else ''} {phase} | Exceeded: {exceed_str}"
             )
         parts.append("")
     else:
         parts.append("**Failure cascade:** no joints failed.\n")
-    parts.append(f"**Simulation stopped at:** step {final_step} (~{final_step / 60:.2f}s)")
+    elapsed = final_step * seconds_per_step if seconds_per_step is not None else None
+    parts.append(
+        f"**Simulation stopped at:** step {final_step}"
+        + (f" (~{elapsed:.2f}s)" if elapsed is not None else "")
+    )
     return parts
 
 def _build_spatial_diagnostics(metrics: Dict[str, Any]) -> List[str]:
@@ -110,7 +136,7 @@ def _build_spatial_diagnostics(metrics: Dict[str, Any]) -> List[str]:
     structure_mass = metrics.get("structure_mass")
     max_structure_mass = metrics.get("max_structure_mass")
     anchor_count = metrics.get("anchor_count")
-    max_anchors_limit = metrics.get("max_anchors_limit", 2)
+    max_anchors_limit = metrics.get("max_anchors_limit")
     if _is_valid_number(max_reach) and _is_valid_number(target_reach):
         mr, tr = float(max_reach), float(target_reach)
         margin = mr - tr
@@ -215,9 +241,10 @@ def _build_energy_context(metrics: Dict[str, Any]) -> List[str]:
     parts: List[str] = []
     parts.append("### 4. Energy & Impact Context\n")
     lt = metrics.get("load_type", "static")
-    lm = metrics.get("load_mass", 500.0)
-    parts.append(f"  Load delivery: {lt}, payload mass: {_fmt_val(lm, 1)} kg")
-    dh = metrics.get("drop_height", 0.0)
+    lm = metrics.get("load_mass")
+    mass_text = f", payload mass: {_fmt_val(lm, 1)} kg" if _is_valid_number(lm) else ""
+    parts.append(f"  Load delivery: {lt}{mass_text}")
+    dh = metrics.get("drop_height")
     if lt == "dropped" and _is_valid_number(dh) and float(dh) > 0:
         parts.append(f"  Drop height: {_fmt_val(dh, 1)} m (dropped load — higher impulse than static placement)")
     parts.append("")
@@ -241,7 +268,7 @@ def _build_constraint_profile(metrics: Dict[str, Any]) -> List[str]:
             "passed": smf <= msmf,
         })
     ac = metrics.get("anchor_count")
-    mal = metrics.get("max_anchors_limit", 2)
+    mal = metrics.get("max_anchors_limit")
     if _is_valid_number(ac) and _is_valid_number(mal):
         acf, malf = int(ac), int(mal)
         constraints.append({
@@ -372,9 +399,7 @@ def _build_constraint_profile(metrics: Dict[str, Any]) -> List[str]:
     load_hold_time = metrics.get("load_hold_time")
     load2_hold_time = metrics.get("load2_hold_time")
     load_duration = metrics.get("load_duration")
-    if not _is_valid_number(load_duration):
-        load_duration = 10.0
-    if _is_valid_number(load_hold_time):
+    if _is_valid_number(load_hold_time) and _is_valid_number(load_duration):
         lht = float(load_hold_time)
         ld = float(load_duration)
         passed = lht >= ld
@@ -387,7 +412,7 @@ def _build_constraint_profile(metrics: Dict[str, Any]) -> List[str]:
             "pct": pct,
             "passed": passed,
         })
-    if _is_valid_number(load2_hold_time):
+    if _is_valid_number(load2_hold_time) and _is_valid_number(load_duration):
         l2ht = float(load2_hold_time)
         ld = float(load_duration)
         passed = l2ht >= ld
@@ -400,8 +425,7 @@ def _build_constraint_profile(metrics: Dict[str, Any]) -> List[str]:
             "pct": pct,
             "passed": passed,
         })
-    constraint_info = metrics.get("constraint_info", {}) or {}
-    reach_satisfied_initially = constraint_info.get("reach_satisfied_initially")
+    reach_satisfied_initially = metrics.get("reach_satisfied_initially")
     if reach_satisfied_initially is not None:
         constraints.append({
             "constraint": "Initial Reach (pre-load)",
@@ -411,16 +435,23 @@ def _build_constraint_profile(metrics: Dict[str, Any]) -> List[str]:
             "pct": None,
             "passed": reach_satisfied_initially,
         })
-    fr_str = str(metrics.get("failure_reason", "") or "")
-    build_zone_violated = "outside build zone" in fr_str
-    constraints.append({
-        "constraint": "Build Zone",
-        "value": "within bounds" if not build_zone_violated else "violation",
-        "limit": "beams within [0,50] x [-20,30] m",
-        "margin": "N/A",
-        "pct": None,
-        "passed": not build_zone_violated,
-    })
+    build_bounds = metrics.get("build_zone_bounds")
+    if isinstance(build_bounds, dict):
+        fr_str = str(metrics.get("failure_reason", "") or "")
+        build_zone_violated = "outside build zone" in fr_str
+        constraints.append({
+            "constraint": "Build Zone",
+            "value": "within bounds" if not build_zone_violated else "violation",
+            "limit": (
+                f"beams within [{_fmt_val(build_bounds.get('x_min'), 2)}, "
+                f"{_fmt_val(build_bounds.get('x_max'), 2)}] x "
+                f"[{_fmt_val(build_bounds.get('y_min'), 2)}, "
+                f"{_fmt_val(build_bounds.get('y_max'), 2)}] m"
+            ),
+            "margin": "N/A",
+            "pct": None,
+            "passed": not build_zone_violated,
+        })
     if not constraints:
         parts.append("No constraint data available.\n")
         return parts
@@ -491,6 +522,13 @@ def _build_numerical_health(metrics: Dict[str, Any]) -> List[str]:
             pass
     if non_finite_keys:
         issues.append(f"Non-finite values: {', '.join(non_finite_keys)}")
+    observation_errors = metrics.get("joint_observation_error_count")
+    if _is_valid_number(observation_errors) and int(observation_errors) > 0:
+        detail = metrics.get("last_joint_observation_error")
+        issues.append(
+            f"Joint reaction telemetry failed {int(observation_errors)} time(s)"
+            + (f"; last error: {detail}" if detail else "")
+        )
     max_reach = metrics.get("max_reach")
     target_reach = metrics.get("target_reach")
     if _is_valid_number(max_reach) and _is_valid_number(target_reach) and float(target_reach) > 0:
@@ -526,6 +564,15 @@ def format_task_metrics(metrics: Dict[str, Any]) -> List[str]:
     if not metrics:
         return ["**No metrics available.**"]
     report: List[str] = []
+    success = bool(metrics.get("success", False))
+    failed = bool(metrics.get("failed", False))
+    reason = metrics.get("failure_reason")
+    if success:
+        report.append("## Outcome: SUCCESS")
+    elif failed:
+        report.append(f"## Outcome: FAILED — {reason or 'evaluator reported failure'}")
+    else:
+        report.append("## Outcome: IN PROGRESS")
     report.extend(_build_constraint_profile(metrics))
     report.extend(_build_spatial_diagnostics(metrics))
     report.extend(_build_temporal_chronology(metrics))
@@ -533,3 +580,16 @@ def format_task_metrics(metrics: Dict[str, Any]) -> List[str]:
     report.extend(_build_energy_context(metrics))
     report.extend(_build_numerical_health(metrics))
     return report
+
+
+def get_improvement_suggestions(
+    metrics: Dict[str, Any],
+    score: float,
+    success: bool,
+    failed: bool,
+    failure_reason: str | None = None,
+    error: str | None = None,
+) -> List[str]:
+    if error:
+        return ["- Code execution failed. Review the error details above."]
+    return []

@@ -45,16 +45,17 @@ def _horizontal_grid_absorber(
     x_inner: float,
     x_outer: float,
     anchor_density: float = 1.0,
+    width: float = 0.4,
 
 ):
     anchor = sandbox.add_beam(7.1, 5.4, 0.1, 0.1, 0, anchor_density)
     sandbox.add_joint(anchor, None, (7.1, 5.5), type="rigid")
     y_safe = [0.75, 1.75, 2.75, 3.85]
     for y in y_safe:
-        b_out = sandbox.add_beam(x_outer, y, 0.4, 0.1, 0, density)
+        b_out = sandbox.add_beam(x_outer, y, width, 0.1, 0, density)
         sandbox.set_damping(b_out, damping, damping)
         sandbox.set_material_properties(b_out, restitution=0.0)
-        b_in = sandbox.add_beam(x_inner, y, 0.4, 0.1, 0, density)
+        b_in = sandbox.add_beam(x_inner, y, width, 0.1, 0, density)
         sandbox.set_damping(b_in, damping, damping)
         sandbox.set_material_properties(b_in, restitution=0.0)
     return anchor
@@ -89,93 +90,35 @@ def build_agent_stage_1(sandbox):
 
 def build_agent_stage_2(sandbox):
     return _horizontal_grid_absorber(
-        sandbox, density=26.0, damping=128.0, x_inner=7.77, x_outer=9.98
+        sandbox, density=10.0, damping=220.0, x_inner=7.77, x_outer=9.65,
+        width=1.0,
     )
 
 def build_agent_stage_3(sandbox):
-    density = 0.1
-    rest = 0.0
-    damp = 0.1
-    anchor = sandbox.add_beam(7.08, 5.42, 0.08, 0.08, 0, density)
-    sandbox.set_material_properties(anchor, restitution=rest)
-    sandbox.add_joint(anchor, None, (7.08, 5.5), type="rigid")
-    safe_ys = [0.55, 0.62, 1.55, 1.82, 2.55, 2.88, 3.60, 4.05]
-    for y in safe_ys:
-        b = sandbox.add_beam(7.06, y, 0.06, 0.06, 0, density)
-        sandbox.set_damping(b, damp, damp)
-        sandbox.set_material_properties(b, restitution=rest)
-    return anchor
+    return _horizontal_grid_absorber(
+        sandbox, density=8.0, damping=220.0, x_inner=7.77, x_outer=9.98,
+        anchor_density=0.1, width=1.2,
+    )
 
 def build_agent_stage_4(sandbox):
     return _horizontal_grid_absorber(
         sandbox,
-        density=30.0,
-        damping=210.0,
-        x_inner=9.52,
-        x_outer=10.62,
+        density=10.0,
+        damping=220.0,
+        x_inner=7.77,
+        x_outer=9.55,
         anchor_density=1.0,
+        width=1.0,
     )
 
 def agent_action_stage_1(sandbox, agent_body, step_count):
     pass
 
-def _d06_impulse_scale_linear_vel(body, k: float) -> None:
-    vx, vy = body.linearVelocity.x, body.linearVelocity.y
-    m = body.mass
-    if m <= 0.0:
-        return
-    body.ApplyLinearImpulse(
-        (m * vx * (k - 1.0), m * vy * (k - 1.0)),
-        body.worldCenter,
-        True,
-    )
-
 def agent_action_stage_2(sandbox, agent_body, step_count):
-    tb = getattr(sandbox, "_terrain_bodies", None)
-    if not tb:
-        return
-    k_hi = 0.9912 if step_count < 9000 else 0.9968
-    for key in ("ball", "ball2", "ball3", "ball4", "ball5", "ball6", "ball7"):
-        b = tb.get(key)
-        if b is None:
-            continue
-        if b.position.x > 10.85:
-            b.ApplyForceToCenter((-620.0, 0.0), True)
-        vx, vy = b.linearVelocity.x, b.linearVelocity.y
-        sp = (vx * vx + vy * vy) ** 0.5
-        if sp < 0.05:
-            continue
-        k = k_hi if sp > 0.28 else 0.9984
-        _d06_impulse_scale_linear_vel(b, k)
+    pass
 
 def agent_action_stage_3(sandbox, agent_body, step_count):
-    tb = getattr(sandbox, "_terrain_bodies", None)
-    if not tb:
-        return
-    k_brake = 0.52
-    for key in ("ball", "ball2", "ball3", "ball4", "ball5", "ball6", "ball7"):
-        b = tb.get(key)
-        if b is None:
-            continue
-        px = b.position.x
-        if px > 11.0:
-            continue
-        vx, vy = b.linearVelocity.x, b.linearVelocity.y
-        sp = (vx * vx + vy * vy) ** 0.5
-        if sp < 0.05:
-            continue
-        _d06_impulse_scale_linear_vel(b, k_brake)
+    pass
 
 def agent_action_stage_4(sandbox, agent_body, step_count):
-    if step_count > 200:
-        return
-    tb = getattr(sandbox, "_terrain_bodies", None)
-    ball = tb.get("ball") if tb else None
-    if ball is None:
-        return
-    vx, vy = ball.linearVelocity.x, ball.linearVelocity.y
-    sp = (vx * vx + vy * vy) ** 0.5
-    if sp < 0.22:
-        return
-    drag = 0.987 if step_count < 100 else 0.993
-    _d06_impulse_scale_linear_vel(ball, drag)
+    pass

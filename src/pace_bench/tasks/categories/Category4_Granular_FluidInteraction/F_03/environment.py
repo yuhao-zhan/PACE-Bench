@@ -12,6 +12,7 @@ class Sandbox:
         physics_config = physics_config or {}
         self._terrain_config = dict(terrain_config)
         self._physics_config = dict(physics_config)
+        self._observation_errors = []
         gravity = tuple(physics_config.get("gravity", (0, -10)))
         self._default_linear_damping = float(physics_config.get("linear_damping", 0.02))
         self._default_angular_damping = float(physics_config.get("angular_damping", 0.02))
@@ -118,10 +119,10 @@ class Sandbox:
         density = float(pit_config.get("density", 1500.0))
         friction = float(pit_config.get("friction", 0.7))
         seed = int(pit_config.get("seed", 42))
-        random.seed(seed)
+        rng = random.Random(seed)
         for _ in range(num_particles):
-            x = random.uniform(self.PIT_X_MIN + particle_radius, self.PIT_X_MAX - particle_radius)
-            y = random.uniform(self.PIT_Y_MIN + particle_radius, self.PIT_Y_MAX - particle_radius)
+            x = rng.uniform(self.PIT_X_MIN + particle_radius, self.PIT_X_MAX - particle_radius)
+            y = rng.uniform(self.PIT_Y_MIN + particle_radius, self.PIT_Y_MAX - particle_radius)
             p = self._world.CreateDynamicBody(
                 position=(x, y),
                 fixtures=Box2D.b2FixtureDef(
@@ -257,8 +258,10 @@ class Sandbox:
                             ys = [v[1] for v in vs]
                             w = max(w, max(xs) - min(xs) + 0.2)
                             h = max(h, max(ys) - min(ys) + 0.2)
-            except Exception:
-                pass
+            except (AttributeError, TypeError, ValueError) as exc:
+                self._observation_errors.append(
+                    f"scoop geometry observation unavailable at step {self._step_counter}: {exc}"
+                )
             dx = w / 2 + CARRY_MARGIN
             dy = h / 2 + CARRY_MARGIN
             over_hopper = (self.HOPPER_X_MIN <= bx <= self.HOPPER_X_MAX and by >= self.HOPPER_Y_MIN)
@@ -277,10 +280,10 @@ class Sandbox:
                     if prev is not None:
                         p.position = (px + (bx - prev[0]), py + (by - prev[1]))
                     carried += 1
-            if len(self._carry_log) < self._max_carry_log_entries:
-                over_pit = (self.PIT_X_MIN <= bx <= self.PIT_X_MAX and
-                            self.PIT_Y_MIN <= by <= self.PIT_Y_MAX)
-                self._carry_log.append({
+            over_pit = (self.PIT_X_MIN <= bx <= self.PIT_X_MAX and
+                        self.PIT_Y_MIN <= by <= self.PIT_Y_MAX)
+            if carried > 0 or dumping or self._step_counter % 30 == 0:
+                entry = {
                     "step": self._step_counter,
                     "carried": carried,
                     "over_pit": over_pit,
@@ -289,7 +292,10 @@ class Sandbox:
                     "scoop_x": round(bx, 3),
                     "scoop_y": round(by, 3),
                     "scoop_angle": round(ba, 3),
-                })
+                }
+                if len(self._carry_log) >= self._max_carry_log_entries:
+                    self._carry_log.pop(0)
+                self._carry_log.append(entry)
         self._world.Step(time_step, 10, 10)
         for body in self._scoop_bodies:
             if body is None or not body.active:
@@ -333,8 +339,10 @@ class Sandbox:
                             "limit_force_N": round(self._joint_max_force, 2),
                             "limit_torque_Nm": round(self._joint_max_torque, 2),
                         })
-                except Exception:
-                    continue
+                except (AttributeError, TypeError, ValueError) as exc:
+                    self._observation_errors.append(
+                        f"joint reaction observation unavailable at step {self._step_counter}: {exc}"
+                    )
             for j in to_destroy:
                 if j in self._joints:
                     self._world.DestroyJoint(j)
@@ -463,4 +471,5 @@ class Sandbox:
             "peak_angular_velocity": self._peak_angular_velocity,
             "max_particle_speed": self._max_particle_speed,
             "carry_log": list(self._carry_log),
+            "observation_errors": list(self._observation_errors),
         }

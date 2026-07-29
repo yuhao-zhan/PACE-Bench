@@ -1,11 +1,5 @@
 import math
 
-import sys
-
-import os
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../.."))
-
 from pace_bench.primitives import compute_constraint_penalty
 
 def _b2_same_body(a, b):
@@ -31,8 +25,7 @@ class Evaluator:
         self._design_constraints_checked = False
         self._ball_approach_step = {}
         self._ball_speed_at_approach = {}
-        self._initial_kinetic_energy = None
-        self._env_config_snapshot = None
+        self._observation_errors = []
         if environment is None:
             raise ValueError("Evaluator requires environment instance")
         self.MAX_STRUCTURE_MASS = getattr(environment, "MAX_STRUCTURE_MASS", 10.0)
@@ -112,7 +105,7 @@ class Evaluator:
             if violations:
                 self._design_constraints_checked = True
                 metrics = self._make_metrics(positions, velocities, step_count, False, True,
-                    "Design constraint violated: " + "; ".join(violations))
+                    "Design constraint violated: " + "; ".join(violations), max_steps)
                 return True, 0.0, metrics
             self._design_constraints_checked = True
         structure_smashed = self.environment.is_structure_smashed()
@@ -127,13 +120,15 @@ class Evaluator:
             failure_reason = "Sequential violation: a ball crossed the approach line (x < 7.4 m) before all lower-index balls were caught"
         elif structure_smashed:
             failed = True
-            failure_reason = "Structure smashed: a joint broke (peak force exceeded limit or sustained high load — reduce impact forces and try again)"
+            failure_reason = "Structure smashed: a joint exceeded the peak or fatigue force limit"
         elif step_count >= max_steps - 1 and not all_caught:
             failed = True
             failure_reason = "Time limit reached: not all balls were caught before the maximum step count"
         done = failed or success or step_count >= max_steps - 1
         score = 100.0 if success else (0.0 if failed else 0.0)
-        metrics = self._make_metrics(positions, velocities, step_count, success, failed, failure_reason)
+        metrics = self._make_metrics(
+            positions, velocities, step_count, success, failed, failure_reason, max_steps
+        )
         return done, score, metrics
     def _check_design_constraints(self):
         violations = []
@@ -154,8 +149,7 @@ class Evaluator:
                 has_rigid_ground_anchor = True
                 break
         if not has_rigid_ground_anchor:
-            violations.append(
-            )
+            violations.append("At least one rigid joint must anchor an agent beam to the ground")
         mass = self.environment.get_structure_mass()
         if mass >= self.MAX_STRUCTURE_MASS:
             violations.append(
@@ -219,7 +213,10 @@ class Evaluator:
                     f"y=[{self.SWEEPER_BAND_4_Y_MIN}, {self.SWEEPER_BAND_4_Y_MAX}]"
                 )
         return violations
-    def _make_metrics(self, positions, velocities, step_count, success=False, failed=False, failure_reason=None):
+    def _make_metrics(
+        self, positions, velocities, step_count, success=False, failed=False,
+        failure_reason=None, max_steps=None,
+    ):
         if not isinstance(positions, list):
             positions = [positions] if positions else [(0, 0)]
         if not isinstance(velocities, list):
@@ -250,29 +247,6 @@ class Evaluator:
         max_joint_force = terrain.get("max_joint_force", 880.0)
         joint_fatigue = terrain.get("joint_fatigue_threshold", 760.0)
         n_beams = len(getattr(self.environment, "_bodies", []))
-        ball_masses = []
-        ball_energies = []
-        total_ke = 0.0
-        if hasattr(self.environment, "get_all_balls_masses"):
-            try:
-                ball_masses = self.environment.get_all_balls_masses()
-            except Exception:
-                ball_masses = []
-        for i, vel_i in enumerate(velocities):
-            if vel_i is None:
-                continue
-            vxi, vyi = float(vel_i[0]), float(vel_i[1])
-            speed_i_sq = vxi * vxi + vyi * vyi
-            mass_i = ball_masses[i] if i < len(ball_masses) else 0.0
-            ke_i = 0.5 * mass_i * speed_i_sq
-            ball_energies.append(ke_i)
-            total_ke += ke_i
-        if self._initial_kinetic_energy is None:
-            self._initial_kinetic_energy = total_ke
-        initial_ke = self._initial_kinetic_energy
-        energy_absorbed_pct = 0.0
-        if initial_ke > 1e-9:
-            energy_absorbed_pct = max(0.0, min(100.0, 100.0 * (1.0 - total_ke / initial_ke)))
         per_ball_positions = {}
         per_ball_speeds = {}
         per_ball_caught = {}
@@ -313,21 +287,27 @@ class Evaluator:
                 for (_, _, _, mag, _) in joint_force_data:
                     if mag > peak_joint_force:
                         peak_joint_force = mag
-            except Exception:
-                pass
+            except Exception as exc:
+                self._observation_errors.append(
+                    f"joint reaction forces unavailable: {type(exc).__name__}: {exc}"
+                )
         if hasattr(self.environment, "get_peak_joint_force_seen"):
             try:
                 hist_peak = self.environment.get_peak_joint_force_seen()
                 if hist_peak > peak_joint_force:
                     peak_joint_force = hist_peak
-            except Exception:
-                pass
+            except Exception as exc:
+                self._observation_errors.append(
+                    f"peak joint force unavailable: {type(exc).__name__}: {exc}"
+                )
         joint_fatigue_data = []
         if hasattr(self.environment, "get_joint_fatigue_state"):
             try:
                 joint_fatigue_data = self.environment.get_joint_fatigue_state()
-            except Exception:
-                pass
+            except Exception as exc:
+                self._observation_errors.append(
+                    f"joint fatigue state unavailable: {type(exc).__name__}: {exc}"
+                )
         approach_order = sorted(self._ball_approach_step.keys())
         sequential_detail = []
         for idx in approach_order:
@@ -348,17 +328,19 @@ class Evaluator:
                 "caught": idx in self._balls_caught,
                 "predecessors_uncaught": predecessors_uncaught,
             })
-        if self._env_config_snapshot is None and hasattr(self.environment, "get_environment_config_snapshot"):
-            try:
-                self._env_config_snapshot = self.environment.get_environment_config_snapshot()
-            except Exception:
-                self._env_config_snapshot = {}
-        env_config = self._env_config_snapshot or {}
         metrics = {
             "ball_x": px, "ball_y": py,
             "ball_vx": vx, "ball_vy": vy, "ball_speed": speed,
             "success": success, "failed": failed, "failure_reason": failure_reason,
             "step_count": step_count,
+            "max_steps": max_steps,
+            "target_x_min": self._target_x_min,
+            "target_x_max": self._target_x_max,
+            "target_y_min": self._target_y_min,
+            "target_y_max": self._target_y_max,
+            "caught_speed_threshold": self._caught_speed_threshold,
+            "pit_y_threshold": self._pit_y_threshold,
+            "pit_speed_threshold": self._pit_speed_threshold,
             "structure_mass": structure_mass,
             "max_structure_mass": self.MAX_STRUCTURE_MASS,
             "mass_budget_used_pct": mass_budget_used,
@@ -376,10 +358,6 @@ class Evaluator:
             "pit_failure": getattr(self, "_ball_ever_in_pit_fast", False),
             "sequential_violation": getattr(self, "_sequential_violation", False),
             "approach_x_m": float(self._approach_x),
-            "ball_kinetic_energy_total": round(total_ke, 3),
-            "initial_kinetic_energy": round(initial_ke, 3),
-            "energy_absorbed_pct": round(energy_absorbed_pct, 1),
-            "ball_masses": ball_masses[:7] if len(ball_masses) <= 7 else ball_masses[:7],
             "per_ball_positions": per_ball_positions,
             "per_ball_speeds": per_ball_speeds,
             "per_ball_caught": per_ball_caught,
@@ -388,7 +366,9 @@ class Evaluator:
             "peak_joint_force": round(peak_joint_force, 3),
             "joint_fatigue_data": joint_fatigue_data,
             "sequential_detail": sequential_detail,
-            "env_config": env_config,
+            "observation_errors": list(self._observation_errors) + getattr(
+                self.environment, "get_observation_errors", lambda: []
+            )(),
         }
         return metrics
     def compute_score_with_penalty(self, score: float, metrics: dict) -> float:
@@ -438,13 +418,10 @@ class Evaluator:
         ty0, ty1 = self._target_y_min, self._target_y_max
         return {
             "task": "D-06: The Catch (Essential)",
-            "description": (
-            ),
+            "description": "Catch seven sequential projectiles inside the target box without structural failure.",
             "success_criteria": {
-                "primary": (
-                ),
-                "failure": (
-                ),
+                "primary": f"All seven balls stabilized in x=[{tx0}, {tx1}], y=[{ty0}, {ty1}] m.",
+                "failure": "Pit event, sequential-order violation, structural breakage, or timeout.",
             },
             "evaluation": {"score_range": "0-100", "success_score": 100, "failure_score": 0},
         }

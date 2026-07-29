@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pace_bench.tasks.stage_prompt import uniform_suffix_for_task
+
 from typing import Any, Dict, List
 
 import re
@@ -31,26 +33,13 @@ def update_success_criteria_for_visible_changes(base_success_criteria: str, targ
     return base_success_criteria
 
 def get_s02_curriculum_stages() -> List[Dict[str, Any]]:
-    UNIFORM_SUFFIX = """
-
-Sensors indicate that this region exhibits non-standard physical properties.
-While the following variables **MIGHT** have changed from the initial environment, **NOT ALL** of them will necessarily be mutated in any given task. You must use active interaction and environmental feedback to deduce which specific conditions apply:
- - **Structural Integrity Thresholds**: Joints between beams may have altered breaking limits for both force and torque.
- - **Seismic Dynamics**: The foundation's oscillation pattern may differ from the initial environment.
- - **Atmospheric Loading**: Wind forces may differ in magnitude, application altitude, or shear behavior.
- - **Gravitational Constant**: The local gravitational acceleration may differ from standard Earth gravity, altering the weight of the structure.
- - **Seismic Frequency**: The rate at which the foundation oscillates may differ from the initial environment.
- - **Wind Application Altitude**: The altitude above which wind forces are applied may differ.
- - **Wind Shear Behavior**: The rate at which wind force scales with altitude may differ.
-
-**Discovery via feedback**: Your objective is to identify the underlying physical rules of this specific environment through trial and reasoning. Initial standard solutions may fail; analyze the failure mode (e.g., where a joint breaks or how the tower sways) to infer the hidden constraints and adapt your design.
-"""
+    UNIFORM_SUFFIX = uniform_suffix_for_task("S_02")
     return [
         {
             "stage_id": "Stage-1",
             "title": "The Brittle Foundation",
             "mutation_description": "Near-zero structural torque and force limits. Any joint in any standard design will snap within milliseconds of the earthquake starting — the combined seismic and wind loads on normal structural mass instantly exceed the razor-thin joint margins. A heavy tower with even moderate joint count will suffer cascading joint failures from the base upward. Survival demands an ultra-light skeleton with maximum base width for torque distribution across as many connection points as possible, using the absolute minimum of joints and the lightest feasible materials.",
-            "task_description_suffix": UNIFORM_SUFFIX,
+            "task_description_suffix": uniform_suffix_for_task("S_02"),
             "terrain_config": {
             },
             "physics_config": {
@@ -62,7 +51,7 @@ While the following variables **MIGHT** have changed from the initial environmen
             "stage_id": "Stage-2",
             "title": "The Glass Skeleton",
             "mutation_description": "Extremely brittle joints: the maximum torque any joint can withstand is reduced to a razor-thin margin. Every kilogram of structural mass and every millimeter of height multiplies the torque imposed by seismic acceleration and wind loading. Standard designs snap their base joints within milliseconds of the earthquake starting. Survival demands an ultra-light skeleton with the absolute minimum number of joints and the widest possible base to distribute torque across as many connection points as possible.",
-            "task_description_suffix": UNIFORM_SUFFIX,
+            "task_description_suffix": uniform_suffix_for_task("S_02"),
             "terrain_config": {
             },
             "physics_config": {
@@ -73,7 +62,7 @@ While the following variables **MIGHT** have changed from the initial environmen
             "stage_id": "Stage-3",
             "title": "The Resonant Collapse",
             "mutation_description": "Near-resonant seismic frequency combined with elevated gravity and extremely brittle joints. The shifted earthquake frequency drives the tower near its fundamental sway mode, while heavier gravity amplifies joint loads. Joints fracture under forces that would be safe in any other environment. Survival demands an ultra-light structure with precision-tuned harmonic damping.",
-            "task_description_suffix": UNIFORM_SUFFIX,
+            "task_description_suffix": uniform_suffix_for_task("S_02"),
             "terrain_config": {
                 "earthquake_amplitude": 0.6,
                 "earthquake_frequency": 1.2,
@@ -86,20 +75,22 @@ While the following variables **MIGHT** have changed from the initial environmen
         },
         {
             "stage_id": "Stage-4",
-            "title": "The Impossible Equilibrium",
-            "mutation_description": "Brutal gravity (+80%) crushes any structure of normal mass, while razor-thin joint margins (13 kN force / 17 kNm torque) snap at the slightest imbalance. Every kilogram of material becomes a crushing liability, and even a handful of joints will fracture under the combined assault of seismic acceleration and wind loading. The sole path to survival: an ultra-light skeleton with surgical mass distribution that exploits a maximally wide base for torque distribution, keeping total mass under 10 kg so that even with joint damage the structure barely holds together through the storm.",
-            "task_description_suffix": UNIFORM_SUFFIX,
+            "title": "The Coupled Storm",
+            "mutation_description": "A rising, off-rate foundation oscillation acts simultaneously with time-varying low-altitude wind, altitude-dependent lateral loading, elevated gravity, and brittle beam joints. The combined forcing invalidates a single tapered load path: lateral reactions concentrate at its lowest welds while its upper tiers are driven through a changing response regime. A viable structure must separate and redistribute vertical and lateral reactions while dissipating relative sway.",
+            "task_description_suffix": uniform_suffix_for_task("S_02"),
             "terrain_config": {
-                "earthquake_amplitude": 0.55,
-                "earthquake_frequency": 2.0,
-                "wind_force": 55.0,
-                "wind_height_threshold": 17.0,
-                "wind_shear_factor": 0.035,
+                "earthquake_amplitude": 0.85,
+                "earthquake_frequency": 3.4,
+                "earthquake_amplitude_evolution": 0.012,
+                "wind_force": 250.0,
+                "wind_height_threshold": 5.0,
+                "wind_shear_factor": 0.08,
+                "wind_oscillation_frequency": 4.5,
             },
             "physics_config": {
-                "gravity": (0, -18.0),
-                "max_joint_force": 13000.0,
-                "max_joint_torque": 17000.0,
+                "gravity": (0, -20.0),
+                "max_joint_force": 5000.0,
+                "max_joint_torque": 10000.0,
             },
         },
     ]

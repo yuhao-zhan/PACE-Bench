@@ -2,10 +2,6 @@ import os
 
 import json
 
-import sys
-
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
-
 from pace_bench.tasks.primitives_api import API_INTRO
 
 with open(os.path.join(os.path.dirname(__file__), '..', '..', 'primitives_api.json'), 'r') as f:
@@ -18,9 +14,9 @@ TASK_PROMPT = {
     "task_description": """
 You need to design a launcher that propels a projectile to hit a distant target.
 
-- **Ground**: Flat surface at y=0 to y=1 m. Ground friction coefficient 0.6.
+- **Ground**: Flat surface at y=0 to y=1 m. Non-visual material properties are intentionally hidden.
 - **Build Zone**: x=[5, 15] m, y=[1.5, 8] m. All beam centers must lie inside this zone. (Evaluated: beams whose centers are outside this bounding box will cause immediate design failure.)
-- **Projectile**: A ball (radius 0.25 m, density 1.0, mass approximately 0.20 kg) starts at rest at position (10, 3) m. Your launcher must accelerate it toward the target.
+- **Projectile**: A ball of radius 0.25 m starts at rest at position (10, 3) m. Its non-visual inertial and damping properties are intentionally hidden.
 - **Target Zone**: x from 40 m to 45 m, and y from 2 m to 5 m. Success requires the projectile center to be inside this rectangle.
 
 Design a launcher that:

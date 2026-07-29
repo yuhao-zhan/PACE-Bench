@@ -146,17 +146,6 @@ class CodeSafetyMixin:
                     primitives = str(prompt_data.get("primitives_api", ""))
                     allowed.update(re.findall(r"sandbox\.([a-zA-Z0-9_]+)", primitives))
 
-                # Also allow reading internal attributes that are documented as allowed in API_INTRO
-                allowed.add("_terrain_bodies")
-                allowed.add("get_structure_mass_limit")
-                allowed.add("get_arena_bounds")
-                allowed.add("get_build_zone")
-                # F_03 (Excavator): reference solution stores revolute joints on sandbox for use in agent_action
-                if task_key == "F_03":
-                    allowed.add("_aj")
-                    allowed.add("_bj")
-                    allowed.add("agent_arm_joint")
-                    allowed.add("agent_bucket_joint")
         except Exception as e:
             print(f"Warning: Failed to load allowed APIs: {e}")
 
@@ -240,6 +229,11 @@ class CodeSafetyMixin:
         }
         agent_tools = set()  # Track variables that represent dynamically created tools
 
+        def _rooted_at_sandbox(expression) -> bool:
+            while isinstance(expression, (ast.Attribute, ast.Subscript)):
+                expression = expression.value
+            return isinstance(expression, ast.Name) and expression.id == "sandbox"
+
         for node in ast.walk(tree):
             # 0. Track variables created via sandbox creation APIs (e.g., v = sandbox.add_box(...))
             if (
@@ -256,6 +250,12 @@ class CodeSafetyMixin:
 
             # 1. Check for attribute access on 'sandbox'
             if isinstance(node, ast.Attribute):
+                if isinstance(node.ctx, ast.Store) and _rooted_at_sandbox(node):
+                    raise ProhibitedOperationError(
+                        "Prohibited operation: candidate code cannot assign to "
+                        "sandbox state, environment configuration, or world properties."
+                    )
+
                 # Check if it's an access to sandbox (e.g., sandbox.add_beam)
                 if isinstance(node.value, ast.Name) and node.value.id == "sandbox":
                     api_name = node.attr
@@ -308,11 +308,30 @@ class CodeSafetyMixin:
             if (
                 isinstance(node, ast.Subscript)
                 and isinstance(node.ctx, ast.Store)
-                and isinstance(node.value, ast.Attribute)
-                and node.value.attr == "_terrain_bodies"
+                and _rooted_at_sandbox(node)
             ):
                 raise ProhibitedOperationError(
-                    "Prohibited operation detected: You cannot directly assign to or modify elements of 'sandbox._terrain_bodies'."
+                    "Prohibited operation: candidate code cannot modify a "
+                    "sandbox-owned mapping, environment configuration, or world state."
+                )
+
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr.startswith(
+                    (
+                        "Create",
+                        "Destroy",
+                        "Step",
+                        "ClearForces",
+                        "ShiftOrigin",
+                    )
+                )
+                and _rooted_at_sandbox(node.func.value)
+            ):
+                raise ProhibitedOperationError(
+                    "Prohibited operation: mutate the physics world only through "
+                    "the documented task primitives."
                 )
 
             # 4. Handle augmented assignments (e.g., body.linearVelocity += ...)

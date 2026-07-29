@@ -1,9 +1,3 @@
-import sys
-
-import os
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../..'))
-
 from pace_bench.primitives import compute_constraint_penalty
 
 from Box2D.b2 import staticBody
@@ -21,6 +15,7 @@ class Evaluator:
         self.design_constraints_checked = False
         self._initial_structure_pose = {}
         self._pose_break_detected = False
+        self._structure_break_step = None
         if not environment:
             raise ValueError("Evaluator requires environment instance")
         env_class = type(environment)
@@ -51,9 +46,13 @@ class Evaluator:
         current_joint_count = len(self.environment._joints)
         if current_joint_count < self.initial_joint_count:
             self.structure_broken = True
+            if self._structure_break_step is None:
+                self._structure_break_step = step_count
         if self._structure_pose_changed():
             self.structure_broken = True
             self._pose_break_detected = True
+            if self._structure_break_step is None:
+                self._structure_break_step = step_count
         violations = self._check_design_constraints()
         if violations:
             return True, 0.0, {
@@ -65,7 +64,13 @@ class Evaluator:
             }
         done = step_count >= max_steps
         if not done:
-            metrics = self._collect_metrics(step_count, success=False, failed=False, failure_reason=None)
+            metrics = self._collect_metrics(
+                step_count,
+                max_steps=max_steps,
+                success=False,
+                failed=False,
+                failure_reason=None,
+            )
             return False, 0.0, metrics
         purity = self.environment.get_classification_purity()
         spawned_total = (
@@ -96,6 +101,7 @@ class Evaluator:
         score = 100.0 if success else 0.0
         metrics = self._collect_metrics(
             step_count,
+            max_steps=max_steps,
             success=success,
             failed=failed,
             failure_reason=failure_reason,
@@ -108,7 +114,7 @@ class Evaluator:
             contaminated=contaminated,
         )
         return True, score, metrics
-    def _collect_metrics(self, step_count, success=False, failed=False, failure_reason=None,
+    def _collect_metrics(self, step_count, max_steps=None, success=False, failed=False, failure_reason=None,
                          purity=None, spawned_total=None, planned_total=None, small_in_small=None,
                          medium_in_medium=None, large_in_large=None, contaminated=None):
         if spawned_total is None:
@@ -139,6 +145,14 @@ class Evaluator:
         medium_in_large = getattr(self.environment, 'get_medium_in_large_zone_count', lambda: 0)()
         base_metrics = {
             "step_count": step_count,
+            "max_steps": max_steps,
+            "progress_pct": (
+                min(100.0, max(0.0, 100.0 * step_count / max_steps))
+                if max_steps
+                else None
+            ),
+            "second_wave_step": int(getattr(self.environment, "SECOND_WAVE_STEP", 1800)),
+            "third_wave_step": int(getattr(self.environment, "THIRD_WAVE_STEP", 3600)),
             "spawned_particle_count": spawned_total,
             "planned_total_particle_count": planned_total,
             "small_in_small_zone": small_in_small,
@@ -163,7 +177,9 @@ class Evaluator:
             "structure_mass": self.environment.get_structure_mass(),
             "max_structure_mass": self.MAX_STRUCTURE_MASS,
             "structure_broken": self.structure_broken,
+            "structure_break_step": self._structure_break_step,
             "joint_count": len(self.environment._joints),
+            "initial_joint_count": self.initial_joint_count,
             "beam_count": len(self.environment._bodies),
             "max_beams": self.MAX_BEAMS,
             "feed_y_min": float(getattr(self.environment, "FEED_Y_MIN", 3.0)),
@@ -171,20 +187,14 @@ class Evaluator:
         env = self.environment
         if hasattr(env, "get_particle_y_stats"):
             base_metrics["particle_y_stats"] = env.get_particle_y_stats()
+        if hasattr(env, "get_wave_events"):
+            base_metrics["wave_events"] = env.get_wave_events()
         if hasattr(env, "get_particle_velocity_stats"):
             base_metrics["particle_velocity_stats"] = env.get_particle_velocity_stats()
-        if hasattr(env, "get_particle_mass_stats"):
-            base_metrics["particle_mass_stats"] = env.get_particle_mass_stats()
-        if hasattr(env, "get_total_kinetic_energy"):
-            base_metrics["total_kinetic_energy"] = env.get_total_kinetic_energy()
-        if hasattr(env, "get_physics_summary"):
-            base_metrics["physics_summary"] = env.get_physics_summary()
         if hasattr(env, "get_beam_build_zone_margins"):
             base_metrics["beam_build_zone_margins"] = env.get_beam_build_zone_margins()
         if hasattr(env, "get_numerical_health"):
             base_metrics["numerical_health"] = env.get_numerical_health()
-        if hasattr(env, "get_env_force_estimates"):
-            base_metrics["env_force_estimates"] = env.get_env_force_estimates()
         base_metrics["zone_boundaries"] = {
             "small_zone_y_max": getattr(env, "SMALL_ZONE_Y_MAX", 1.92),
             "medium_zone_y_min": getattr(env, "MEDIUM_ZONE_Y_MIN", 1.92),

@@ -257,6 +257,8 @@ class Evaluator:
             "env_params": env_params,
             "initial_joint_count": initial_joint_count,
             "build_zone_half_width": 4.5,
+            "joint_observation_error_count": getattr(self.environment, "_joint_observation_error_count", 0),
+            "last_joint_observation_error": getattr(self.environment, "_last_joint_observation_error", None),
         }
     def compute_score_with_penalty(self, score: float, metrics: dict) -> float:
         if score > 0:

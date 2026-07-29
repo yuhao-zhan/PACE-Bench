@@ -1,10 +1,4 @@
-import sys
-
-import os
-
 import math
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../..'))
 
 from pace_bench.simulator import TIME_STEP
 
@@ -53,7 +47,6 @@ class Evaluator:
             if current_x >= self._target_x_min:
                 if self._target_speed_min <= speed <= self._target_speed_max:
                     success = True
-                    print(f"SUCCESS at step {step_count}: x={current_x:.2f}, speed={speed:.2f}")
                 elif is_end:
                     failed, failure_reason = True, f"Final speed out of band ({speed:.2f} m/s)"
             elif is_end:
@@ -67,15 +60,10 @@ class Evaluator:
         checkpoint_11_actual = getattr(env, "get_checkpoint_11_actual_speed", lambda: None)()
         gate_arrivals = getattr(env, "get_gate_arrival_events", lambda: [])()
         gate_collisions = getattr(env, "get_gate_collision_details", lambda: [])()
-        energy_initial = getattr(env, "get_energy_initial_ke", lambda: None)()
-        energy_min = getattr(env, "get_energy_min_ke", lambda: None)()
-        energy_max = getattr(env, "get_energy_max_ke", lambda: None)()
         zone_crossings = getattr(env, "get_zone_crossings", lambda: [])()
         peak_speed = getattr(env, "get_peak_speed", lambda: None)()
         speed_trace = getattr(env, "get_speed_trace", lambda: [])()
-        initial_mass = getattr(env, "get_initial_total_mass", lambda: None)()
-        gate_half_widths = getattr(env, "get_gate_open_half_widths", lambda: {})()
-        gate_omegas = getattr(env, "get_gate_angular_velocities", lambda: {})()
+        observation_errors = getattr(env, "get_observation_errors", lambda: [])()
         speed_trap_margin = None
         if speed_trap_actual is not None:
             speed_trap_margin = speed_trap_actual - self._speed_trap_min
@@ -84,12 +72,6 @@ class Evaluator:
         if checkpoint_11_actual is not None:
             cp_lo_margin = checkpoint_11_actual - self._checkpoint_11_speed_min
             cp_hi_margin = self._checkpoint_11_speed_max - checkpoint_11_actual
-        _cabin = self.environment._terrain_bodies.get("vehicle_cabin")
-        _cabin_mass = _cabin.mass if _cabin else 0.0
-        _beam_mass = self.environment.get_structure_mass() or 0.0
-        _total_mass_ke = (float(initial_mass)
-                          if initial_mass is not None and float(initial_mass) > 0
-                          else _cabin_mass + _beam_mass)
         return done, score, {
             "x": current_x,
             "speed": speed,
@@ -117,8 +99,6 @@ class Evaluator:
             "min_beam_count": self.terrain_bounds.get("min_beam_count", 4),
             "max_beam_count": self.terrain_bounds.get("max_beam_count", 5),
             "structure_mass": self.environment.get_structure_mass(),
-            "cabin_mass": _cabin_mass,
-            "total_mass": _total_mass_ke,
             "max_structure_mass": self.terrain_bounds.get("max_structure_mass", 14.0),
             "build_zone": self.terrain_bounds.get("build_zone", {}),
             "gate_x": self.terrain_bounds.get("gate_pivot_x", 10.0),
@@ -127,17 +107,11 @@ class Evaluator:
             "gate4_x": self.terrain_bounds.get("gate4_pivot_x", 12.5),
             "gate_arrival_events": gate_arrivals,
             "gate_collision_details": gate_collisions,
-            "energy_initial_ke": energy_initial,
-            "energy_min_ke": energy_min,
-            "energy_max_ke": energy_max,
-            "energy_final_ke": (0.5 * _total_mass_ke * speed * speed
-                                 if speed is not None and _total_mass_ke > 0 else None),
             "zone_crossings": zone_crossings,
             "peak_speed": peak_speed,
             "speed_trace": speed_trace,
-            "initial_total_mass": initial_mass,
-            "gate_open_half_widths": gate_half_widths,
-            "gate_angular_velocities": gate_omegas,
+            "observation_errors": observation_errors,
+            "time_step": TIME_STEP,
             "mud_zone": self.terrain_bounds.get("mud_zone", [5.5, 7.5]),
             "impulse_zone": self.terrain_bounds.get("impulse_zone", [8.0, 9.0]),
             "impulse2_zone": self.terrain_bounds.get("impulse2_zone", [10.5, 11.0]),

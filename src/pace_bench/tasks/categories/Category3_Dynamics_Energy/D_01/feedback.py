@@ -1,5 +1,6 @@
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 import math
+from pace_bench.simulator import TIME_STEP
 
 def _f(val, default=None):
     if val is None:
@@ -12,6 +13,10 @@ def _f(val, default=None):
 
 def _finite(v):
     return _f(v) is not None
+
+def _int(val, default=0):
+    finite = _f(val)
+    return default if finite is None else int(finite)
 
 def _pct(part, whole, default=None):
     p = _f(part)
@@ -37,11 +42,11 @@ def _fmt_step(step_val):
         return "--"
     return str(int(s))
 
-def _step_to_time(step_val, fps=60):
+def _step_to_time(step_val, fps=None):
     s = _f(step_val)
     if s is None or s < 0:
         return None
-    return s / fps
+    return s * TIME_STEP if fps is None else s / fps
 
 def _fmt_time(step_val, fps=60):
     t = _step_to_time(step_val, fps)
@@ -67,15 +72,16 @@ def format_task_metrics(metrics: Dict[str, Any]) -> List[str]:
     success = bool(metrics.get("success", False))
     failed = bool(metrics.get("failed", False))
     fr = metrics.get("failure_reason")
-    step_count = int(metrics.get("step_count", 0))
-    progress = _f(metrics.get("progress"), 0.0)
+    step_count = _int(metrics.get("step_count"), 0)
+    progress = _f(metrics.get("progress"))
 
     parts.append("## D_01 Diagnostic Report — The Launcher\n")
     status = "SUCCESS" if success else ("FAILED" if failed else "RUNNING")
     parts.append("**Status**: {}".format(status))
     if fr:
         parts.append("  Failure: {}".format(fr))
-    parts.append("  Steps: {}  |  Progress: {:.1f}%".format(step_count, progress if progress is not None else 0.0))
+    progress_text = f"{progress:.1f}%" if progress is not None else "n/a"
+    parts.append(f"  Steps: {step_count}  |  Progress: {progress_text}")
     parts.append("")
 
     parts.append(_header("Temporal Event Chronology", "1"))
@@ -99,16 +105,15 @@ def format_task_metrics(metrics: Dict[str, Any]) -> List[str]:
     return parts
 
 def _timeline_report(metrics: Dict[str, Any], parts: List[str]):
-    step = int(metrics.get("step_count", 0))
-    fps = 60.0
-
+    step = _int(metrics.get("step_count"), 0)
     events = []
 
-    spawn_x = _f(metrics.get("projectile_spawn_x"), 10.0)
-    spawn_y = _f(metrics.get("projectile_spawn_y"), 3.0)
-    events.append((0,
-        "Simulation start. Projectile at spawn ({:.2f}, {:.2f}) m.".format(spawn_x, spawn_y)
-    ))
+    spawn_x = _f(metrics.get("projectile_spawn_x"))
+    spawn_y = _f(metrics.get("projectile_spawn_y"))
+    if spawn_x is not None and spawn_y is not None:
+        events.append((0,
+            "Simulation start. Projectile at spawn ({:.2f}, {:.2f}) m.".format(spawn_x, spawn_y)
+        ))
 
     springs = metrics.get("spring_states", [])
     for s in springs:
@@ -120,7 +125,7 @@ def _timeline_report(metrics: Dict[str, Any], parts: List[str]):
         pe = _f(s.get("elastic_pe"))
         is_c = s.get("is_compressed", False)
         if cl is not None and rl is not None:
-            state = "COMPRESSED" if is_c else "SLACK"
+            state = "COMPRESSED" if is_c else ("TENSIONED" if s.get("is_tensioned") else "RELAXED")
             events.append((0,
                 "Spring #{}: {} — force={:.1f} N, PE={:.1f} J, ratio={:.3f}"
                 .format(idx, state,
@@ -277,8 +282,8 @@ def _spatial_report(metrics: Dict[str, Any], parts: List[str]):
     tx_max = _f(metrics.get("target_x_max"))
     ty_min = _f(metrics.get("target_y_min"))
     ty_max = _f(metrics.get("target_y_max"))
-    spawn_x = _f(metrics.get("projectile_spawn_x"), 10.0)
-    spawn_y = _f(metrics.get("projectile_spawn_y"), 3.0)
+    spawn_x = _f(metrics.get("projectile_spawn_x"))
+    spawn_y = _f(metrics.get("projectile_spawn_y"))
 
     if px is not None and py is not None:
         parts.append("  Position: ({:.2f}, {:.2f}) m".format(px, py))
@@ -322,7 +327,7 @@ def _spatial_report(metrics: Dict[str, Any], parts: List[str]):
     if arm_to_proj is not None:
         parts.append("  Arm-to-projectile: {:.2f} m".format(arm_to_proj))
 
-    if px is not None:
+    if px is not None and py is not None and spawn_x is not None and spawn_y is not None:
         total_dx = px - spawn_x
         total_dy = py - spawn_y
         total_dist = math.sqrt(total_dx**2 + total_dy**2)
@@ -359,10 +364,10 @@ def _load_report(metrics: Dict[str, Any], parts: List[str]):
             force = _f(s.get("force_est"))
             pe = _f(s.get("elastic_pe"))
             idx = s.get("index", "?")
-            compressed = s.get("is_compressed", False)
+            energized = bool(s.get("is_compressed") or s.get("is_tensioned"))
             if force is None:
                 continue
-            tier = "DRIVING" if (compressed and force > 0.001) else ("TRANSITIONAL" if compressed else "INACTIVE")
+            tier = "ENERGIZED" if (energized and force > 0.001) else "RELAXED"
             spring_items.append((force, pe, tier, idx))
         spring_items.sort(key=lambda x: -x[0])
 
@@ -393,21 +398,20 @@ def _energy_report(metrics: Dict[str, Any], parts: List[str]):
     springs = metrics.get("spring_states", [])
     arm_ke = _f(metrics.get("arm_kinetic_energy"))
     pspeed = _f(metrics.get("projectile_speed"))
-    proj_mass = _f(metrics.get("projectile_mass"))
 
     total_spring_pe = 0.0
-    any_compressed = False
+    any_energized = False
     for s in springs:
         pe = _f(s.get("elastic_pe"))
         if pe is not None:
             total_spring_pe += pe
-        if s.get("is_compressed"):
-            any_compressed = True
+        if s.get("is_compressed") or s.get("is_tensioned"):
+            any_energized = True
 
     parts.append("**Energy chain**:\n")
     parts.append("  Spring PE (total): {:.1f} J ({} spring(s), {})".format(
         total_spring_pe, len(springs),
-        "compressed" if any_compressed else "all slack" if springs else "none"
+        "energized" if any_energized else "all relaxed" if springs else "none"
     ))
 
     if arm_ke is not None:
@@ -418,29 +422,13 @@ def _energy_report(metrics: Dict[str, Any], parts: List[str]):
         t_str = _fmt_time(peak_ke_step)
         parts.append("  Arm KE (peak): {:.3f} J at {}".format(peak_ke, t_str))
 
-    proj_ke = _kb(proj_mass, pspeed)
-    if proj_ke is not None:
-        parts.append(
-            "  Projectile KE (terminal): {:.4f} J (mass={:.3f} kg, speed={:.3f} m/s)"
-            .format(proj_ke,
-                    proj_mass if proj_mass is not None else 0.0,
-                    pspeed if pspeed is not None else 0.0)
-        )
+    if pspeed is not None:
+        parts.append("  Projectile speed (terminal): {:.3f} m/s".format(pspeed))
     pps = _f(metrics.get("peak_proj_speed"))
     pps_step = _f(metrics.get("peak_proj_speed_step"))
-    if pps is not None and proj_mass is not None:
-        peak_proj_ke = 0.5 * proj_mass * pps * pps
+    if pps is not None:
         t_str = _fmt_time(pps_step) if pps_step is not None else "?"
-        parts.append(
-            "  Projectile KE (peak): {:.3f} J at {} (speed={:.2f} m/s)"
-            .format(peak_proj_ke, t_str, pps)
-        )
-
-    if total_spring_pe > 0.001 and proj_ke is not None:
-        eff_total = _pct(proj_ke, total_spring_pe, 0.0)
-        parts.append("  Overall efficiency (proj_KE / spring_PE): {:.1f}%".format(eff_total))
-    elif total_spring_pe < 0.001:
-        parts.append("  Overall efficiency: N/A (no spring energy stored)")
+        parts.append("  Projectile speed (peak): {:.2f} m/s at {}".format(pps, t_str))
 
 def _constraint_report(metrics: Dict[str, Any], parts: List[str]):
     structure_mass = _f(metrics.get("structure_mass"))
@@ -472,13 +460,13 @@ def _constraint_report(metrics: Dict[str, Any], parts: List[str]):
                 .format(structure_mass, max_mass, mass_pct)
             )
 
-    bx_min = _f(constraint_info.get("build_zone_x_min", 5.0))
-    bx_max = _f(constraint_info.get("build_zone_x_max", 15.0))
-    by_min = _f(constraint_info.get("build_zone_y_min", 1.5))
-    by_max = _f(constraint_info.get("build_zone_y_max", 8.0))
+    bx_min = _f(constraint_info.get("build_zone_x_min"))
+    bx_max = _f(constraint_info.get("build_zone_x_max"))
+    by_min = _f(constraint_info.get("build_zone_y_min"))
+    by_max = _f(constraint_info.get("build_zone_y_max"))
     arm_px = _f(metrics.get("arm_position_x"))
     arm_py = _f(metrics.get("arm_position_y"))
-    if arm_px is not None and arm_py is not None:
+    if all(v is not None for v in (arm_px, arm_py, bx_min, bx_max, by_min, by_max)):
         in_x = bx_min <= arm_px <= bx_max
         in_y = by_min <= arm_py <= by_max
         if in_x and in_y:
@@ -561,6 +549,14 @@ def _numerical_health_report(metrics: Dict[str, Any], parts: List[str]):
             nan_keys.append("{} (non-numeric)".format(key))
     if nan_keys:
         issues.append("NaN/Inf in: {}".format(", ".join(nan_keys)))
+    observation_errors = metrics.get("observation_error_count", 0)
+    if isinstance(observation_errors, (int, float)) and observation_errors > 0:
+        issues.append(
+            "Observation API errors: {}; last={}".format(
+                int(observation_errors),
+                metrics.get("last_observation_error") or "details unavailable",
+            )
+        )
 
     pspeed = _f(metrics.get("projectile_speed"))
     if pspeed is not None and pspeed > 100.0:
@@ -582,7 +578,7 @@ def _numerical_health_report(metrics: Dict[str, Any], parts: List[str]):
     springs = metrics.get("spring_states", [])
     extreme_springs = []
     for s in springs:
-        stiff = _f(s.get("stiffness_est"))
+        stiff = _f(s.get("stiffness"))
         cr = _f(s.get("compression_ratio"))
         idx = s.get("index", "?")
         if stiff is not None and stiff > 50000.0:
@@ -603,7 +599,7 @@ def _numerical_health_report(metrics: Dict[str, Any], parts: List[str]):
 
     if not metrics.get("spring_ever_compressed", True) and len(springs) > 0:
         issues.append(
-            "{} spring(s) present but NONE ever compressed — no elastic energy stored."
+            "{} spring(s) present but NONE ever stored measurable elastic energy."
             .format(len(springs))
         )
 
@@ -622,6 +618,20 @@ def _numerical_health_report(metrics: Dict[str, Any], parts: List[str]):
         parts.append("{} issue(s):".format(len(issues)))
         for issue in issues:
             parts.append("  - {}".format(issue))
+
+
+def get_improvement_suggestions(
+    metrics: Dict[str, Any],
+    score: float,
+    success: bool,
+    failed: bool,
+    failure_reason: Optional[str] = None,
+    error: Optional[str] = None,
+) -> List[str]:
+    del metrics, score, success, failed, failure_reason
+    if error:
+        return [f"- Resolve the reported execution error: {error}"]
+    return []
 
 try:
     from pace_bench.evaluation.verification.diagnostics import (

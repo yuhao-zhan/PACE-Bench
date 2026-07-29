@@ -2,10 +2,6 @@ import os
 
 import json
 
-import sys
-
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
-
 from pace_bench.tasks.primitives_api import API_INTRO
 
 with open(os.path.join(os.path.dirname(__file__), '..', '..', 'primitives_api.json'), 'r') as f:
@@ -37,7 +33,7 @@ Design a controller that:
 
 1. **Target**: Seat reaches the target zone (y >= 11.7 m, x in [9.35, 10.65] m) either (a) at the apex (speed < 1.0 m/s), or (b) via vertical fall into the zone after an apex (|vx| < 1.35 m/s, vy <= 0).
 
-- **Mass Budget**: Total structure mass must be less than 100 kg.
+- **Mass Budget**: Total structure mass must be at most 100 kg.
 - **Build Zone**: Structure must be built within x = [6, 14] m, y = [4, 10] m.
 - **Beam Size**: Each beam dimension (width, height) is clamped to [0.1, 3.0] m.
 - **Pump Force**: |fx|, |fy| <= 42 N per step.

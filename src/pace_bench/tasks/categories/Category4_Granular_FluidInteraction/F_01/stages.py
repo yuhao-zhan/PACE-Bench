@@ -1,30 +1,12 @@
 from __future__ import annotations
 
+from pace_bench.tasks.stage_prompt import uniform_suffix_for_task
+
 from typing import Any, Dict, List
 
 import re
 
-UNIFORM_SUFFIX = """
-
-Sensors indicate that this region exhibits non-standard physical properties.
-While the following variables MIGHT have changed from the initial environment, NOT ALL of them will necessarily be mutated in any given task. You must use active interaction and environmental feedback to deduce which specific conditions apply:
- - Beam-to-beam weld force threshold
- - Weld failure persistence
- - Gravitational acceleration
- - Reservoir particle normal restitution
- - Reservoir particle surface friction
- - Downstream boundary oscillation
- - Downstream boundary oscillation rate
- - Debris impact velocity
- - Seismic horizontal impulse magnitude
- - Vertical fluid surge impulse intensity
- - Reverse fluid surge impulse magnitude
- - Forward surge impulse intensity
- - Maximum allowable structure mass budget
- - Maximum leakage rate tolerance
-
-Discovery via feedback: Your objective is to identify the underlying physical rules of this specific environment through trial and reasoning. Initial standard solutions may fail; analyze the failure mode through interaction feedback to infer which hidden variables have changed and adapt your design.
-"""
+UNIFORM_SUFFIX = uniform_suffix_for_task("F_01")
 
 def _replace_weld_constraint_line(
     description: str,
@@ -95,6 +77,7 @@ def update_task_description_for_visible_changes(
     target_leakage = target_terrain_config.get("max_leakage_rate", default_leakage)
     base_leakage = base_terrain_config.get("max_leakage_rate", default_leakage)
     if target_leakage != base_leakage:
+        before = description
         pattern_obj = r"(the leakage rate does not exceed )(\d+\.?\d*%)"
         if re.search(pattern_obj, description):
             description = re.sub(
@@ -109,11 +92,14 @@ def update_task_description_for_visible_changes(
                 f"\\g<1>{target_leakage*100:.2f}% (originally {base_leakage*100:.2f}% in the source environment)",
                 description,
             )
+        if description == before:
+            raise ValueError("F-01 prompt updater could not replace visible leakage limit")
     target_break = float(target_terrain_config.get("joint_break_force", default_joint_break_force))
     base_break = float(base_terrain_config.get("joint_break_force", default_joint_break_force))
     target_steps = int(target_terrain_config.get("joint_break_consecutive_steps", default_joint_break_consecutive_steps))
     base_steps = int(base_terrain_config.get("joint_break_consecutive_steps", default_joint_break_consecutive_steps))
     if target_break != base_break or target_steps != base_steps:
+        before = description
         description = _replace_weld_constraint_line(
             description,
             target_force=target_break,
@@ -121,9 +107,12 @@ def update_task_description_for_visible_changes(
             target_steps=target_steps,
             base_steps=base_steps,
         )
+        if description == before:
+            raise ValueError("F-01 prompt updater could not replace visible weld constraint")
     target_height = target_terrain_config.get("fluid_height", default_fluid_height)
     base_height = base_terrain_config.get("fluid_height", default_fluid_height)
     if target_height != base_height:
+        before = description
         pattern = r"(\*\*Reservoir fill height\*\*: )(\d+\.?\d*)( m\.)"
         if re.search(pattern, description):
             description = re.sub(
@@ -131,7 +120,8 @@ def update_task_description_for_visible_changes(
                 f"\\g<1>{target_height:.1f} m (originally {base_height:.1f} m in the source environment).",
                 description,
             )
-    description = _replace_debris_velocity_line(description, target_terrain_config, base_terrain_config)
+        if description == before:
+            raise ValueError("F-01 prompt updater could not replace visible reservoir height")
     return description
 
 def update_success_criteria_for_visible_changes(
@@ -144,6 +134,7 @@ def update_success_criteria_for_visible_changes(
     target_leakage = target_terrain_config.get("max_leakage_rate", default_leakage)
     base_leakage = base_terrain_config.get("max_leakage_rate", default_leakage)
     if target_leakage != base_leakage:
+        before = criteria
         pattern_le = r"(1\. \*\*Leakage Rate\*\*: Total leakage <= )(\d+\.?\d*%)"
         if re.search(pattern_le, criteria):
             criteria = re.sub(
@@ -159,10 +150,13 @@ def update_success_criteria_for_visible_changes(
                     f"\\g<1>{target_leakage*100:.2f}% (originally {base_leakage*100:.2f}% in the source environment)",
                     criteria,
                 )
+        if criteria == before:
+            raise ValueError("F-01 criteria updater could not replace visible leakage limit")
     default_mass = 380.0
     target_mass = float(target_terrain_config.get("max_structure_mass", default_mass))
     base_mass = float(base_terrain_config.get("max_structure_mass", default_mass))
     if target_mass != base_mass:
+        before = criteria
         pattern_mass = r"(\*\*Mass Budget\*\*: Total structure mass <= )(\d+\.?\d*)( kg\.)"
         if re.search(pattern_mass, criteria):
             criteria = re.sub(
@@ -170,6 +164,8 @@ def update_success_criteria_for_visible_changes(
                 f"\\g<1>{target_mass:.0f} kg (originally {base_mass:.0f} kg in the source environment).",
                 criteria,
             )
+        if criteria == before:
+            raise ValueError("F-01 criteria updater could not replace visible mass budget")
     return criteria
 
 def get_f01_curriculum_stages() -> List[Dict[str, Any]]:
@@ -178,7 +174,7 @@ def get_f01_curriculum_stages() -> List[Dict[str, Any]]:
             "stage_id": "Stage-1",
             "title": "Low weld ceiling (threshold physics)",
             "mutation_description": "Single lever: reduced weld force ceiling (just below what the stock design survives).",
-            "task_description_suffix": UNIFORM_SUFFIX,
+            "task_description_suffix": uniform_suffix_for_task("F_01"),
             "terrain_config": {
                 "joint_break_force": 41000.0,
             },
@@ -188,7 +184,7 @@ def get_f01_curriculum_stages() -> List[Dict[str, Any]]:
             "stage_id": "Stage-2",
             "title": "Elastic reservoir granules",
             "mutation_description": "Single lever: raised restitution on every fluid particle so impacts rebound through the pile—multi-bounce chain reactions and impulsive lateral loading instead of the damped slosh the stock dam assumes.",
-            "task_description_suffix": UNIFORM_SUFFIX,
+            "task_description_suffix": uniform_suffix_for_task("F_01"),
             "terrain_config": {
                 "fluid_particle_restitution": 0.78,
             },
@@ -198,7 +194,7 @@ def get_f01_curriculum_stages() -> List[Dict[str, Any]]:
             "stage_id": "Stage-3",
             "title": "Bounce apocalypse + wide squeeze + fast debris + heavy world",
             "mutation_description": "Multi-variable: near-perfectly elastic fluid particles (19x baseline) create violent sustained impact cascades; wide and fast downstream wall oscillation opens the gate dramatically; faster debris slams the structure with punishing blows; elevated gravity crushes everything; welds break after just 2 consecutive over-threshold steps. The dam faces compounded overload: hyper-elastic impacts never dissipate, the oscillating wall creates relentless gap cycles, heavy debris adds impulse loading, and extra gravity amplifies every force.",
-            "task_description_suffix": UNIFORM_SUFFIX,
+            "task_description_suffix": uniform_suffix_for_task("F_01"),
             "terrain_config": {
                 "joint_break_force": 50000.0,
                 "joint_break_consecutive_steps": 2,
@@ -206,6 +202,9 @@ def get_f01_curriculum_stages() -> List[Dict[str, Any]]:
                 "downstream_wall_phase_divisor": 30.0,
                 "fluid_particle_restitution": 0.95,
                 "debris_linear_velocity_x": 3.2,
+                # One particle is 0.333% of this 300-particle reservoir.  The
+                # visible 0.40% limit avoids an impossible sub-particle cutoff.
+                "max_leakage_rate": 0.004,
             },
             "physics_config": {
                 "gravity": (0, -10.5),
@@ -214,8 +213,8 @@ def get_f01_curriculum_stages() -> List[Dict[str, Any]]:
         {
             "stage_id": "Stage-4",
             "title": "Apocalypse: every physics dial at breaking point",
-            "mutation_description": "Cataclysmic 13-variable escalation far beyond Stage-3: welds at baseline 50000 N with 2-step break (vs baseline's 3-step grace, matching Stage-3's 2-step but combined with far worse conditions); wall oscillation at 1.0 m amplitude (2.5× baseline) with accelerated frequency (phase_divisor=20 vs Stage-3's 30, a 1.5× speedup); debris impacts at 4.0 m/s (1.82× baseline); elevated gravity at -11.5 m/s^2 (15% above baseline, vs Stage-3's modest +5%); particle restitution at 0.97 — virtually no energy dissipation (19.4× baseline); particle friction slashed to 0.02 (5× below baseline); earthquake pulses at 0.5 m/s (1.43× baseline); vertical fluid surge at 1.5 m/s (1.5× baseline); reverse slosh at -0.9 m/s (1.29× baseline); forward surge sequence escalated to 2.2 m/s peak (1.29× baseline); mass budget slashed to 130 kg (34% of baseline); leakage tightened to 0.5% (2× more stringent than baseline 0.1%). The dam faces a perfect storm: softened welds with reduced failure grace period, hyper-energetic particles that never lose momentum, violent multi-directional disturbances at extreme magnitudes, elevated gravity amplifying every hydrostatic load, severely restricted mass, and tight leakage tolerance — all simultaneously. Solving one problem (e.g., leakage) worsens others (mass, joint load distribution). This is the hard ceiling on physically-solvable dam design.",
-            "task_description_suffix": UNIFORM_SUFFIX,
+            "mutation_description": "Cataclysmic multi-variable escalation far beyond Stage-3: reduced weld grace, faster and wider wall motion, harder debris impacts, elevated gravity, nearly elastic low-friction particles, stronger multi-directional disturbances, and a sharply reduced mass budget. The leakage tolerance is relaxed relative to Initial, but the combined loading and mass restriction remain the dominant challenge.",
+            "task_description_suffix": uniform_suffix_for_task("F_01"),
             "terrain_config": {
                 "joint_break_force": 50000.0,
                 "joint_break_consecutive_steps": 2,

@@ -2,10 +2,6 @@ import os
 
 import json
 
-import sys
-
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
-
 from pace_bench.tasks.primitives_api import API_INTRO
 
 with open(os.path.join(os.path.dirname(__file__), '..', '..', 'primitives_api.json'), 'r') as f:
@@ -24,7 +20,7 @@ TASK_PROMPT = {
 Design a robotic gripper attached to a gantry that can grasp an object on a platform and lift it vertically.
 
 - **Gantry**: A static support at y=10.0m. Use `get_anchor_for_gripper()` to anchor your base.
-- **Target Object**: An object of mass 1.0 kg with surface friction coefficient 0.6 at x=5.0m, y=2.0m (on a platform at y=1.8m; platform surface friction coefficient 0.25).
+- **Target Object**: A rectangular block at x=5.0m, y=2.0m, on a platform whose top is at y=1.8m. Non-visual environmental coefficients and loads are intentionally hidden and must be inferred from motion and contact behavior.
 - **Target Height**: Lift the object so its center reaches at least y=3.5m.
 - **Build Zone**: x=[0, 10], y=[5, 15]. The gripper base must be anchored to the gantry.
 

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pace_bench.tasks.stage_prompt import uniform_suffix_for_task
+
 from typing import Any, Dict, List
 
 import re
@@ -125,27 +127,15 @@ def update_success_criteria_for_visible_changes(
     return criteria
 
 def get_f06_curriculum_stages() -> List[Dict[str, Any]]:
-    UNIFORM_SUFFIX = """
-
-Sensors indicate that this region exhibits non-standard physical properties.
-While the following variables **MIGHT** have changed from the initial environment, **NOT ALL** of them will necessarily be mutated in any given task. You must use active interaction and environmental feedback to deduce which specific conditions apply:
-- **Fluid Viscosity**: The resistance of the medium may be altered.
-- **Gravity**: The acceleration due to the local gravitational field may vary.
-- **Gravity Well Intensity**: The downward force magnitude within the gravity well zone may differ from the source environment.
-- **Operational Resource Limit**: The per-step force budget available for particle manipulation may be adjusted.
-- **Target zone (vertical extent)**: The vertical range (y) of the target zone may differ.
-- **Delivery ratio threshold**: The required fraction of particles that must reach the target may differ.
-- **Fluid particle count**: The number of fluid particles released from the source may differ.
-
-**Discovery via feedback**: Your objective is to identify the underlying physical rules of this specific environment through trial and reasoning. Initial standard solutions may fail; analyze the failure mode to infer the hidden constraints and adapt your design.
-"""
+    UNIFORM_SUFFIX = uniform_suffix_for_task("F_06")
     return [
         {
             "stage_id": "Stage-1",
-            "title": "High-Viscosity Fluid",
-            "mutation_description": "Fluid viscosity increased significantly.",
-            "task_description_suffix": UNIFORM_SUFFIX,
+            "title": "Localized Transport Anomaly",
+            "mutation_description": "One or more candidate environmental variables differ from the source environment.",
+            "task_description_suffix": uniform_suffix_for_task("F_06"),
             "terrain_config": {
+                "gravwell_fy": -2500.0,
                 "fluid": {"viscosity": 20.0, "count": 20},
                 "min_delivery_ratio": 0.45,
             },
@@ -159,7 +149,7 @@ While the following variables **MIGHT** have changed from the initial environmen
             "stage_id": "Stage-2",
             "title": "Raised Delivery Target",
             "mutation_description": "Target zone moved to higher elevation.",
-            "task_description_suffix": UNIFORM_SUFFIX,
+            "task_description_suffix": uniform_suffix_for_task("F_06"),
             "terrain_config": {
                 "target_y_min": 2.5,
                 "target_y_max": 4.0,
@@ -174,9 +164,9 @@ While the following variables **MIGHT** have changed from the initial environmen
         },
         {
             "stage_id": "Stage-3",
-            "title": "Extreme Viscosity",
-            "mutation_description": "Extremely high fluid viscosity.",
-            "task_description_suffix": UNIFORM_SUFFIX,
+            "title": "Transport Anomaly",
+            "mutation_description": "One or more candidate environmental variables differ from the source environment.",
+            "task_description_suffix": uniform_suffix_for_task("F_06"),
             "terrain_config": {
                 "fluid": {"viscosity": 30.0, "count": 20},
                 "min_delivery_ratio": 0.45,
@@ -189,9 +179,9 @@ While the following variables **MIGHT** have changed from the initial environmen
         },
         {
             "stage_id": "Stage-4",
-            "title": "Hostile Pipeline",
-            "mutation_description": "Raised target + viscosity + gravity.",
-            "task_description_suffix": UNIFORM_SUFFIX,
+            "title": "Raised Delivery Adaptation",
+            "mutation_description": "The target zone is visibly raised; other candidate environmental variables may also differ.",
+            "task_description_suffix": uniform_suffix_for_task("F_06"),
             "terrain_config": {
                 "target_y_min": 2.5,
                 "target_y_max": 4.0,

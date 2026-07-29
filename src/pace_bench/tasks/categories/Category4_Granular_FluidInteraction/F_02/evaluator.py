@@ -1,10 +1,4 @@
-import sys
-
-import os
-
 import math
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../..'))
 
 from pace_bench.primitives import compute_constraint_penalty
 
@@ -27,8 +21,15 @@ class Evaluator:
         self.TARGET_X = getattr(environment, 'TARGET_X', 26.0)
     def evaluate(self, agent_body, step_count, max_steps):
         if not self.environment:
-            return True, 0.0, {"error": "Environment not available"}
-        if not self.design_constraints_checked and step_count == 0:
+            return True, 0.0, {
+                "success": False,
+                "failed": True,
+                "failure_reason": "Environment not available",
+                "error": "Environment not available",
+                "step_count": step_count,
+            }
+        self._current_max_steps = int(max_steps)
+        if not self.design_constraints_checked:
             violations = self._check_design_constraints()
             if violations:
                 self.design_constraints_checked = True
@@ -86,54 +87,14 @@ class Evaluator:
         progress = None
         if front_x is not None and self.TARGET_X > self.BUILD_ZONE_X_MIN:
             progress = 100.0 * (front_x - self.BUILD_ZONE_X_MIN) / (self.TARGET_X - self.BUILD_ZONE_X_MIN)
-        zone_crossing_events = []
-        if hasattr(self.environment, 'get_zone_crossing_events'):
-            try:
-                zone_crossing_events = self.environment.get_zone_crossing_events()
-            except Exception:
-                pass
-        joint_failure_events = []
-        if hasattr(self.environment, 'get_joint_failure_events'):
-            try:
-                joint_failure_events = self.environment.get_joint_failure_events()
-            except Exception:
-                pass
-        sink_trajectory = []
-        if hasattr(self.environment, 'get_sink_trajectory'):
-            try:
-                sink_trajectory = self.environment.get_sink_trajectory()
-            except Exception:
-                pass
-        speed_cap_count = 0
-        if hasattr(self.environment, 'get_speed_cap_count'):
-            try:
-                speed_cap_count = self.environment.get_speed_cap_count()
-            except Exception:
-                pass
-        joint_force_samples = []
-        if hasattr(self.environment, 'get_joint_force_samples'):
-            try:
-                joint_force_samples = self.environment.get_joint_force_samples()
-            except Exception:
-                pass
-        max_vertical_accel = 0.0
-        if hasattr(self.environment, 'get_max_vertical_accel'):
-            try:
-                max_vertical_accel = self.environment.get_max_vertical_accel()
-            except Exception:
-                pass
-        env_params = {}
-        if hasattr(self.environment, 'get_env_parameters'):
-            try:
-                env_params = self.environment.get_env_parameters()
-            except Exception:
-                pass
-        force_decomposition = []
-        if hasattr(self.environment, 'compute_force_decomposition'):
-            try:
-                force_decomposition = self.environment.compute_force_decomposition()
-            except Exception:
-                pass
+        zone_crossing_events = self.environment.get_zone_crossing_events()
+        joint_failure_events = self.environment.get_joint_failure_events()
+        sink_trajectory = self.environment.get_sink_trajectory()
+        speed_cap_count = self.environment.get_speed_cap_count()
+        joint_force_samples = self.environment.get_joint_force_samples()
+        max_vertical_accel = self.environment.get_max_vertical_accel()
+        body_observations = self.environment.get_body_observations()
+        observation_errors = self.environment.get_observation_errors()
         num_issues = []
         if velocity_x is not None and (not math.isfinite(velocity_x) or abs(velocity_x) > 100.0):
             num_issues.append("non-finite/extreme velocity_x")
@@ -143,9 +104,9 @@ class Evaluator:
             num_issues.append("extreme front_x position")
         if lowest_y is not None and (not math.isfinite(lowest_y) or abs(lowest_y) > 500.0):
             num_issues.append("extreme lowest_y position")
-        import math as _m
         return {
             "step_count": step_count,
+            "max_steps": getattr(self, '_current_max_steps', None),
             "vehicle_front_x": front_x,
             "vehicle_lowest_y": lowest_y,
             "target_x": self.TARGET_X,
@@ -168,8 +129,8 @@ class Evaluator:
             "speed_cap_limit": getattr(self.environment, '_MAX_LINEAR_SPEED', 4.0),
             "joint_force_samples": joint_force_samples,
             "max_vertical_accel_seen": max_vertical_accel,
-            "env_parameters": env_params,
-            "force_decomposition": force_decomposition,
+            "body_observations": body_observations,
+            "observation_errors": observation_errors,
             "numerical_issues": num_issues,
             "sink_y_threshold": self.SINK_Y_THRESHOLD,
             "build_zone_x": [self.BUILD_ZONE_X_MIN, self.BUILD_ZONE_X_MAX],

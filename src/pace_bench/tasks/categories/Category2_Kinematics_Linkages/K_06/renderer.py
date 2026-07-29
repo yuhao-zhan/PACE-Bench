@@ -1,9 +1,5 @@
-import sys
-import os
 import math
 import pygame
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../..'))
 
 from pace_bench.renderer import Renderer
 from Box2D.b2 import dynamicBody, staticBody, revoluteJoint, polygonShape, circleShape
@@ -172,7 +168,7 @@ class K06Renderer(Renderer):
             _sh = self.simulator.screen_height
 
             if self._font_label:
-                label = self._font_label.render("K-06 | Pantograph",
+                label = self._font_label.render("K-06 | Wiper",
                                                 True, COLOR_ANNOTATION)
                 self.simulator.screen.blit(label, (18, 14))
 

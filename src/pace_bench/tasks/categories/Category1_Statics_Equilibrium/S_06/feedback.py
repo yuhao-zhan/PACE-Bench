@@ -35,9 +35,12 @@ def _format_event_timeline(metrics: Dict[str, Any]) -> List[str]:
     failure_type = metrics.get("failure_type")
     step_at_failure = metrics.get("step_at_failure")
     time_at_failure = metrics.get("time_at_failure")
-    if _is_finite_number(step_count):
-        t_end = float(step_count) / 60.0
+    time_step = metrics.get("time_step")
+    if _is_finite_number(step_count) and _is_finite_number(time_step):
+        t_end = float(step_count) * float(time_step)
         parts.append(f"Ended: step {int(step_count)}  (t = {t_end:.2f}s)")
+    elif _is_finite_number(step_count):
+        parts.append(f"Ended: step {int(step_count)}")
     else:
         parts.append("Ended: step unknown")
     if _is_finite_number(step_at_failure) and _is_finite_number(time_at_failure):
@@ -168,24 +171,22 @@ def _format_spatial_diagnostics(metrics: Dict[str, Any]) -> List[str]:
 
 def _format_load_distribution(metrics: Dict[str, Any]) -> List[str]:
     parts: List[str] = []
-    parts.append("## 3. Load/Friction\n")
-    table_friction = metrics.get("table_friction")
+    parts.append("## 3. Load & Surface Motion\n")
     structure_mass = metrics.get("structure_mass")
-    block_count = metrics.get("block_count", 0)
-    oscillation_active = metrics.get("oscillation_active", False)
-    osc_amplitude = metrics.get("osc_amplitude", 0.0)
-    osc_frequency = metrics.get("osc_frequency", 0.0)
-    if not _is_finite_number(table_friction) or not _is_finite_number(structure_mass):
-        parts.append("Insufficient data (missing friction or mass).")
+    block_count = metrics.get("block_count")
+    if not _is_finite_number(structure_mass):
+        parts.append("Structure mass unavailable.")
         return parts
-    mu_table = float(table_friction)
     mass = float(structure_mass)
     bc = int(block_count) if _is_finite_number(block_count) else 0
-    parts.append(f"mu_table={mu_table:.4f}  mass={mass:.2f}  blocks={bc}")
-    if oscillation_active and _is_finite_number(osc_amplitude) and _is_finite_number(osc_frequency):
-        amp = float(osc_amplitude)
-        freq = float(osc_frequency)
-        parts.append(f"Osc: amplitude={amp:.3f}m freq={freq:.2f}rad/s")
+    parts.append(f"Structure mass={mass:.2f}; blocks={bc}")
+    table_velocity = metrics.get("table_velocity")
+    if isinstance(table_velocity, (list, tuple)) and len(table_velocity) >= 2:
+        if _is_finite_number(table_velocity[0]) and _is_finite_number(table_velocity[1]):
+            parts.append(
+                f"Observed table velocity=({float(table_velocity[0]):.3f}, "
+                f"{float(table_velocity[1]):.3f}) m/s"
+            )
     return parts
 
 def _format_energy_flow(metrics: Dict[str, Any]) -> List[str]:
@@ -276,8 +277,9 @@ def _format_constraint_profile(metrics: Dict[str, Any]) -> List[str]:
             f"max_y={my:.3f}m", f"{clearance:+.3f}m clearance (ceiling {cy:.2f}m)",
             util
         ))
-    spawn_zone = metrics.get("spawn_zone", [-10.0, 0.0])
-    design_violations = metrics.get("design_constraint_violations") or []
+    spawn_zone = metrics.get("spawn_zone")
+    design_violations_raw = metrics.get("design_constraint_violations")
+    design_violations = design_violations_raw or []
     spawn_fails = [d for d in design_violations if d.get("constraint") == "spawn_zone"]
     if spawn_fails:
         for sf in spawn_fails:
@@ -290,7 +292,11 @@ def _format_constraint_profile(metrics: Dict[str, Any]) -> List[str]:
                     f"x={float(px):.3f}m", f"{margin_val:+.3f}m vs max {float(smx):.2f}m",
                     100.0
                 ))
-    else:
+    elif (
+        design_violations_raw is not None
+        and isinstance(spawn_zone, (list, tuple))
+        and len(spawn_zone) >= 2
+    ):
         sz_str = f"[{_ff(spawn_zone[0], 2)}, {_ff(spawn_zone[1], 2)}]"
         constraints.append((
             "Spawn zone", "PASS", f"zone={sz_str}", "all blocks inside", 0.0
@@ -307,9 +313,15 @@ def _format_constraint_profile(metrics: Dict[str, Any]) -> List[str]:
                 f"limit={_ff(lim) if _is_finite_number(lim) else lim}",
                 100.0
             ))
-    else:
+    elif design_violations_raw is not None:
+        max_length = metrics.get("max_block_length_limit")
+        max_height = metrics.get("max_block_height_limit")
+        if _is_finite_number(max_length) and _is_finite_number(max_height):
+            dim_value = f"w≤{float(max_length):.2f}m h≤{float(max_height):.2f}m"
+        else:
+            dim_value = "within evaluator limits"
         constraints.append((
-            "Block dims", "PASS", "w≤1.0m h≤0.2m", "all blocks ok", 0.0
+            "Block dims", "PASS", dim_value, "all blocks ok", 0.0
         ))
     failed = [c for c in constraints if "FAIL" in c[1]]
     near_limit = [c for c in constraints if "PASS" in c[1] and c[4] > 50.0]
@@ -342,7 +354,7 @@ def _format_numerical_health(metrics: Dict[str, Any]) -> List[str]:
         "min_y_position", "max_y_position", "structure_mass", "block_count",
         "total_kinetic_energy", "max_velocity", "peak_kinetic_energy",
         "center_of_mass_x", "center_of_mass_y", "com_to_edge_margin",
-        "table_friction", "block_friction", "step_at_failure", "time_at_failure",
+        "step_at_failure", "time_at_failure",
         "step_count", "ceiling_y_limit", "table_edge_x",
     ]
     for key in numeric_keys:
@@ -395,33 +407,33 @@ def format_task_metrics(metrics: Dict[str, Any]) -> List[str]:
     parts.append("")
     try:
         parts.extend(_format_event_timeline(metrics))
-    except Exception:
-        parts.append("## 1. Temporal\n\n(error)")
+    except Exception as exc:
+        parts.append(f"## 1. Temporal\n\n(formatting error: {type(exc).__name__}: {exc})")
     parts.append("")
     try:
         parts.extend(_format_spatial_diagnostics(metrics))
-    except Exception:
-        parts.append("## 2. Spatial\n\n(error)")
+    except Exception as exc:
+        parts.append(f"## 2. Spatial\n\n(formatting error: {type(exc).__name__}: {exc})")
     parts.append("")
     try:
         parts.extend(_format_load_distribution(metrics))
-    except Exception:
-        parts.append("## 3. Load/Friction\n\n(error)")
+    except Exception as exc:
+        parts.append(f"## 3. Load & Surface Motion\n\n(formatting error: {type(exc).__name__}: {exc})")
     parts.append("")
     try:
         parts.extend(_format_energy_flow(metrics))
-    except Exception:
-        parts.append("## 4. Energy\n\n(error)")
+    except Exception as exc:
+        parts.append(f"## 4. Energy\n\n(formatting error: {type(exc).__name__}: {exc})")
     parts.append("")
     try:
         parts.extend(_format_constraint_profile(metrics))
-    except Exception:
-        parts.append("## 5. Constraints\n\n(error)")
+    except Exception as exc:
+        parts.append(f"## 5. Constraints\n\n(formatting error: {type(exc).__name__}: {exc})")
     parts.append("")
     try:
         parts.extend(_format_numerical_health(metrics))
-    except Exception:
-        parts.append("## 6. Numerical Health\n\n(error)")
+    except Exception as exc:
+        parts.append(f"## 6. Numerical Health\n\n(formatting error: {type(exc).__name__}: {exc})")
     return parts
 
 def get_improvement_suggestions(
@@ -433,50 +445,4 @@ def get_improvement_suggestions(
     error: str = None,
 
 ) -> List[str]:
-    suggestions = []
-    if error:
-        suggestions.append(
-        )
-        return suggestions
-    if success:
-        suggestions.append("- Task completed successfully. No further changes needed.")
-        return suggestions
-    failure_type = metrics.get("failure_type", "")
-    if failure_type == "spawn_violation":
-        spawn_zone = metrics.get("spawn_zone", [-10.0, 0.0])
-        if isinstance(spawn_zone, (list, tuple)) and len(spawn_zone) >= 2:
-            suggestions.append(
-                f"- One or more blocks were placed outside the permitted build zone "
-                f"x in [{spawn_zone[0]:.1f}, {spawn_zone[1]:.1f}]. "
-                f"Ensure all block centres stay within this interval."
-            )
-    if failure_type == "fell_off_table":
-        suggestions.append(
-        )
-    if failure_type == "mass_overrun":
-        max_mass = metrics.get("max_total_mass_limit")
-        curr_mass = metrics.get("structure_mass")
-        if _is_finite_number(max_mass) and _is_finite_number(curr_mass):
-            suggestions.append(
-                f"- Structure mass ({float(curr_mass):.1f}) exceeds the "
-                f"mass budget ({float(max_mass):.1f}). Reduce total mass."
-            )
-    if failure_type == "hit_ceiling":
-        ceiling = metrics.get("ceiling_y_limit")
-        if _is_finite_number(ceiling):
-            suggestions.append(
-                f"- The structure contacted the ceiling at y={float(ceiling):.1f}m. "
-                f"Use shorter blocks or lower block placement."
-            )
-    overhang_ok = metrics.get("overhang_ok", False)
-    if not overhang_ok:
-        suggestions.append(
-        )
-    stability_ok = metrics.get("stability_ok", False)
-    if not stability_ok:
-        suggestions.append(
-        )
-    if not suggestions:
-        suggestions.append(
-        )
-    return suggestions
+    return []

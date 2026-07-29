@@ -207,19 +207,12 @@ def _format_energy_flow(metrics: Dict[str, Any]) -> List[str]:
         lines.append("  No energy data.")
         return lines
     chassis_ke = _safe_float(et.get("peak_chassis_ke"))
-    object_ke = _safe_float(et.get("peak_object_ke"))
     motor_energy = _safe_float(et.get("cumulative_motor_energy_est"))
-    total_ke = chassis_ke + object_ke
-    if total_ke < 0.001 and motor_energy < 0.001:
-        lines.append("  No energy produced or transferred (all KE=0, motors inactive).")
+    if chassis_ke < 0.001 and motor_energy < 0.001:
+        lines.append("  No chassis kinetic energy or motor work recorded.")
         return lines
-    lines.append(f"  Peak KE: chassis {chassis_ke:.2f}J, object {object_ke:.2f}J (total {total_ke:.2f}J)")
+    lines.append(f"  Peak chassis KE: {chassis_ke:.2f}J")
     lines.append(f"  Motor work (est): {motor_energy:.2f}J")
-    if motor_energy > 0.001 and object_ke > 0.001:
-        eff = object_ke / motor_energy * 100.0
-        lines.append(f"  Transfer efficiency: {eff:.1f}%")
-    elif motor_energy > 0.001:
-        lines.append("  All motor energy dissipated before reaching object.")
     return lines
 
 def _format_constraint_profile(metrics: Dict[str, Any]) -> List[str]:
@@ -294,28 +287,20 @@ def _build_constraint_fallback(metrics: Dict[str, Any]) -> List[Dict[str, Any]]:
             "margin": f"{ox - tx:+.2f} m",
             "phase": "runtime",
         })
-    sc = int(metrics.get("step_count", 0))
-    min_sc = int(metrics.get("min_simulation_steps_required", 720))
-    profile.append({
-        "constraint": "Simulation time",
-        "status": "PASS" if sc >= min_sc else "FAIL",
-        "current": f"{sc} steps",
-        "limit": f"{min_sc} steps",
-        "margin": f"{sc - min_sc:+d} steps",
-        "phase": "runtime",
-    })
-    ws = metrics.get("wheel_state")
-    if ws:
+    if metrics.get("step_count") is not None and metrics.get("min_simulation_steps_required") is not None:
+        sc = int(metrics["step_count"])
+        min_sc = int(metrics["min_simulation_steps_required"])
         profile.append({
-            "constraint": "Wheel-ground contact",
-            "status": "FAIL" if ws in ("wheels suspended", "wheel spinning") else "PASS",
-            "current": str(ws),
-            "limit": "wheels in contact with ground",
-            "margin": "—",
+            "constraint": "Simulation time",
+            "status": "PASS" if sc >= min_sc else "FAIL",
+            "current": f"{sc} steps",
+            "limit": f"{min_sc} steps",
+            "margin": f"{sc - min_sc:+d} steps",
             "phase": "runtime",
         })
-    oy = _safe_float(metrics.get("object_y"))
-    if oy is not None:
+    oy_raw = metrics.get("object_y")
+    if oy_raw is not None and math.isfinite(_safe_float(oy_raw, default=float("nan"))):
+        oy = float(oy_raw)
         payload_limit = 0.50
         profile.append({
             "constraint": "Payload support (y > 0.5m)",
@@ -325,16 +310,18 @@ def _build_constraint_fallback(metrics: Dict[str, Any]) -> List[Dict[str, Any]]:
             "margin": f"{oy - payload_limit:+.2f} m",
             "phase": "runtime",
         })
-    tilt = _safe_float(metrics.get("max_pusher_tilt"))
-    tilt_limit = math.pi / 6
-    profile.append({
-        "constraint": "Chassis tilt (< π/6 rad)",
-        "status": "PASS" if tilt < tilt_limit else "FAIL",
-        "current": f"{math.degrees(tilt):.1f}°",
-        "limit": "30.0°",
-        "margin": f"{tilt_limit - tilt:+.3f} rad",
-        "phase": "runtime",
-    })
+    if metrics.get("max_pusher_tilt") is not None:
+        tilt = _safe_float(metrics.get("max_pusher_tilt"), default=float("nan"))
+        if math.isfinite(tilt):
+            tilt_limit = math.pi / 6
+            profile.append({
+                "constraint": "Chassis tilt (< π/6 rad)",
+                "status": "PASS" if tilt < tilt_limit else "FAIL",
+                "current": f"{math.degrees(tilt):.1f}°",
+                "limit": "30.0°",
+                "margin": f"{tilt_limit - tilt:+.3f} rad",
+                "phase": "runtime",
+            })
     return profile
 
 def _format_numerical_health(metrics: Dict[str, Any]) -> List[str]:
@@ -358,6 +345,19 @@ def _format_numerical_health(metrics: Dict[str, Any]) -> List[str]:
     mwt = _safe_float(metrics.get("max_wheel_tangential_speed"))
     if mwt > 50.0:
         issues.append(f"⚠️ Extreme wheel tangential speed: {mwt:.0f} m/s")
+    for key in ("object_x", "object_y", "pusher_x", "pusher_y", "structure_mass"):
+        if key in metrics and metrics[key] is not None:
+            try:
+                if not math.isfinite(float(metrics[key])):
+                    issues.append(f"❌ Non-finite metric: {key}={metrics[key]}")
+            except (TypeError, ValueError):
+                issues.append(f"❌ Non-numeric metric: {key}={metrics[key]}")
+    diagnostic_errors = metrics.get("diagnostic_error_count", 0)
+    if isinstance(diagnostic_errors, (int, float)) and diagnostic_errors > 0:
+        issues.append(
+            f"⚠️ Diagnostic collection errors: {int(diagnostic_errors)}; "
+            f"last={metrics.get('last_diagnostic_error') or 'details unavailable'}"
+        )
     if not issues:
         lines.append("  ✅ No numerical anomalies")
     else:
@@ -372,6 +372,13 @@ def format_task_metrics(metrics: Dict[str, Any]) -> List[str]:
     if error:
         return [f"**Execution Error**: {error}"]
     parts: List[str] = []
+    success = bool(metrics.get("success"))
+    failed = bool(metrics.get("failed"))
+    status = "SUCCESS ✓" if success else ("FAILED ✗" if failed else "IN PROGRESS")
+    parts.append(f"## Outcome: {status}")
+    if metrics.get("failure_reason"):
+        parts.append(f"Failure: {metrics['failure_reason']}")
+    parts.append("")
     try:
         parts.extend(_format_temporal_chronology(metrics))
     except Exception as e:
@@ -412,43 +419,6 @@ def get_improvement_suggestions(
     error: str = None,
 
 ) -> List[str]:
-    suggestions: List[str] = []
     if error:
-        return suggestions
-    if success:
-        return suggestions
-    fb = metrics.get("force_budget")
-    if isinstance(fb, dict) and fb:
-        ratio = _safe_float(fb.get("force_ratio_pct"), default=100.0)
-        if ratio < 50.0 and ratio > 0:
-            bottleneck = fb.get("bottleneck", "unknown")
-            suggestions.append(
-                f"- Force budget deficit: available traction is {ratio:.1f}% of required push force. "
-                f"Bottleneck identified as '{bottleneck}'."
-            )
-    wca = metrics.get("wheel_contact_audit")
-    if isinstance(wca, dict):
-        ever = wca.get("ever_contacted", True)
-        if not ever:
-            suggestions.append(
-            )
-    ws = metrics.get("wheel_state")
-    if ws == "wheels suspended":
-        depth = _safe_float(metrics.get("max_wheel_suspension_depth"))
-        ground_y = _safe_float(metrics.get("ground_y"), default=1.0)
-        suggestions.append(
-            f"- Wheels are suspended {depth:.3f} m above contact threshold. "
-            f"Ground surface is at y={ground_y:.2f} m."
-        )
-    ma = metrics.get("motor_actuation")
-    if isinstance(ma, dict):
-        ever = ma.get("ever_active", False)
-        if not ever:
-            suggestions.append(
-            )
-    gap = _safe_float(metrics.get("pusher_object_gap"), default=0.0)
-    if gap < -0.1:
-        suggestions.append(
-            f"- Pusher is {abs(gap):.2f} m behind the object. "
-        )
-    return suggestions
+        return ["- Code execution failed. Review the reported exception and traceback."]
+    return []

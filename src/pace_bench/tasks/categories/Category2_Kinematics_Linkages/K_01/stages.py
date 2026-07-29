@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pace_bench.tasks.stage_prompt import uniform_suffix_for_task
+
 import math
 
 import re
@@ -10,6 +12,9 @@ _DEFAULT_MAX_STRUCTURE_MASS = 100.0
 
 def _mass_str(m: float) -> str:
     return f"{m:.0f}" if m == int(m) else f"{m:.1f}"
+
+def _coefficient_str(value: float) -> str:
+    return f"{float(value):.3f}".rstrip("0").rstrip(".")
 
 def update_task_description_for_visible_changes(
     base_description: str,
@@ -31,24 +36,6 @@ def update_task_description_for_visible_changes(
                 f"(originally {_mass_str(base_max_mass)} kg in the source environment; default now {_mass_str(target_max_mass)} kg).",
                 description,
             )
-    target_ground_friction = target_terrain_config.get("ground_friction")
-    base_ground_friction_raw = base_terrain_config.get("ground_friction")
-    base_ground_friction = (
-        float(base_ground_friction_raw) if base_ground_friction_raw is not None
-        else 0.8
-    )
-    if target_ground_friction is not None and base_ground_friction != target_ground_friction:
-        gf_desc_pattern = re.compile(
-            r"(default ground (?:traction|friction) coefficient is )(\d+\.?\d*)(\.)",
-            re.IGNORECASE,
-        )
-        if gf_desc_pattern.search(description):
-            description = gf_desc_pattern.sub(
-                lambda m: m.group(1)
-                + f"now {float(target_ground_friction):.2f} (originally {base_ground_friction:.2f} in the source environment)"
-                + m.group(3),
-                description,
-            )
     target_body_friction = target_physics_config.get("max_body_friction")
     base_body_friction_raw = base_physics_config.get("max_body_friction")
     base_body_friction = (
@@ -64,7 +51,7 @@ def update_task_description_for_visible_changes(
                 g3 = m.group(3)
                 t = float(target)
                 b = float(base)
-                val = f"{t:.2f} (originally {b:.2f} in the source environment)"
+                val = f"{_coefficient_str(t)} (originally {_coefficient_str(b)} in the source environment)"
                 return m.group(1) + val + g3
             description = bf_pattern_with_orig.sub(
                 lambda m: _replace_bf_orig(m, target_body_friction, base_body_friction),
@@ -76,7 +63,7 @@ def update_task_description_for_visible_changes(
             )
             if bf_pattern.search(description):
                 description = bf_pattern.sub(
-                    lambda m: m.group(1) + f"{float(target_body_friction):.2f} (originally {float(base_body_friction):.2f} in the source environment)" + m.group(3),
+                    lambda m: m.group(1) + f"{_coefficient_str(target_body_friction)} (originally {_coefficient_str(base_body_friction)} in the source environment)" + m.group(3),
                     description,
                 )
     target_lo = target_physics_config.get("default_joint_lower_limit")
@@ -137,19 +124,7 @@ def update_success_criteria_for_visible_changes(base_success_criteria: str, targ
             )
     return criteria
 
-_UNIFORM_SUFFIX = """
-
-Sensors indicate that this region exhibits non-standard physical properties.
-While the following variables **MIGHT** have changed from the initial environment, **NOT ALL** of them will necessarily be mutated in any given task:
-- **Ground Friction**: The traction between the walker's contact points and the ground may differ from standard.
-- **Joint Limits (Lower/Upper)**: The minimum and maximum angles for pivot joints may differ from the standard range.
-- **Gravity**: The gravitational field in this region may exhibit non-standard characteristics.
-- **Body Friction**: The effective friction of the walker's components in contact with the ground or other bodies may differ from standard.
-- **Body Friction Cap**: The maximum friction coefficient usable via `set_material_properties` may differ from standard.
-- **Linear Damping**: The linear velocity damping coefficient may differ from standard.
-- **Angular Damping**: The angular velocity damping coefficient may differ from standard.
-- **Structure Mass Budget**: The maximum allowed total mass of the structure may differ from standard.
-"""
+_UNIFORM_SUFFIX = uniform_suffix_for_task("K_01")
 
 def get_k01_curriculum_stages() -> List[Dict[str, Any]]:
     return [
@@ -157,7 +132,7 @@ def get_k01_curriculum_stages() -> List[Dict[str, Any]]:
             "stage_id": "Stage-1",
             "title": "Near-Zero Structure Mass Budget",
             "mutation_description": "Structure mass budget is pushed to a near-breaking extreme. The standard walker design exceeds the budget by over 10×; even a naively simplified design will likely fail. Every gram must be optimized, requiring ultra-light materials, minimal component dimensions, and elimination of all non-essential mass.",
-            "task_description_suffix": _UNIFORM_SUFFIX,
+            "task_description_suffix": uniform_suffix_for_task("K_01"),
             "terrain_config": {"max_structure_mass": 0.8},
             "physics_config": {},
         },
@@ -165,7 +140,7 @@ def get_k01_curriculum_stages() -> List[Dict[str, Any]]:
             "stage_id": "Stage-2",
             "title": "Near-Zero Ground Traction + Restricted Joints",
             "mutation_description": "Ground traction is reduced to near-zero, and pivot joint range is restricted. Legs slip with almost no grip; the walker must use minimal motor torque to avoid breaking the tiny friction threshold, while operating within a narrow angular window.",
-            "task_description_suffix": _UNIFORM_SUFFIX,
+            "task_description_suffix": uniform_suffix_for_task("K_01"),
             "terrain_config": {"ground_friction": 0.02},
             "physics_config": {
                 "default_joint_lower_limit": -math.pi / 12,
@@ -174,24 +149,24 @@ def get_k01_curriculum_stages() -> List[Dict[str, Any]]:
         },
         {
             "stage_id": "Stage-3",
-            "title": "Energy Drain + Frictionless Surface + Tight Joints + Mass Crunch + Elevated Gravity",
-            "mutation_description": "Linear and angular damping are pushed to extreme levels (16.0 each), ground friction is reduced to 0.01 (near-frictionless), body friction is capped at merely 0.015, joint range is tightly restricted to ±18°, the structure mass budget is slashed to 3.0 kg, and gravity is elevated 40% above standard. The walker faces a lethal combination: massive energy dissipation through damping that bleeds any velocity gain within milliseconds, a near-frictionless surface that prevents traction-based propulsion, joint limits that forbid full rotation, a mass budget so tight that only ultra-light materials are permissible, and elevated gravity that increases collapse risk. Each constraint alone is manageable; together they create a synergistic trap where every solution to one problem worsens another.",
-            "task_description_suffix": _UNIFORM_SUFFIX,
-            "terrain_config": {"ground_friction": 0.01, "max_structure_mass": 3.0},
+            "title": "Dissipative Low-Traction Walking Crown",
+            "mutation_description": "A 1.5 kg mass budget excludes the Stage-2 many-legged chassis, while 1.7x gravity raises its support load. Default pivot travel contracts to ±π/14, linear and angular damping rise to 4.0, and the body-friction cap falls to 0.20 on ground friction 0.015. The coupled regime removes coasting, default full-turn wheel motion, heavy contact arrays, and friction-maximization as viable strategy families. A sparse articulated gait must alternate loaded stance and lifted recovery phases while maintaining torso clearance.",
+            "task_description_suffix": uniform_suffix_for_task("K_01"),
+            "terrain_config": {"ground_friction": 0.015, "max_structure_mass": 1.5},
             "physics_config": {
-                "gravity": (0, -14.0),
-                "max_body_friction": 0.015,
-                "default_joint_lower_limit": -math.pi / 10,
-                "default_joint_upper_limit": math.pi / 10,
-                "linear_damping": 16.0,
-                "angular_damping": 16.0,
+                "gravity": (0, -17.0),
+                "max_body_friction": 0.2,
+                "default_joint_lower_limit": -math.pi / 14,
+                "default_joint_upper_limit": math.pi / 14,
+                "linear_damping": 4.0,
+                "angular_damping": 4.0,
             },
         },
         {
             "stage_id": "Stage-4",
             "title": "Maximum Difficulty — All Variables Beyond Stage-3 Extremes",
             "mutation_description": "Ground friction matched at Stage-3's extreme low of 0.01, but every other variable is pushed significantly further: structure mass budget slashed to 1.2 kg (60% less than Stage-3's 3.0), gravity nearly doubled to -20.0 (vs Stage-3's -14.0), body friction cap cut to 0.008 (nearly half of Stage-3's 0.015), joint range squeezed to ±12° (±π/15 vs Stage-3's ±18°), and both linear and angular damping raised to 18.0 (above Stage-3's 16.0). The walker faces double gravitational loading with barely any joint articulation, severe energy dissipation, minimal body friction, and a mass budget so tight that only the most aggressively weight-optimized design can fit. The combination creates a synergistic trap: high gravity demands structural robustness but the tiny mass budget forbids it; high damping kills all momentum between leg contacts; ultra-tight joints restrict the walking gait; and the near-zero body friction cap prevents friction-based traction strategies.",
-            "task_description_suffix": _UNIFORM_SUFFIX,
+            "task_description_suffix": uniform_suffix_for_task("K_01"),
             "terrain_config": {"ground_friction": 0.01, "max_structure_mass": 1.2},
             "physics_config": {
                 "gravity": (0, -20.0),

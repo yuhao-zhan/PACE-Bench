@@ -1,8 +1,4 @@
-import sys
-import os
 import pygame
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../..'))
 
 from pace_bench.renderer import Renderer
 from Box2D.b2 import staticBody
@@ -151,7 +147,7 @@ class F05Renderer(Renderer):
 
             # Top-left: task label
             if self._font_label:
-                label = self._font_label.render("F-05 | Conveyor",
+                label = self._font_label.render("F-05 | Boat",
                                                 True, COLOR_ANNOTATION)
                 self.simulator.screen.blit(label, (18, 14))
 

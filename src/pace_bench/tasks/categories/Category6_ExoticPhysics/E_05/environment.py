@@ -4,6 +4,8 @@ import Box2D
 
 from Box2D.b2 import world, polygonShape, staticBody, dynamicBody
 
+TIME_STEP = 1.0 / 60.0
+
 def default_magnets():
     return [
         (12.0, 4.0, -300.0),
@@ -64,7 +66,7 @@ class Sandbox:
         self._create_terrain(terrain_config)
         self._create_body(terrain_config)
         self._body_mass = 30.0 * 0.8 * 0.4
-        self.reset_forensic_state()
+        self._reset_forensic_state()
     def _create_terrain(self, terrain_config: dict):
         ground_length = 45.0
         ground_height = 1.0
@@ -93,16 +95,17 @@ class Sandbox:
         body.angularDamping = self._angular_damping
         self._terrain_bodies["body"] = body
     def step(self, time_step):
+        if not math.isclose(float(time_step), TIME_STEP, rel_tol=0.0, abs_tol=1e-12):
+            raise ValueError(f"E_05 requires a fixed time step of {TIME_STEP}")
         self._step_count += 1
         body = self._terrain_bodies.get("body")
         if body:
             bx, by = body.position.x, body.position.y
             vel = (body.linearVelocity.x, body.linearVelocity.y)
             if not hasattr(self, "_forensic") or self._forensic is None:
-                self.reset_forensic_state()
+                self._reset_forensic_state()
             self._update_forensic(self._step_count, (bx, by), vel)
             net_mag_fx, net_mag_fy = 0.0, 0.0
-            per_magnet_forces = []
             for m in self._magnets:
                 if len(m) == 3:
                     mx, my, strength = m[0], m[1], m[2]
@@ -119,19 +122,24 @@ class Sandbox:
                 fy = scale * dy
                 net_mag_fx += fx
                 net_mag_fy += fy
-                per_magnet_forces.append((mx, my, round(strength, 2), round(fx, 3), round(fy, 3), round(r, 3)))
                 body.ApplyForceToCenter((fx, fy), wake=True)
             self._forensic["current_net_magnetic_force"] = (net_mag_fx, net_mag_fy)
-            mag_total = abs(net_mag_fx) + abs(net_mag_fy)
+            mag_total = math.hypot(net_mag_fx, net_mag_fy)
             if mag_total > self._forensic["peak_magnetic_force_magnitude"]:
                 self._forensic["peak_magnetic_force_magnitude"] = mag_total
-            per_magnet_forces.sort(key=lambda t: abs(t[3]) + abs(t[4]), reverse=True)
-            self._forensic["top_magnet_contributors"] = per_magnet_forces[:5]
             tx, ty = self._pending_thrust
             thrust_mag = math.sqrt(tx * tx + ty * ty)
+            if thrust_mag > self._forensic["peak_requested_thrust"]:
+                self._forensic["peak_requested_thrust"] = thrust_mag
             if thrust_mag > self._max_thrust_magnitude:
+                self._forensic["thrust_clipped_steps"] += 1
+                if self._forensic["first_thrust_clip_step"] is None:
+                    self._forensic["first_thrust_clip_step"] = self._step_count
                 scale = self._max_thrust_magnitude / thrust_mag
                 tx, ty = tx * scale, ty * scale
+            applied_magnitude = math.hypot(tx, ty)
+            if applied_magnitude > self._forensic["peak_applied_thrust"]:
+                self._forensic["peak_applied_thrust"] = applied_magnitude
             self._forensic["current_applied_thrust"] = (tx, ty)
             body.ApplyForceToCenter((tx, ty), wake=True)
         self._pending_thrust = (0.0, 0.0)
@@ -169,7 +177,7 @@ class Sandbox:
                 "y_max": self.PIT_Y_MAX,
             },
         }
-    def reset_forensic_state(self):
+    def _reset_forensic_state(self):
         self._forensic = {
             "max_body_x": None,
             "min_body_x": None,
@@ -194,7 +202,6 @@ class Sandbox:
             "peak_magnetic_force_magnitude": 0.0,
             "cumulative_magnetic_work": 0.0,
             "cumulative_thrust_work": 0.0,
-            "cumulative_damping_loss": 0.0,
             "body_mass": self._body_mass,
             "temporal_events": [],
             "velocity_reversal_events": [],
@@ -204,8 +211,11 @@ class Sandbox:
             "_last_progress_x": None,
             "_progress_stall_counter": 0,
             "peak_vertical_accel": 0.0,
+            "peak_requested_thrust": 0.0,
+            "peak_applied_thrust": 0.0,
+            "thrust_clipped_steps": 0,
+            "first_thrust_clip_step": None,
             "_prev_body_vel": None,
-            "top_magnet_contributors": [],
             "_prev_body_pos": None,
             "_prev_net_magnetic_force": (0.0, 0.0),
             "_prev_applied_thrust": (0.0, 0.0),
@@ -298,7 +308,6 @@ class Sandbox:
             pt = f["_prev_applied_thrust"]
             f["cumulative_magnetic_work"] += pmf[0] * dx + pmf[1] * dy
             f["cumulative_thrust_work"] += pt[0] * dx + pt[1] * dy
-            f["cumulative_damping_loss"] += self._linear_damping * (speed * speed) * (1.0 / 60.0)
         last_px = f["_last_progress_x"]
         f["_last_progress_x"] = x
         if last_px is not None and x <= last_px + 0.001:
@@ -306,6 +315,9 @@ class Sandbox:
         else:
             f["_progress_stall_counter"] = 0
         if f["_progress_stall_counter"] >= 300:
+            f["progress_plateau_duration"] = max(
+                f["progress_plateau_duration"], f["_progress_stall_counter"]
+            )
             if f["progress_plateau_end_step"] is None:
                 f["progress_plateau_end_step"] = step_count
                 f["progress_plateau_x"] = round(x, 3)
@@ -315,9 +327,9 @@ class Sandbox:
                      "body_x": round(x, 3), "body_y": round(y, 3),
                      "stall_duration_steps": f["_progress_stall_counter"]}
                 )
-    def get_forensic_summary(self):
+    def _get_forensic_summary(self):
         return dict(self._forensic)
-    def get_magnetic_force_summary(self):
+    def _get_magnetic_force_summary(self):
         f = self._forensic
         net_fx, net_fy = f.get("current_net_magnetic_force", (0.0, 0.0))
         return {
@@ -325,12 +337,8 @@ class Sandbox:
             "net_magnetic_force_y": round(net_fy, 3),
             "net_magnetic_force_magnitude": round(math.sqrt(net_fx * net_fx + net_fy * net_fy), 3),
             "peak_magnetic_force_magnitude": round(f.get("peak_magnetic_force_magnitude", 0.0), 3),
-            "top_magnet_contributors": [
-                {"mx": t[0], "my": t[1], "strength": t[2], "fx": t[3], "fy": t[4], "distance": t[5]}
-                for t in f.get("top_magnet_contributors", [])
-            ],
         }
-    def get_energy_summary(self):
+    def _get_energy_summary(self):
         f = self._forensic
         body = self._terrain_bodies.get("body")
         ke = 0.0
@@ -339,35 +347,23 @@ class Sandbox:
             ke = 0.5 * self._body_mass * (vx * vx + vy * vy)
         cum_mag = f.get("cumulative_magnetic_work", 0.0)
         cum_thrust = f.get("cumulative_thrust_work", 0.0)
-        cum_damp = f.get("cumulative_damping_loss", 0.0)
-        total_work_in = cum_thrust + cum_mag
-        efficiency = (ke / max(total_work_in, 1e-6)) * 100.0 if total_work_in > 0 else 0.0
         return {
             "kinetic_energy": round(ke, 3),
             "cumulative_magnetic_work": round(cum_mag, 3),
             "cumulative_thrust_work": round(cum_thrust, 3),
-            "cumulative_damping_loss": round(cum_damp, 3),
-            "energy_efficiency_pct": round(max(0.0, min(100.0, efficiency)), 1),
             "body_mass": round(self._body_mass, 3),
         }
-    def get_temporal_events(self):
+    def _get_temporal_events(self):
         return list(self._forensic.get("temporal_events", []))
-    def get_velocity_reversals(self):
+    def _get_velocity_reversals(self):
         return list(self._forensic.get("velocity_reversal_events", []))
-    def get_force_decomposition(self):
+    def _get_force_decomposition(self):
         f = self._forensic
         net_mag_fx, net_mag_fy = f.get("current_net_magnetic_force", (0.0, 0.0))
         tx, ty = f.get("current_applied_thrust", (0.0, 0.0))
         gx, gy = self._world.gravity
         grav_fx = gx * self._body_mass
         grav_fy = gy * self._body_mass
-        body = self._terrain_bodies.get("body")
-        damp_fx, damp_fy = 0.0, 0.0
-        if body:
-            damp_fx = -self._linear_damping * body.linearVelocity.x
-            damp_fy = -self._linear_damping * body.linearVelocity.y
-        net_fx = tx + net_mag_fx + grav_fx + damp_fx
-        net_fy = ty + net_mag_fy + grav_fy + damp_fy
         required_hover = self._body_mass * abs(gy)
         return {
             "thrust_applied_x": round(tx, 3),
@@ -377,20 +373,20 @@ class Sandbox:
             "net_magnetic_force_y": round(net_mag_fy, 3),
             "gravity_force_x": round(grav_fx, 3),
             "gravity_force_y": round(grav_fy, 3),
-            "damping_force_x": round(damp_fx, 3),
-            "damping_force_y": round(damp_fy, 3),
-            "net_force_x": round(net_fx, 3),
-            "net_force_y": round(net_fy, 3),
             "required_hover_thrust": round(required_hover, 3),
+            "peak_requested_thrust": round(f.get("peak_requested_thrust", 0.0), 3),
+            "peak_applied_thrust": round(f.get("peak_applied_thrust", 0.0), 3),
+            "thrust_clipped_steps": int(f.get("thrust_clipped_steps", 0)),
+            "first_thrust_clip_step": f.get("first_thrust_clip_step"),
         }
-    def get_progress_plateau_info(self):
+    def _get_progress_plateau_info(self):
         f = self._forensic
         return {
             "progress_plateau_end_step": f.get("progress_plateau_end_step"),
             "progress_plateau_x": f.get("progress_plateau_x"),
             "progress_plateau_duration": f.get("progress_plateau_duration", 0),
         }
-    def get_peak_vertical_acceleration(self):
+    def _get_peak_vertical_acceleration(self):
         return self._forensic.get("peak_vertical_accel", 0.0)
     def get_physics_params(self):
         gx, gy = self._world.gravity

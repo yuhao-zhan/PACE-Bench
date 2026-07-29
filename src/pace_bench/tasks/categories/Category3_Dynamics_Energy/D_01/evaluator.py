@@ -1,12 +1,7 @@
-import sys
-
 import math
 
-import os
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../.."))
-
 from pace_bench.primitives import compute_constraint_penalty
+from pace_bench.simulator import TIME_STEP
 
 def _segment_intersects_rect(x0, y0, x1, y1, rx_min, ry_min, rx_max, ry_max):
     if rx_min <= x0 <= rx_max and ry_min <= y0 <= ry_max:
@@ -218,7 +213,7 @@ class Evaluator:
         try:
             springs = self.environment.get_spring_states()
             for s in springs:
-                if s.get("is_compressed"):
+                if float(s.get("elastic_pe", 0.0)) > 1e-6:
                     self._spring_ever_compressed = True
                     if self._spring_compressed_first_step is None:
                         self._spring_compressed_first_step = step_count
@@ -266,6 +261,7 @@ class Evaluator:
             "failed": failed,
             "failure_reason": failure_reason,
             "step_count": step_count,
+            "time_step": TIME_STEP,
             "structure_mass": self.environment.get_structure_mass(),
             "max_structure_mass": self.MAX_STRUCTURE_MASS,
             "hit_occurred": self._hit_occurred,
@@ -274,11 +270,12 @@ class Evaluator:
             "sim_x_max": getattr(type(self.environment), "SIM_BOUNDS_X_MAX", 60.0),
             "sim_y_min": getattr(type(self.environment), "SIM_BOUNDS_Y_MIN", -5.0),
             "constraint_info": self.get_constraint_info(),
+            "observation_error_count": getattr(self.environment, "_observation_error_count", 0),
+            "last_observation_error": getattr(self.environment, "_last_observation_error", None),
         }
         try:
             proj_body = self.environment.get_projectile()
             if proj_body is not None:
-                metrics["projectile_mass"] = float(proj_body.mass)
                 metrics["projectile_awake"] = bool(proj_body.awake)
         except Exception:
             pass
@@ -309,14 +306,6 @@ class Evaluator:
                 if arm_state.get("pivot") is not None:
                     metrics["arm_pivot_x"] = arm_state["pivot"][0]
                     metrics["arm_pivot_y"] = arm_state["pivot"][1]
-        except Exception:
-            pass
-        try:
-            phys = self.environment.get_physics_config()
-            metrics["gravity_x"] = phys["gravity"][0]
-            metrics["gravity_y"] = phys["gravity"][1]
-            metrics["linear_damping"] = phys["linear_damping"]
-            metrics["angular_damping"] = phys["angular_damping"]
         except Exception:
             pass
         try:
