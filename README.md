@@ -227,7 +227,7 @@ Schema `1.0` records task/pair identity, config, seeds, requests, candidates, me
 ```text
 PACE-Bench/
 ├── assets/                         # README figures
-├── dataset_validation/             # construction scripts and audit prompts
+├── dataset_validation/             # dataset-construction audit prompts
 ├── src/
 │   ├── custom_extension.py         # external provider/method example
 │   └── pace_bench/
@@ -287,15 +287,15 @@ Keeping these modules local makes task physics auditable without forcing all tas
 
 ### Dataset construction validation
 
-The three prompt/script pairs in `dataset_validation/` correspond to the three **Dataset Construction Details** subsections in the paper appendix:
+The three reusable prompts in `dataset_validation/` correspond to the three **Dataset Construction Details** subsections in the paper appendix:
 
-| Appendix subsection | Script | Reusable prompt | Purpose |
-| --- | --- | --- | --- |
-| Module Auditing | [`auto_audit.sh`](dataset_validation/auto_audit.sh) | [`module_auditing_prompt.md`](dataset_validation/module_auditing_prompt.md) | Cross-module, prompt-exposure, suffix, runtime, and reference audit. |
-| Difficulty Escalation | [`auto_difficulty_escalation.sh`](dataset_validation/auto_difficulty_escalation.sh) | [`difficulty_escalation_prompt.md`](dataset_validation/difficulty_escalation_prompt.md) | Monotonic mutation hardening that maximizes required solution adaptation while preserving reference solvability. |
-| Feedback Design | [`auto_feedback.sh`](dataset_validation/auto_feedback.sh) | [`feedback_design_prompt.md`](dataset_validation/feedback_design_prompt.md) | Failure forensics, measurement-backed diagnostics, and feedback debloating. |
+| Appendix subsection | Reusable prompt | Purpose |
+| --- | --- | --- |
+| Module Auditing | [`module_auditing_prompt.md`](dataset_validation/module_auditing_prompt.md) | Cross-module, prompt-exposure, suffix, runtime, and reference audit. |
+| Difficulty Escalation | [`difficulty_escalation_prompt.md`](dataset_validation/difficulty_escalation_prompt.md) | Monotonic mutation hardening that maximizes required solution adaptation while preserving reference solvability. |
+| Feedback Design | [`feedback_design_prompt.md`](dataset_validation/feedback_design_prompt.md) | Failure forensics, measurement-backed diagnostics, and feedback debloating. |
 
-The Bash files preserve the original construction-time orchestration and are not public evaluation entry points. The Markdown prompts use the current layout and CLI: audit first, escalate only when completed baseline runs show insufficient difficulty, improve feedback from real failures, then re-audit.
+These Markdown prompts document the construction-time workflows and are not public evaluation entry points.
 
 ## Scope, security, and license
 
