@@ -2,24 +2,15 @@
 
 **PACE-Bench: Benchmarking Physics Adaptation via Code Evolution in Dynamic Environments** evaluates whether a language-model agent can adapt an executable physical design after its environment changes.
 
-![Static physical design versus adaptation under changing physics](assets/pace_bench_motivation.png)
+<p align="center">
+  <img src="assets/pace_bench_motivation.png" alt="Static physical design versus adaptation under changing physics" width="720">
+</p>
 
-## Why and how?
+## Overview
 
-Most physics benchmarks assume a fixed world, while real designs must survive changes in friction, gravity, geometry, load, delay, and force limits. PACE-Bench asks a solver to infer such changes from simulation feedback and revise a Python structure or controller until it succeeds.
+PACE-Bench tests whether a language-model solver can adapt executable Python structures and controllers when the physical environment changes. A solver starts from an `Initial` solution, observes Box2D evaluation feedback in a mutated environment, and revises its code.
 
-Each task has an `Initial` environment and four mutated stages. The Initial reference passes `Initial` but fails every mutation; a stage-specific reference proves each target remains solvable. For `Initial_to_Stage-1`, the benchmark evaluates the Initial design in Stage-1 as attempt 0, returns diagnostics, and repeats code revision and Box2D verification until success or budget exhaustion.
-
-```mermaid
-flowchart LR
-    A[Initial design in mutated environment] --> B[Box2D score and feedback]
-    B --> C[Model or Agent revises code]
-    C --> D[Verify candidate]
-    D -->|fail, budget remains| B
-    D -->|pass| E[Save result]
-```
-
-PACE-Bench ships one model baseline: **vanilla Previous-One + Best**. Every revision receives the current task context, the immediately previous candidate and feedback, and the highest-scoring candidate and feedback without duplicating an attempt that is both previous and best. The benchmark also supports external models/methods and black-box coding agents such as Codex and Claude Code.
+Each task contains one `Initial` environment and four mutated stages. Reference solutions verify that the source design fails each mutation while every target remains solvable. The benchmark supports API-hosted or local models, external methods, and black-box coding agents.
 
 | Property | Count |
 | --- | ---: |
@@ -32,48 +23,6 @@ PACE-Bench ships one model baseline: **vanilla Previous-One + Best**. Every revi
 The categories are statics, kinematics, dynamics, granular/fluid interaction, control, and exotic physics.
 
 ![All 36 PACE-Bench tasks](assets/pace_bench_tasks.png)
-
-## Repository layout
-
-```text
-PACE-Bench/
-├── assets/                         # README figures
-├── dataset_validation/             # construction scripts and audit prompts
-├── src/
-│   ├── custom_extension.py         # external provider/method example
-│   └── pace_bench/
-│       ├── cli.py                  # list, evaluate, agent, validate, report
-│       ├── agents/                 # isolated coding-Agent runtime and gateway
-│       ├── evaluation/             # engine, vanilla method, prompts, providers, results
-│       │   ├── prompt_data/        # shared few-shot/framing fragments
-│       │   └── verification/       # safety checks and Box2D verification
-│       ├── tasks/
-│       │   ├── registry.py         # task discovery and selectors
-│       │   ├── stage_prompt.py     # canonical mutation suffixes and variable inventories
-│       │   ├── categories/         # 36 tasks and their local prompts/physics
-│       │   └── demos/basic/        # tutorial demo; not benchmark data
-│       ├── primitives.py           # task-facing physics helpers
-│       ├── simulator.py            # shared Box2D stepping
-│       ├── renderer.py             # shared pygame rendering
-│       ├── paths.py                # package/output paths
-│       └── types.py                # typed task, attempt, and result records
-├── requirements.txt                # sole dependency manifest
-└── pyproject.toml                  # editable package and CLI metadata
-```
-
-Task-specific physics stays in `tasks/categories/CategoryN_*/X_NN/`; shared evaluation code does not replace task or environment prompts.
-
-### Dataset construction validation
-
-The three prompt/script pairs in `dataset_validation/` correspond to the three **Dataset Construction Details** subsections in the paper appendix:
-
-| Appendix subsection | Script | Reusable prompt | Purpose |
-| --- | --- | --- | --- |
-| Module Auditing | [`auto_audit.sh`](dataset_validation/auto_audit.sh) | [`module_auditing_prompt.md`](dataset_validation/module_auditing_prompt.md) | Cross-module, prompt-exposure, suffix, runtime, and reference audit. |
-| Difficulty Escalation | [`auto_difficulty_escalation.sh`](dataset_validation/auto_difficulty_escalation.sh) | [`difficulty_escalation_prompt.md`](dataset_validation/difficulty_escalation_prompt.md) | Monotonic mutation hardening that maximizes required solution adaptation while preserving reference solvability. |
-| Feedback Design | [`auto_feedback.sh`](dataset_validation/auto_feedback.sh) | [`feedback_design_prompt.md`](dataset_validation/feedback_design_prompt.md) | Failure forensics, measurement-backed diagnostics, and feedback debloating. |
-
-The Bash files preserve the original construction-time orchestration and are not public evaluation entry points. The Markdown prompts use the current layout and CLI: audit first, escalate only when completed baseline runs show insufficient difficulty, improve feedback from real failures, then re-audit.
 
 ## Installation
 
@@ -273,6 +222,36 @@ outputs/<run>/<category>/<task>/<model>/<method>/run-<N>/Initial_to_Stage-<K>.js
 
 Schema `1.0` records task/pair identity, config, seeds, requests, candidates, metrics, feedback, scores, errors, token usage, timing, and artifact paths. Completed results resume by default; use `--no-resume` to rerun. For reproducibility, report the model revision, hardware, seed, attempt budget, runs, temperature, maximum tokens, and display/headless setting.
 
+## Repository layout
+
+```text
+PACE-Bench/
+├── assets/                         # README figures
+├── dataset_validation/             # construction scripts and audit prompts
+├── src/
+│   ├── custom_extension.py         # external provider/method example
+│   └── pace_bench/
+│       ├── cli.py                  # list, evaluate, agent, validate, report
+│       ├── agents/                 # isolated coding-Agent runtime and gateway
+│       ├── evaluation/             # engine, vanilla method, prompts, providers, results
+│       │   ├── prompt_data/        # shared few-shot/framing fragments
+│       │   └── verification/       # safety checks and Box2D verification
+│       ├── tasks/
+│       │   ├── registry.py         # task discovery and selectors
+│       │   ├── stage_prompt.py     # canonical mutation suffixes and variable inventories
+│       │   ├── categories/         # 36 tasks and their local prompts/physics
+│       │   └── demos/basic/        # tutorial demo; not benchmark data
+│       ├── primitives.py           # task-facing physics helpers
+│       ├── simulator.py            # shared Box2D stepping
+│       ├── renderer.py             # shared pygame rendering
+│       ├── paths.py                # package/output paths
+│       └── types.py                # typed task, attempt, and result records
+├── requirements.txt                # sole dependency manifest
+└── pyproject.toml                  # editable package and CLI metadata
+```
+
+Task-specific physics stays in `tasks/categories/CategoryN_*/X_NN/`; shared evaluation code does not replace task or environment prompts.
+
 ## Architecture notes
 
 The evaluation engine owns attempt accounting and verification; providers only generate code, and methods only construct requests and observe attempts. `evaluation/verification/` separates candidate safety, task loading, simulation, diagnostics, and verifier coordination because those pieces have different security and lifecycle responsibilities.
@@ -305,6 +284,18 @@ The vanilla model and default Agent receive the applicable shared fragment in th
 | `stages.py` | Mutations and visibility-aware prompt updates |
 
 Keeping these modules local makes task physics auditable without forcing all tasks into one abstraction.
+
+### Dataset construction validation
+
+The three prompt/script pairs in `dataset_validation/` correspond to the three **Dataset Construction Details** subsections in the paper appendix:
+
+| Appendix subsection | Script | Reusable prompt | Purpose |
+| --- | --- | --- | --- |
+| Module Auditing | [`auto_audit.sh`](dataset_validation/auto_audit.sh) | [`module_auditing_prompt.md`](dataset_validation/module_auditing_prompt.md) | Cross-module, prompt-exposure, suffix, runtime, and reference audit. |
+| Difficulty Escalation | [`auto_difficulty_escalation.sh`](dataset_validation/auto_difficulty_escalation.sh) | [`difficulty_escalation_prompt.md`](dataset_validation/difficulty_escalation_prompt.md) | Monotonic mutation hardening that maximizes required solution adaptation while preserving reference solvability. |
+| Feedback Design | [`auto_feedback.sh`](dataset_validation/auto_feedback.sh) | [`feedback_design_prompt.md`](dataset_validation/feedback_design_prompt.md) | Failure forensics, measurement-backed diagnostics, and feedback debloating. |
+
+The Bash files preserve the original construction-time orchestration and are not public evaluation entry points. The Markdown prompts use the current layout and CLI: audit first, escalate only when completed baseline runs show insufficient difficulty, improve feedback from real failures, then re-audit.
 
 ## Scope, security, and license
 
