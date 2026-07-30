@@ -24,6 +24,41 @@ The categories are statics, kinematics, dynamics, granular/fluid interaction, co
 
 ![All 36 PACE-Bench tasks](assets/pace_bench_tasks.png)
 
+## Repository layout
+
+```text
+PACE-Bench/
+├── assets/                         # README figures
+├── dataset_validation/             # dataset-construction audit prompts
+├── src/
+│   ├── custom_extension.py         # external provider/method example
+│   └── pace_bench/
+│       ├── cli.py                  # list, evaluate, agent, validate, report
+│       ├── agents/                 # isolated coding-Agent runtime and gateway
+│       ├── evaluation/             # evaluation engine, methods, providers, results
+│       │   ├── prompt_data/        # shared demonstrations and framing
+│       │   └── verification/       # safety checks and Box2D verification
+│       ├── tasks/
+│       │   ├── categories/
+│       │   │   ├── Category1_Statics_Equilibrium/
+│       │   │   ├── Category2_Kinematics_Linkages/
+│       │   │   ├── Category3_Dynamics_Energy/
+│       │   │   ├── Category4_Granular_FluidInteraction/
+│       │   │   ├── Category5_Cybernetics_Control/
+│       │   │   └── Category6_ExoticPhysics/
+│       │   ├── demos/basic/        # tutorial demo; not benchmark data
+│       │   ├── registry.py         # task discovery and selectors
+│       │   └── stage_prompt.py     # mutation suffixes and variable inventories
+│       ├── primitives.py           # task-facing physics helpers
+│       ├── simulator.py            # shared Box2D stepping
+│       ├── renderer.py             # shared pygame rendering
+│       └── types.py                # task, attempt, and result records
+├── requirements.txt                # dependency manifest
+└── pyproject.toml                  # package and CLI metadata
+```
+
+Each category contains six self-contained `TASK_ID/` directories. Every task keeps its environment, evaluator, feedback, prompt, renderer, stage definitions, and reference solutions together; the detailed module contract appears in [Architecture notes](#architecture-notes).
+
 ## Installation
 
 PACE-Bench targets Python 3.10 and is run from a cloned checkout. `requirements.txt` ends with `-e .`, which installs this checkout and registers `pace-bench`; no PyPI release is required.
@@ -221,36 +256,6 @@ outputs/<run>/<category>/<task>/<model>/<method>/run-<N>/Initial_to_Stage-<K>.js
 ```
 
 Schema `1.0` records task/pair identity, config, seeds, requests, candidates, metrics, feedback, scores, errors, token usage, timing, and artifact paths. Completed results resume by default; use `--no-resume` to rerun. For reproducibility, report the model revision, hardware, seed, attempt budget, runs, temperature, maximum tokens, and display/headless setting.
-
-## Repository layout
-
-```text
-PACE-Bench/
-├── assets/                         # README figures
-├── dataset_validation/             # dataset-construction audit prompts
-├── src/
-│   ├── custom_extension.py         # external provider/method example
-│   └── pace_bench/
-│       ├── cli.py                  # list, evaluate, agent, validate, report
-│       ├── agents/                 # isolated coding-Agent runtime and gateway
-│       ├── evaluation/             # engine, vanilla method, prompts, providers, results
-│       │   ├── prompt_data/        # shared few-shot/framing fragments
-│       │   └── verification/       # safety checks and Box2D verification
-│       ├── tasks/
-│       │   ├── registry.py         # task discovery and selectors
-│       │   ├── stage_prompt.py     # canonical mutation suffixes and variable inventories
-│       │   ├── categories/         # 36 tasks and their local prompts/physics
-│       │   └── demos/basic/        # tutorial demo; not benchmark data
-│       ├── primitives.py           # task-facing physics helpers
-│       ├── simulator.py            # shared Box2D stepping
-│       ├── renderer.py             # shared pygame rendering
-│       ├── paths.py                # package/output paths
-│       └── types.py                # typed task, attempt, and result records
-├── requirements.txt                # sole dependency manifest
-└── pyproject.toml                  # editable package and CLI metadata
-```
-
-Task-specific physics stays in `tasks/categories/CategoryN_*/X_NN/`; shared evaluation code does not replace task or environment prompts.
 
 ## Architecture notes
 
