@@ -21,6 +21,9 @@ def agent_action(sandbox, agent_body, step_count):
     return None
 """
 
+DEFAULT_VLLM_BASE_URL = "http://127.0.0.1:8000/v1"
+DEFAULT_VLLM_API_KEY = "EMPTY"
+
 
 def load_object(dotted_path: str) -> Any:
     """Load ``package.module:Symbol`` with an actionable error."""
@@ -42,14 +45,16 @@ def load_provider(
     options = dict(options or {})
     if name in {"openai", "openai-compatible"}:
         return OpenAICompatibleProvider(model=model, **options)
+    if name == "vllm":
+        return VLLMProvider(model=model, **options)
     if name in {"local", "local-transformers", "transformers"}:
         return LocalTransformersProvider(model=model, **options)
     if name == "mock":
         return MockProvider(model=model, **options)
     if ":" not in name:
         raise ConfigurationError(
-            f"Unknown provider {name!r}. Use openai-compatible, local-transformers, mock, "
-            "or package.module:ProviderClass."
+            f"Unknown provider {name!r}. Use vllm, openai-compatible, "
+            "local-transformers, mock, or package.module:ProviderClass."
         )
     provider = load_object(name)(model=model, **options)
     missing = [
@@ -128,7 +133,7 @@ class OpenAICompatibleProvider:
             return self._client
         if not self.api_key:
             raise ConfigurationError(
-                "OpenAI-compatible evaluation requires --api-key or OPENAI_API_KEY."
+                f"{self.name} evaluation requires --api-key or OPENAI_API_KEY."
             )
         try:
             from openai import OpenAI
@@ -160,7 +165,7 @@ class OpenAICompatibleProvider:
                 extra_body=self.extra_body or None,
             )
         except Exception as exc:
-            raise ProviderError(f"OpenAI-compatible generation failed: {exc}") from exc
+            raise ProviderError(f"{self.name} generation failed: {exc}") from exc
         text = response.choices[0].message.content or "" if response.choices else ""
         usage = getattr(response, "usage", None)
         return GenerationResult(
@@ -180,6 +185,36 @@ class OpenAICompatibleProvider:
         if callable(close):
             close()
         self._client = None
+
+
+class VLLMProvider(OpenAICompatibleProvider):
+    """Client for a local or remote vLLM OpenAI-compatible server.
+
+    The evaluator never imports vLLM or owns model weights. A separately managed
+    vLLM server performs inference, which keeps serving and benchmark dependencies
+    isolated and permits several evaluation workers to share one model instance.
+    """
+
+    name = "vllm"
+
+    def __init__(
+        self,
+        *,
+        model: str,
+        api_key: str | None = None,
+        base_url: str | None = None,
+        timeout: float = 120.0,
+        extra_body: dict[str, Any] | None = None,
+    ) -> None:
+        super().__init__(
+            model=model,
+            api_key=api_key or os.environ.get("VLLM_API_KEY") or DEFAULT_VLLM_API_KEY,
+            base_url=base_url
+            or os.environ.get("VLLM_BASE_URL")
+            or DEFAULT_VLLM_BASE_URL,
+            timeout=timeout,
+            extra_body=extra_body,
+        )
 
 
 class LocalTransformersProvider:
