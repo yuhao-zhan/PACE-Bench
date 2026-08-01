@@ -160,6 +160,7 @@ class OpenAICompatibleProvider:
                 model=self.model,
                 messages=messages,
                 temperature=request.temperature,
+                top_p=request.top_p,
                 max_tokens=request.max_tokens,
                 seed=request.seed,
                 extra_body=self.extra_body or None,
@@ -284,12 +285,17 @@ class LocalTransformersProvider:
             encoded = {key: value.to(model_device) for key, value in encoded.items()}
             torch.manual_seed(request.seed)
             started = time.perf_counter()
-            output = self._model.generate(
+            generation_arguments: dict[str, Any] = {
                 **encoded,
-                do_sample=request.temperature > 0,
-                temperature=max(request.temperature, 1e-5),
-                max_new_tokens=request.max_tokens,
-            )
+                "do_sample": request.temperature > 0,
+                "max_new_tokens": request.max_tokens,
+            }
+            if request.temperature > 0:
+                generation_arguments.update(
+                    temperature=request.temperature,
+                    top_p=request.top_p,
+                )
+            output = self._model.generate(**generation_arguments)
             prompt_tokens = int(encoded["input_ids"].shape[-1])
             generated = output[0, prompt_tokens:]
             completion_tokens = int(generated.shape[-1])

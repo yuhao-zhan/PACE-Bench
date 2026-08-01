@@ -393,6 +393,7 @@ def _compact_result(result: EvaluationResult, path: Path) -> dict[str, Any]:
         "generation_retries",
         "seed",
         "temperature",
+        "top_p",
         "max_tokens",
         "headless",
         "save_gif",

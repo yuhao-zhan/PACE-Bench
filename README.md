@@ -97,7 +97,7 @@ pace-bench list --task S_01
 pace-bench validate --task all --contracts-only
 pace-bench evaluate --task S_01 --env Stage-1 \
   --method vanilla --provider mock --model mock --attempts 1 \
-  --output results/smoke --no-resume
+  --runs 1 --output results/smoke --no-resume
 ```
 
 For headless Linux:
@@ -124,7 +124,7 @@ export PYGAME_HIDE_SUPPORT_PROMPT=1
 export OPENAI_API_KEY=<your-key>
 pace-bench evaluate --task S_01 --env Stage-1 \
   --method vanilla --provider openai-compatible --model <model-name> \
-  --attempts 20 --runs 3 --output results/my-run
+  --attempts 20 --runs 2 --output results/my-run
 ```
 
 For another compatible server, add `--base-url http://host:port/v1` or set `OPENAI_BASE_URL`.
@@ -142,7 +142,7 @@ vllm serve Qwen/Qwen2.5-Coder-7B-Instruct \
 pace-bench evaluate --task K_03 --env Stage-2 \
   --method vanilla --provider vllm \
   --model Qwen/Qwen2.5-Coder-7B-Instruct \
-  --attempts 20 --runs 3 --output results/qwen-vllm
+  --attempts 20 --runs 2 --output results/qwen-vllm
 ```
 
 `--model` must match the model ID exposed by vLLM (or its configured `--served-model-name`). For a remote server, pass `--base-url http://host:port/v1` or set `VLLM_BASE_URL`. If the server uses `vllm serve --api-key ...`, pass the same value with `--api-key` or `VLLM_API_KEY`. Without server authentication, PACE-Bench supplies only the placeholder required by the OpenAI client. `--workers N` may issue concurrent trajectories to the shared server; size it for the server's capacity.
@@ -169,7 +169,8 @@ pace-bench evaluate --task S_01 --task K_01 \
   --env Stage-1 --env Stage-3 --provider openai-compatible --model <model-name>
 
 # Enumerate all 144 pairs without model calls
-pace-bench evaluate --task all --env all --provider mock --model mock --dry-run
+pace-bench evaluate --task all --env all --provider mock --model mock \
+  --runs 1 --dry-run
 
 # Solve Initial without a source reference
 pace-bench evaluate --task D_01 --env Initial --from-scratch \
@@ -280,7 +281,7 @@ pace-bench report --input results/my-run \
   --output results/my-run/report.json                # aggregate JSON results
 ```
 
-`--runs K` executes `K` complete trajectories for every selected task pair in model or Agent mode. Each trajectory receives the configured attempt budget (20 by default). Model-generation seeds deterministically combine the base `--seed`, run index, attempt index, and retry index, preserving independent legacy trial semantics. `--run-index` can select the first Agent run index. The CLI and `pace-bench report` calculate pair-level `Pass@1` through `Pass@K`, where `Pass@k` means that at least one of the pair's first `k` trajectories succeeds.
+`--runs K` executes `K` complete trajectories for every selected task pair in model or Agent mode. Paper reproduction defaults to two 20-attempt runs per pair, with `temperature=0.7`, `top_p=0.95`, and at most 65,536 output tokens for every method and auxiliary model call. Model-generation seeds deterministically combine the base `--seed`, run index, attempt index, and retry index. `--run-index` can select the first Agent run index. The CLI and `pace-bench report` calculate pair-level `Pass@1` through `Pass@K`, where `Pass@k` means that at least one of the pair's first `k` trajectories succeeds.
 
 `--output` selects an experiment root. JSON is always saved; `--save-gif` additionally saves one GIF for every verified attempt, including adaptation attempt 0. The JSON and GIF trees intentionally mirror one another:
 
@@ -297,7 +298,7 @@ One schema `2.0` JSON represents one task-pair trajectory. It stores identity an
 
 `pace-bench report` preserves every generic metric used by the former result plots and tables: Pass@k across independent runs; pass and score curves by attempt; score deviation; attempts and adaptation efficiency; prompt/completion cost; best-code size; error taxonomy; early/middle/late code similarity and radicality; budget saturation; stage/model/category/strategy breakdowns; model scale; strategy cost/Pareto data and Cohen's kappa; mutation counts; and reference-solution similarity. The report includes an explicit `legacy_metric_coverage` map from old metric names to current JSON paths. Removed-method, VLM, CE, and paper-specific plot emitters are intentionally not runtime features; their underlying generic measurements remain available. Schema `1.0` and older unversioned result JSON remain readable.
 
-Completed JSON resumes by default; use `--no-resume` to rerun. For reproducibility, report the model revision, hardware, base seed, attempt budget, number of runs, temperature, maximum tokens, and display/headless setting.
+Completed JSON resumes by default; use `--no-resume` to rerun. For reproducibility, report the model revision, hardware, base seed, attempt budget, number of runs, temperature, top-p, maximum tokens, and display/headless setting.
 
 ## Architecture notes
 

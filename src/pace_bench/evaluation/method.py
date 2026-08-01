@@ -108,6 +108,7 @@ class VanillaMethod:
             prompt=prompt,
             seed=config.seed + attempt,
             temperature=config.temperature,
+            top_p=config.top_p,
             max_tokens=config.max_tokens,
             metadata={"attempt": attempt, "method": self.name},
         )

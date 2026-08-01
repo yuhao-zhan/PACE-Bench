@@ -36,7 +36,8 @@ class RunConfig:
     generation_retries: int = 2
     seed: int = 0
     temperature: float = 0.7
-    max_tokens: int = 8192
+    top_p: float = 0.95
+    max_tokens: int = 65_536
     headless: bool = True
     save_gif: bool = False
     output: Path | None = None
@@ -52,6 +53,12 @@ class RunConfig:
             raise ConfigurationError("attempts must be at least 1")
         if self.generation_retries < 0:
             raise ConfigurationError("generation_retries cannot be negative")
+        if self.temperature < 0:
+            raise ConfigurationError("temperature cannot be negative")
+        if not 0 < self.top_p <= 1:
+            raise ConfigurationError("top_p must be in the interval (0, 1]")
+        if self.max_tokens < 1:
+            raise ConfigurationError("max_tokens must be positive")
         if self.max_steps is not None and self.max_steps < 1:
             raise ConfigurationError("max_steps must be positive")
         if self.timeout_seconds is not None and self.timeout_seconds <= 0:
@@ -290,6 +297,7 @@ class StrategyRuntime:
             **details,
             "seed": request.seed,
             "temperature": request.temperature,
+            "top_p": request.top_p,
             "max_tokens": request.max_tokens,
             "request_metadata": to_jsonable(request.metadata),
         }

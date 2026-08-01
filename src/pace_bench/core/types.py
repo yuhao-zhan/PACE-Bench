@@ -101,7 +101,8 @@ class GenerationRequest:
     system_prompt: str | None = None
     seed: int = 0
     temperature: float = 0.7
-    max_tokens: int = 8192
+    top_p: float = 0.95
+    max_tokens: int = 65_536
     metadata: dict[str, Any] = field(default_factory=dict)
 
 

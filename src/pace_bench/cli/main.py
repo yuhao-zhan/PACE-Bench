@@ -100,8 +100,8 @@ def build_parser() -> argparse.ArgumentParser:
     evaluate_parser.add_argument(
         "--runs",
         type=int,
-        default=1,
-        help="Independent complete trajectories per selected task pair (for Pass@k)",
+        default=2,
+        help="Independent complete trajectories per pair (paper default: 2 for Pass@2)",
     )
     evaluate_parser.add_argument("--workers", type=int, default=1)
     evaluate_parser.add_argument("--max-steps", type=int)
@@ -109,7 +109,8 @@ def build_parser() -> argparse.ArgumentParser:
     evaluate_parser.add_argument("--timeout-seconds", type=float)
     evaluate_parser.add_argument("--seed", type=int, default=0)
     evaluate_parser.add_argument("--temperature", type=float, default=0.7)
-    evaluate_parser.add_argument("--max-tokens", type=int, default=8192)
+    evaluate_parser.add_argument("--top-p", type=float, default=0.95)
+    evaluate_parser.add_argument("--max-tokens", type=int, default=65_536)
     evaluate_parser.add_argument(
         "--output",
         type=Path,
@@ -319,6 +320,7 @@ def _config_from_args(args: argparse.Namespace, mode: RunMode) -> RunConfig:
         timeout_seconds=args.timeout_seconds,
         seed=args.seed,
         temperature=args.temperature,
+        top_p=args.top_p,
         max_tokens=args.max_tokens,
         headless=not args.display,
         save_gif=args.save_gif,
