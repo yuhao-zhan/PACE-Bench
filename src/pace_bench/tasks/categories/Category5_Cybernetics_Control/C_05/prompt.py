@@ -2,7 +2,7 @@ import os
 
 import json
 
-from pace_bench.simulator import TIME_STEP
+from pace_bench.core.simulator import TIME_STEP
 
 from pace_bench.tasks.primitives_api import API_INTRO
 

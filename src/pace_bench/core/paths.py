@@ -5,7 +5,8 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-PACKAGE_ROOT = Path(__file__).resolve().parent
+# This module lives under ``pace_bench/core``; package data remains one level up.
+PACKAGE_ROOT = Path(__file__).resolve().parent.parent
 TASKS_ROOT = PACKAGE_ROOT / "tasks"
 TASK_CATEGORIES_ROOT = TASKS_ROOT / "categories"
 TASK_DEMOS_ROOT = TASKS_ROOT / "demos"

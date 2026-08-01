@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from contextlib import suppress
 
-from pace_bench.simulator import TIME_STEP, Simulator
+from pace_bench.core.simulator import TIME_STEP, Simulator
 
 
 def _matches_category(task_name: str, category: int) -> bool:

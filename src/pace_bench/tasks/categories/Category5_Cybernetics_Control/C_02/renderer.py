@@ -6,7 +6,7 @@ except ImportError:
     from pace_bench.tasks.categories.Category5_Cybernetics_Control.C_02.environment import (
         GROUND_SLAB_HEIGHT,
     )
-from pace_bench.renderer import Renderer
+from pace_bench.core.renderer import Renderer
 from Box2D.b2 import dynamicBody, staticBody
 
 # ── Academic palette ──────────────────────────────────────────────

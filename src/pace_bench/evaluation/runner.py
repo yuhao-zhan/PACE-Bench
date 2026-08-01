@@ -18,7 +18,7 @@ from pace_bench.tasks.registry import get_reference_solution
 from pace_bench.tasks.registry import TaskRegistry, get_registry
 from pace_bench.tasks.registry import max_steps_for_task
 from pace_bench.tasks.registry import EnvironmentSpec, TaskSpec
-from pace_bench.types import EnvironmentId, EvaluationResult, RunMode
+from pace_bench.core.types import EnvironmentId, EvaluationResult, RunMode
 
 
 @dataclass(frozen=True)

@@ -1,8 +1,8 @@
 import math
 
-from pace_bench.simulator import TIME_STEP
+from pace_bench.core.simulator import TIME_STEP
 
-from pace_bench.primitives import compute_constraint_penalty
+from pace_bench.core.primitives import compute_constraint_penalty
 
 GROUND_Y = 1.0
 

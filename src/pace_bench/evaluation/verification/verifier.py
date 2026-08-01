@@ -18,7 +18,7 @@ from pace_bench.evaluation.verification.simulation import SimulationMixin
 from pace_bench.evaluation.verification.task_runtime import TaskRuntimeMixin
 from pace_bench.tasks.registry import TaskRegistry, get_registry
 from pace_bench.tasks.registry import EnvironmentSpec, TaskSpec
-from pace_bench.types import VerificationResult
+from pace_bench.core.types import VerificationResult
 
 
 class CodeVerifier(CodeSafetyMixin, TaskRuntimeMixin, SimulationMixin):

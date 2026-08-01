@@ -5,11 +5,11 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-from pace_bench.errors import ConfigurationError
+from pace_bench.core.errors import ConfigurationError
 from pace_bench.evaluation.prompts import PromptBuilder
 from pace_bench.evaluation.config import EvaluationStrategy, StrategyContext
 from pace_bench.evaluation.providers import load_object
-from pace_bench.types import AttemptRecord, EvaluationResult, GenerationRequest, RunMode
+from pace_bench.core.types import AttemptRecord, EvaluationResult, GenerationRequest, RunMode
 
 
 @dataclass(frozen=True)

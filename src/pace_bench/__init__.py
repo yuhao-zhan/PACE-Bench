@@ -1,6 +1,6 @@
 """PACE-Bench: Physics Adaptation via Code Evolution."""
 
-from pace_bench.types import EnvironmentId, EnvironmentPair, TaskId
+from pace_bench.core.types import EnvironmentId, EnvironmentPair, TaskId
 
 __all__ = ["EnvironmentId", "EnvironmentPair", "TaskId", "__version__"]
 

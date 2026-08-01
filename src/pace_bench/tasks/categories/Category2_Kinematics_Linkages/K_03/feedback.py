@@ -422,7 +422,7 @@ def _format_load_distribution(metrics: Dict[str, Any], prev_metrics: Optional[Di
         parts.append(f"  All motors nominal (≤50%), max {max_pct:.1f}%")
     max_ni = _f(metrics.get("contact_max_normal_impulse"))
     if max_ni is not None and max_ni > 0:
-        from pace_bench.simulator import TIME_STEP
+        from pace_bench.core.simulator import TIME_STEP
         normal_force = max_ni / TIME_STEP if TIME_STEP > 0 else 0.0
         parts.append(f"- **Contact**: peak normal ≈ {normal_force:.1f}N (impulse {max_ni:.3f}N·s)")
     return parts

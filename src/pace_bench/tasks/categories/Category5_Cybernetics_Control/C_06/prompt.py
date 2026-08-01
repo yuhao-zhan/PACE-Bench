@@ -10,7 +10,7 @@ with open(os.path.join(os.path.dirname(__file__), '..', '..', 'primitives_api.js
 if 'C_06' in _api_data and 'API_INTRO' in _api_data['C_06']:
     del _api_data['C_06']['API_INTRO']
 
-from pace_bench.simulator import TIME_STEP
+from pace_bench.core.simulator import TIME_STEP
 
 from pace_bench.tasks.categories.Category5_Cybernetics_Control.C_06.environment import (
     DEFAULT_WHEEL_MASS_KG,

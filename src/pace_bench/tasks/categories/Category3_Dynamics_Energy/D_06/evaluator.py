@@ -1,6 +1,6 @@
 import math
 
-from pace_bench.primitives import compute_constraint_penalty
+from pace_bench.core.primitives import compute_constraint_penalty
 
 def _b2_same_body(a, b):
     if a is None or b is None:

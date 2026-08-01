@@ -33,9 +33,14 @@ PACE-Bench/
 ├── src/
 │   ├── custom_extension.py         # external provider/method example
 │   └── pace_bench/
-│       ├── cli.py                  # list, evaluate, agent, validate, report
 │       ├── agents/                 # isolated coding-Agent runtime and gateway
-│       ├── evaluation/             # evaluation engine, methods, providers, results
+│       ├── cli/                    # one CLI parser and console entry point
+│       ├── core/                   # shared types, paths, errors, physics, rendering
+│       ├── evaluation/             # model/method benchmark runtime
+│       │   ├── engine.py           # one attempt loop for every run mode
+│       │   ├── providers.py        # API, local, mock, and external backends
+│       │   ├── results.py          # compact JSON storage and compatibility reader
+│       │   ├── metrics.py          # pair/run aggregation and analysis metrics
 │       │   ├── prompt_data/        # shared demonstrations and framing
 │       │   └── verification/       # safety checks and Box2D verification
 │       ├── tasks/
@@ -49,10 +54,7 @@ PACE-Bench/
 │       │   ├── demos/basic/        # tutorial demo; not benchmark data
 │       │   ├── registry.py         # task discovery and selectors
 │       │   └── stage_prompt.py     # mutation suffixes and variable inventories
-│       ├── primitives.py           # task-facing physics helpers
-│       ├── simulator.py            # shared Box2D stepping
-│       ├── renderer.py             # shared pygame rendering
-│       └── types.py                # task, attempt, and result records
+│       └── __init__.py             # small public package surface
 ├── requirements.txt                # dependency manifest
 └── pyproject.toml                  # package and CLI metadata
 ```
@@ -246,7 +248,8 @@ pace-bench list                                      # tasks and environments
 pace-bench validate --task all --contracts-only     # imports/contracts
 pace-bench validate --task S_01                     # one reference matrix
 pace-bench validate --task all                      # full 36-task validation
-pace-bench report --input results/my-run             # aggregate JSON results
+pace-bench report --input results/my-run \
+  --output results/my-run/report.json                # aggregate JSON results
 ```
 
 `--runs K` executes `K` complete trajectories for every selected task pair in model or Agent mode. Each trajectory receives the configured attempt budget (20 by default). Model-generation seeds deterministically combine the base `--seed`, run index, attempt index, and retry index, preserving independent legacy trial semantics. `--run-index` can select the first Agent run index. The CLI and `pace-bench report` calculate pair-level `Pass@1` through `Pass@K`, where `Pass@k` means that at least one of the pair's first `k` trajectories succeeds.
@@ -262,7 +265,9 @@ results/<experiment>/
     └── ...
 ```
 
-One schema `2.0` JSON represents one task-pair trajectory. It stores identity and run configuration; per-attempt code and hash, score, success, error category, failure reason, hard-constraint violations, step count, structural-break count, progress when available, token use, timing, and artifact references; and final success, best score/attempt, success attempt, stop reason, and trajectory error type. These are the signals used by the original score, code-similarity, budget, and error-taxonomy analyses. Full prompts, raw provider responses, formatted feedback, tracebacks, granular snapshots, body coordinates, stress arrays, and other high-volume physics metrics are deliberately omitted. `pace-bench report` aggregates Pass@k, score mean/deviation, stop reasons, and both pair-level and trajectory-level error taxonomy; schema `1.0` and older unversioned result JSON remain readable.
+One schema `2.0` JSON represents one task-pair trajectory. It stores identity and run configuration; per-attempt code and hash, score, success, error category, failure reason, hard-constraint violations, essential structural/progress signals, token use, timing, and artifacts; plus a compact analysis block. Full prompts, raw responses, formatted feedback, tracebacks, snapshots, coordinates, and stress arrays are omitted.
+
+`pace-bench report` preserves every generic metric used by the former result plots and tables: Pass@k across independent runs; pass and score curves by attempt; score deviation; attempts and adaptation efficiency; prompt/completion cost; best-code size; error taxonomy; early/middle/late code similarity and radicality; budget saturation; stage/model/category/strategy breakdowns; model scale; strategy cost/Pareto data and Cohen's kappa; mutation counts; and reference-solution similarity. The report includes an explicit `legacy_metric_coverage` map from old metric names to current JSON paths. Removed-method, VLM, CE, and paper-specific plot emitters are intentionally not runtime features; their underlying generic measurements remain available. Schema `1.0` and older unversioned result JSON remain readable.
 
 Completed JSON resumes by default; use `--no-resume` to rerun. For reproducibility, report the model revision, hardware, base seed, attempt budget, number of runs, temperature, maximum tokens, and display/headless setting.
 

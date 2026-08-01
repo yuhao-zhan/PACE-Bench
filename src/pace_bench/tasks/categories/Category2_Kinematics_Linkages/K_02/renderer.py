@@ -1,7 +1,7 @@
 import pygame
 import math
 
-from pace_bench.renderer import Renderer
+from pace_bench.core.renderer import Renderer
 from Box2D.b2 import dynamicBody, staticBody, revoluteJoint
 
 # ── Academic palette ──────────────────────────────────────────────

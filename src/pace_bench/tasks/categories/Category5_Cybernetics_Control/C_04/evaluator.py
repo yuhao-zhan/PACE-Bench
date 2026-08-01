@@ -1,4 +1,4 @@
-from pace_bench.primitives import compute_constraint_penalty
+from pace_bench.core.primitives import compute_constraint_penalty
 
 from pace_bench.tasks.categories.Category5_Cybernetics_Control.C_04.environment import (
     ACTIVATION_X_MAX,
