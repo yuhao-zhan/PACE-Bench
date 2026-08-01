@@ -1,4 +1,14 @@
-"""Generic trajectory and aggregate metrics for PACE-Bench results."""
+"""Compute plot-agnostic trajectory and benchmark report metrics.
+
+The metric families are kept in one place so persistence never depends on a
+paper plotting script. The module is organized as follows:
+
+1. per-trajectory score, token, error, and code-similarity diagnostics;
+2. independent-run distillation and Pass@k/group aggregation;
+3. model, strategy, category, stage, and task breakdowns;
+4. source-derived task difficulty and reference-similarity analysis; and
+5. the public :func:`aggregate` report builder.
+"""
 
 from __future__ import annotations
 
@@ -24,8 +34,9 @@ INVISIBLE_PARAMETER_KEYWORDS = (
     "restitution",
 )
 
-# Audited against every generic plot/table emitter in evaluation_old/result.py.
-# Removed-method/VLM/CE figures use deltas of these same underlying metrics.
+# Audit map for the former plot/table metric families. It is documentation only:
+# this package never imports or executes the local legacy analysis directory.
+# Method-specific/VLM/CE figures are comparisons of the generic grouped values.
 LEGACY_METRIC_PATHS = {
     "Pass@k across independent runs": "pass_at_k.Pass@k",
     "Pass@2 / pass rate": "metrics.pass_rate_percent",
@@ -45,15 +56,26 @@ LEGACY_METRIC_PATHS = {
     "Trajectory failure diagnostics": "metrics.trajectory_diagnostics",
     "Stage degradation": "by_stage",
     "Model x category": "by_model_and_category",
+    "Model x stage": "by_model_and_stage",
     "Strategy x model": "by_strategy_and_model",
+    "Strategy x category": "by_strategy_and_category",
+    "Design fixation by strategy x model x category": (
+        "by_strategy_and_model_and_category.*.*.*.error_taxonomy"
+    ),
     "Category x stage": "by_category_and_stage",
     "Model parameter scale": "model_scale",
     "Token/pass Pareto frontier": "strategy_efficiency",
     "Strategy complementarity (Cohen's kappa)": "strategy_complementarity_cohens_kappa",
     "Mutation counts / invisible counts / reference tokens": "dataset_metrics",
     "Reference-solution Jaccard / token ratio": "dataset_metrics.*.stages",
-    "Reference similarity correlations": "reference_similarity_correlations",
+    "Reference similarity stage correlations": "reference_similarity_correlations",
+    "Reference similarity task summary/correlations": "reference_similarity_analysis",
 }
+
+
+# ---------------------------------------------------------------------------
+# Per-trajectory metrics
+# ---------------------------------------------------------------------------
 
 
 def _pass_rate(results: Sequence[EvaluationResult]) -> float:
@@ -114,8 +136,15 @@ def _ordered_attempts(result: EvaluationResult) -> list[AttemptRecord]:
     return sorted(result.attempts, key=lambda item: item.attempt)
 
 
-def _score_at_attempt(result: EvaluationResult, attempt_number: int) -> float:
-    scores = [item.score for item in result.attempts if item.attempt <= attempt_number]
+def _score_at_iteration(result: EvaluationResult, iteration_count: int) -> float:
+    """Return cumulative score after N verified records, including attempt 0.
+
+    The former result tables treated the adaptation reference check as the
+    first history entry. Keeping that ordinal convention here preserves
+    Score@1..20 and Iteration-Avg for existing benchmark comparisons.
+    """
+
+    scores = [item.score for item in _ordered_attempts(result)[:iteration_count]]
     return max(scores, default=0.0)
 
 
@@ -243,6 +272,35 @@ def trajectory_metrics(result: EvaluationResult) -> dict[str, Any]:
         )
     if not total_tokens:
         total_tokens = prompt_tokens + completion_tokens
+    # Schema-2 strategy runs audit every code-generation call, including
+    # unverified inner candidates used by methods such as Self-Refine. Prefer
+    # that complete accounting when present; legacy files fall back to the
+    # generation attached to each verified AttemptRecord above.
+    strategy_runtime = dict(result.metadata.get("strategy_runtime") or {})
+    candidate_usage = dict(strategy_runtime.get("candidate_usage") or {})
+    candidate_calls = int(candidate_usage.get("calls", 0) or 0)
+    candidate_tokens = dict(candidate_usage.get("token_usage") or {})
+    if candidate_calls:
+        prompt_tokens = int(candidate_tokens.get("prompt_tokens", 0) or 0)
+        completion_tokens = int(candidate_tokens.get("completion_tokens", 0) or 0)
+        total_tokens = int(
+            candidate_tokens.get("total_tokens", prompt_tokens + completion_tokens) or 0
+        )
+        if not total_tokens:
+            total_tokens = prompt_tokens + completion_tokens
+    auxiliary_usage = dict(result.metadata.get("auxiliary_usage") or {})
+    auxiliary_tokens = dict(auxiliary_usage.get("token_usage") or {})
+    auxiliary_prompt_tokens = int(auxiliary_tokens.get("prompt_tokens", 0) or 0)
+    auxiliary_completion_tokens = int(auxiliary_tokens.get("completion_tokens", 0) or 0)
+    auxiliary_total_tokens = int(
+        auxiliary_tokens.get(
+            "total_tokens",
+            auxiliary_prompt_tokens + auxiliary_completion_tokens,
+        )
+        or 0
+    )
+    if not auxiliary_total_tokens:
+        auxiliary_total_tokens = auxiliary_prompt_tokens + auxiliary_completion_tokens
 
     best_metrics = best.verification.metrics if best else {}
     best_failure_reason = _optional_text(best_metrics.get("failure_reason"))
@@ -265,9 +323,17 @@ def trajectory_metrics(result: EvaluationResult) -> dict[str, Any]:
         "best_code_tokens": _count_code_tokens(best.code) if best else 0,
         "cumulative_best_scores": cumulative_scores,
         "tokens": {
+            # These three compatibility fields count candidate-producing calls,
+            # matching historical result files and plots.
             "prompt": prompt_tokens,
             "completion": completion_tokens,
             "total": total_tokens,
+            # Auxiliary calls (reflection, memory induction, etc.) do not spend
+            # sandbox attempts, but remain visible for complete cost analysis.
+            "auxiliary_prompt": auxiliary_prompt_tokens,
+            "auxiliary_completion": auxiliary_completion_tokens,
+            "auxiliary_total": auxiliary_total_tokens,
+            "all_calls_total": total_tokens + auxiliary_total_tokens,
         },
         "error_type": _trajectory_error_type(result),
         "best_attempt_diagnostics": {
@@ -280,6 +346,11 @@ def trajectory_metrics(result: EvaluationResult) -> dict[str, Any]:
         },
         "trajectory_diagnostics": _trajectory_diagnostics(result),
     }
+
+
+# ---------------------------------------------------------------------------
+# Independent-run and group aggregation
+# ---------------------------------------------------------------------------
 
 
 def _result_run_index(result: EvaluationResult) -> int:
@@ -415,14 +486,23 @@ def _pair_records(results: Sequence[EvaluationResult]) -> list[dict[str, Any]]:
             for run, analysis in zip(runs, analyses)
             if run.success and analysis["success_attempt"] is not None
         ]
-        attempts_used = (
-            min(int(item["success_attempt"]) for item in successful)
-            if successful
-            else min((int(item["revision_attempts"]) for item in analyses), default=0)
+        attempts_used = min(
+            (int(item["verified_attempts"]) for item in successful),
+            default=min(
+                (int(item["verified_attempts"]) for item in analyses), default=0
+            ),
         )
         scores = [run.best_score for run in runs]
         best_run_index = max(range(len(runs)), key=lambda index: runs[index].best_score)
-        token_keys = ("prompt", "completion", "total")
+        token_keys = (
+            "prompt",
+            "completion",
+            "total",
+            "auxiliary_prompt",
+            "auxiliary_completion",
+            "auxiliary_total",
+            "all_calls_total",
+        )
         token_means = {
             name: _mean([float(analysis["tokens"][name]) for analysis in analyses])
             for name in token_keys
@@ -443,14 +523,12 @@ def _pair_records(results: Sequence[EvaluationResult]) -> list[dict[str, Any]]:
             max((item.attempt for run in runs for item in run.attempts), default=0),
         )
         score_curve = {
-            str(attempt): _mean([_score_at_attempt(run, attempt) for run in runs])
+            str(attempt): _mean([_score_at_iteration(run, attempt) for run in runs])
             for attempt in range(1, max_budget + 1)
         }
         discovery = {
             str(attempt): any(
-                item.success and item.attempt <= attempt
-                for run in runs
-                for item in run.attempts
+                run.success and len(run.attempts) <= attempt for run in runs
             )
             for attempt in range(1, max_budget + 1)
         }
@@ -532,6 +610,18 @@ def _group_metrics(
     total_tokens = sum(float(item["tokens_mean"]["total"]) for item in pairs)
     prompt_tokens = sum(float(item["tokens_mean"]["prompt"]) for item in pairs)
     completion_tokens = sum(float(item["tokens_mean"]["completion"]) for item in pairs)
+    auxiliary_prompt_tokens = sum(
+        float(item["tokens_mean"]["auxiliary_prompt"]) for item in pairs
+    )
+    auxiliary_completion_tokens = sum(
+        float(item["tokens_mean"]["auxiliary_completion"]) for item in pairs
+    )
+    auxiliary_total_tokens = sum(
+        float(item["tokens_mean"]["auxiliary_total"]) for item in pairs
+    )
+    all_calls_tokens = sum(
+        float(item["tokens_mean"]["all_calls_total"]) for item in pairs
+    )
     mean_attempts = _mean([float(item["attempts_used"]) for item in pairs])
     mean_budget = _mean(
         [float(result.config.get("attempts", 0) or 0) for result in results]
@@ -581,11 +671,21 @@ def _group_metrics(
         "tokens": {
             "prompt_total": prompt_tokens,
             "completion_total": completion_tokens,
+            "auxiliary_prompt_total": auxiliary_prompt_tokens,
+            "auxiliary_completion_total": auxiliary_completion_tokens,
+            "auxiliary_total": auxiliary_total_tokens,
             "total": total_tokens,
             "mean_per_pair": total_tokens / pair_count if pair_count else 0.0,
             "per_successful_pair": total_tokens / successful_pairs
             if successful_pairs
             else None,
+            "all_calls_total": all_calls_tokens,
+            "all_calls_mean_per_pair": (
+                all_calls_tokens / pair_count if pair_count else 0.0
+            ),
+            "all_calls_per_successful_pair": (
+                all_calls_tokens / successful_pairs if successful_pairs else None
+            ),
         },
         "attempt_discovery": discovery,
         "score_by_attempt": score_curve,
@@ -631,6 +731,11 @@ def _group_metrics(
     }
 
 
+# ---------------------------------------------------------------------------
+# One-, two-, and three-dimensional report breakdowns
+# ---------------------------------------------------------------------------
+
+
 def _breakdown(
     results: Sequence[EvaluationResult], key_function: Any
 ) -> dict[str, Any]:
@@ -654,6 +759,33 @@ def _cross_breakdown(
             for inner, items in sorted(inner_groups.items())
         }
         for outer, inner_groups in sorted(grouped.items())
+    }
+
+
+def _three_way_breakdown(
+    results: Sequence[EvaluationResult],
+    outer_function: Any,
+    middle_function: Any,
+    inner_function: Any,
+) -> dict[str, Any]:
+    """Group results across the three dimensions used by fixation analyses."""
+
+    grouped: dict[str, dict[str, dict[str, list[EvaluationResult]]]] = defaultdict(
+        lambda: defaultdict(lambda: defaultdict(list))
+    )
+    for result in results:
+        grouped[str(outer_function(result))][str(middle_function(result))][
+            str(inner_function(result))
+        ].append(result)
+    return {
+        outer: {
+            middle: {
+                inner: _group_metrics(items)
+                for inner, items in sorted(inner_groups.items())
+            }
+            for middle, inner_groups in sorted(middle_groups.items())
+        }
+        for outer, middle_groups in sorted(grouped.items())
     }
 
 
@@ -709,6 +841,11 @@ def _strategy_complementarity(results: Sequence[EvaluationResult]) -> dict[str, 
         }
         for left in strategies
     }
+
+
+# ---------------------------------------------------------------------------
+# Dataset difficulty and reference-solution similarity
+# ---------------------------------------------------------------------------
 
 
 def _model_parameter_billions(model: str) -> float | None:
@@ -825,10 +962,10 @@ def _dataset_profiles(results: Sequence[EvaluationResult]) -> dict[str, Any]:
     return profiles
 
 
-def _reference_similarity_analysis(
+def _reference_similarity_correlations(
     pair_records: Sequence[dict[str, Any]], profiles: dict[str, Any]
 ) -> dict[str, Any]:
-    """Correlate reference-code distance with pair performance, as before."""
+    """Retain the schema-1.0 stage-level correlation view by model."""
 
     by_model: dict[str, list[dict[str, float]]] = defaultdict(list)
     for pair in pair_records:
@@ -860,6 +997,90 @@ def _reference_similarity_analysis(
     }
 
 
+def _reference_similarity_analysis(
+    pair_records: Sequence[dict[str, Any]], profiles: dict[str, Any]
+) -> dict[str, Any]:
+    """Build the stage- and task-level views used by legacy similarity plots.
+
+    Results are separated by both model and strategy. This avoids mixing
+    custom strategies when researchers add them to the same report while still
+    supporting the former vanilla-only table and scatter plots.
+    """
+
+    stage_points: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
+    for pair in pair_records:
+        profile = profiles.get(str(pair["task"]), {})
+        stage_profile = profile.get("stages", {}).get(str(pair["stage"]), {})
+        similarity = stage_profile.get("reference_similarity", {}).get("jaccard")
+        if similarity is None:
+            continue
+        stage_points[(str(pair["model"]), str(pair["strategy"]))].append(
+            {
+                "task": str(pair["task"]),
+                "category": str(pair["category"]),
+                "stage": str(pair["stage"]),
+                "reference_jaccard": float(similarity),
+                "pass_rate": float(bool(pair["success"])),
+                "score_mean": float(pair["best_score_mean"]),
+            }
+        )
+
+    report: dict[str, dict[str, Any]] = defaultdict(dict)
+    for (model, strategy), points in sorted(stage_points.items()):
+        by_task: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        for point in points:
+            by_task[str(point["task"])].append(point)
+        task_rows = []
+        for task, task_points in sorted(by_task.items()):
+            task_rows.append(
+                {
+                    "task": task,
+                    "category": str(task_points[0]["category"]),
+                    "stage_count": len(task_points),
+                    "reference_jaccard_mean": _mean(
+                        [float(point["reference_jaccard"]) for point in task_points]
+                    ),
+                    "pass_rate_mean": _mean(
+                        [float(point["pass_rate"]) for point in task_points]
+                    ),
+                    "score_mean": _mean(
+                        [float(point["score_mean"]) for point in task_points]
+                    ),
+                }
+            )
+        report[model][strategy] = {
+            "stage_level": {
+                "point_count": len(points),
+                "similarity_vs_pass_rate_pearson_r": _pearson(
+                    [float(point["reference_jaccard"]) for point in points],
+                    [float(point["pass_rate"]) for point in points],
+                ),
+                "similarity_vs_score_pearson_r": _pearson(
+                    [float(point["reference_jaccard"]) for point in points],
+                    [float(point["score_mean"]) for point in points],
+                ),
+            },
+            "task_level": {
+                "point_count": len(task_rows),
+                "similarity_vs_pass_rate_pearson_r": _pearson(
+                    [float(row["reference_jaccard_mean"]) for row in task_rows],
+                    [float(row["pass_rate_mean"]) for row in task_rows],
+                ),
+                "similarity_vs_score_pearson_r": _pearson(
+                    [float(row["reference_jaccard_mean"]) for row in task_rows],
+                    [float(row["score_mean"]) for row in task_rows],
+                ),
+                "tasks": task_rows,
+            },
+        }
+    return {model: dict(strategies) for model, strategies in sorted(report.items())}
+
+
+# ---------------------------------------------------------------------------
+# Public benchmark report
+# ---------------------------------------------------------------------------
+
+
 def aggregate(results: list[EvaluationResult]) -> dict[str, Any]:
     """Build the versioned, plot-agnostic benchmark analysis report."""
 
@@ -876,8 +1097,12 @@ def aggregate(results: list[EvaluationResult]) -> dict[str, Any]:
         strategy: {
             "pass_rate": values["pass_rate"],
             "score_mean": values["score_mean"],
-            "mean_tokens_per_pair": values["tokens"]["mean_per_pair"],
-            "tokens_per_successful_pair": values["tokens"]["per_successful_pair"],
+            "mean_tokens_per_pair": values["tokens"]["all_calls_mean_per_pair"],
+            "tokens_per_successful_pair": values["tokens"][
+                "all_calls_per_successful_pair"
+            ],
+            "candidate_tokens_mean_per_pair": values["tokens"]["mean_per_pair"],
+            "auxiliary_tokens_total": values["tokens"]["auxiliary_total"],
         }
         for strategy, values in by_strategy.items()
     }
@@ -938,8 +1163,20 @@ def aggregate(results: list[EvaluationResult]) -> dict[str, Any]:
         "by_model_and_category": _cross_breakdown(
             results, lambda item: item.model, _category
         ),
+        "by_model_and_stage": _cross_breakdown(
+            results, lambda item: item.model, _target_stage
+        ),
         "by_strategy_and_model": _cross_breakdown(
             results, lambda item: item.strategy, lambda item: item.model
+        ),
+        "by_strategy_and_category": _cross_breakdown(
+            results, lambda item: item.strategy, _category
+        ),
+        "by_strategy_and_model_and_category": _three_way_breakdown(
+            results,
+            lambda item: item.strategy,
+            lambda item: item.model,
+            _category,
         ),
         "by_category_and_stage": _cross_breakdown(results, _category, _target_stage),
         "strategy_efficiency": strategy_efficiency,
@@ -961,10 +1198,18 @@ def aggregate(results: list[EvaluationResult]) -> dict[str, Any]:
             for model, values in by_model.items()
         },
         "dataset_metrics": profiles,
-        "reference_similarity_correlations": _reference_similarity_analysis(
+        "reference_similarity_correlations": _reference_similarity_correlations(
+            pair_records, profiles
+        ),
+        "reference_similarity_analysis": _reference_similarity_analysis(
             pair_records, profiles
         ),
     }
+
+
+# ---------------------------------------------------------------------------
+# Error taxonomy and compact physical diagnostics
+# ---------------------------------------------------------------------------
 
 
 def _constraint_violations(

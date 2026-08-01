@@ -60,7 +60,17 @@ def build_parser() -> argparse.ArgumentParser:
     evaluate_parser.add_argument(
         "--method",
         default="vanilla",
-        help="vanilla or a dotted class path such as package.module:MyMethod",
+        help=(
+            "vanilla, methods/<name>.py exporting Method, or a dotted class path "
+            "such as package.module:MyMethod"
+        ),
+    )
+    evaluate_parser.add_argument(
+        "--method-option",
+        action="append",
+        default=[],
+        metavar="KEY=VALUE",
+        help="Method constructor option; repeat for multiple values (JSON is accepted)",
     )
     evaluate_parser.add_argument(
         "--provider",
@@ -309,7 +319,28 @@ def _config_from_args(args: argparse.Namespace, mode: RunMode) -> RunConfig:
         output=args.output,
         resume=not args.no_resume,
         provider_options=options,
+        method_options=_key_value_options(args.method_option, "--method-option"),
     )
+
+
+def _key_value_options(values: list[str], flag: str) -> dict[str, Any]:
+    """Parse repeatable CLI KEY=VALUE options, accepting JSON scalar values."""
+
+    options: dict[str, Any] = {}
+    for value in values:
+        if "=" not in value:
+            raise ConfigurationError(f"{flag} expects KEY=VALUE, got {value!r}")
+        key, raw = value.split("=", 1)
+        key = key.strip()
+        if not key:
+            raise ConfigurationError(f"{flag} requires a non-empty key")
+        if key in options:
+            raise ConfigurationError(f"Duplicate {flag} key: {key}")
+        try:
+            options[key] = json.loads(raw)
+        except json.JSONDecodeError:
+            options[key] = raw
+    return options
 
 
 def _agent_command(args: argparse.Namespace) -> int:

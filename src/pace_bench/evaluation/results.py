@@ -1,4 +1,10 @@
-"""Compact result persistence, backward-compatible decoding, and aggregation."""
+"""Read, write, and migrate PACE-Bench result files.
+
+This module owns the result-file boundary: schema decoding, legacy migration,
+output paths, and compact JSON serialization. Metric formulas and report-level
+aggregation live in :mod:`pace_bench.evaluation.metrics` and are re-exported
+here for the CLI's stable public import path.
+"""
 
 from __future__ import annotations
 
@@ -46,6 +52,11 @@ __all__ = [
     "save_result",
     "trajectory_metrics",
 ]
+
+
+# ---------------------------------------------------------------------------
+# Schema decoding and legacy migration
+# ---------------------------------------------------------------------------
 
 
 def decode_result(data: dict[str, Any]) -> EvaluationResult:
@@ -260,6 +271,11 @@ def migrate_legacy_result(data: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+# ---------------------------------------------------------------------------
+# Deterministic result and artifact paths
+# ---------------------------------------------------------------------------
+
+
 def _safe_segment(value: str) -> str:
     return re.sub(r"[^A-Za-z0-9_.-]+", "_", value).strip("._") or "unknown"
 
@@ -291,6 +307,11 @@ def _run_directory(config: RunConfig, task: TaskSpec, *, kind: str) -> Path:
         / _safe_segment(config.strategy)
         / f"run-{config.run_index}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Atomic persistence and result discovery
+# ---------------------------------------------------------------------------
 
 
 def save_result(path: Path, result: EvaluationResult) -> None:
@@ -352,6 +373,11 @@ def load_results(root: Path) -> tuple[list[EvaluationResult], list[tuple[Path, s
     return results, errors
 
 
+# ---------------------------------------------------------------------------
+# Compact schema encoding
+# ---------------------------------------------------------------------------
+
+
 def _compact_result(result: EvaluationResult, path: Path) -> dict[str, Any]:
     """Serialize only reproducibility and analysis fields, not prompts/raw metrics."""
 
@@ -372,6 +398,7 @@ def _compact_result(result: EvaluationResult, path: Path) -> dict[str, Any]:
         "save_gif",
         "timeout_seconds",
         "run_index",
+        "method_options",
     )
     config = {
         key: result.config[key]
@@ -462,6 +489,11 @@ def _compact_attempt(attempt: AttemptRecord, result_path_value: Path) -> dict[st
             for item in attempt.verification.artifact_paths
         ],
     }
+
+
+# ---------------------------------------------------------------------------
+# Compact error, artifact, and metadata helpers
+# ---------------------------------------------------------------------------
 
 
 def _error_category(
