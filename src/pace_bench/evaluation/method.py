@@ -24,6 +24,7 @@ from pace_bench.evaluation.config import (
 )
 from pace_bench.evaluation.prompts import PromptBuilder
 from pace_bench.evaluation.providers import load_object
+from pace_bench.core.paths import repository_root
 
 
 @dataclass(frozen=True)
@@ -122,7 +123,7 @@ class VanillaMethod:
 def load_method(
     name: str, *, options: dict[str, Any] | None = None
 ) -> EvaluationStrategy | EvaluationStrategyV2:
-    """Load vanilla or a user-owned dotted-import implementation."""
+    """Load vanilla, a repository method, or a dotted-import implementation."""
 
     if name in {"vanilla", "iterative"}:
         if options:
@@ -160,16 +161,23 @@ def load_method(
 
 
 def _load_local_method_class(name: str) -> Any:
-    """Load ``Method`` from an ignored ``methods/<name>.py`` local plugin."""
+    """Load ``Method`` from a checkout or working-directory method plug-in."""
 
     if not re.fullmatch(r"[A-Za-z0-9_-]+", name):
         raise ConfigurationError(
             f"Invalid local method name {name!r}; use a simple filename or dotted path"
         )
-    path = Path.cwd() / "methods" / f"{name}.py"
-    if not path.is_file():
+    candidates = [Path.cwd() / "methods" / f"{name}.py"]
+    root = repository_root()
+    if root is not None:
+        checkout_candidate = root / "methods" / f"{name}.py"
+        if checkout_candidate not in candidates:
+            candidates.append(checkout_candidate)
+    path = next((candidate for candidate in candidates if candidate.is_file()), None)
+    if path is None:
+        expected = " or ".join(str(candidate) for candidate in candidates)
         raise ConfigurationError(
-            f"Unknown method {name!r}. Expected {path} exporting Method, or use "
+            f"Unknown method {name!r}. Expected {expected} exporting Method, or use "
             "package.module:MethodClass."
         )
     module_name = f"_pace_bench_local_method_{name.replace('-', '_')}"

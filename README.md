@@ -30,7 +30,7 @@ The categories are statics, kinematics, dynamics, granular/fluid interaction, co
 PACE-Bench/
 ├── assets/                         # README figures
 ├── dataset_validation/             # dataset-construction audit prompts
-├── methods/                        # optional local method plug-ins (git-ignored)
+├── methods/                        # paper-aligned research method plug-ins
 ├── src/
 │   ├── custom_extension.py         # external provider/method example
 │   └── pace_bench/
@@ -252,14 +252,14 @@ The isolation path blocks ordinary Agent access to benchmark source, but it is n
 
 ## Bring your own model or method
 
-External extensions can use `package.module:Class`; see [`src/custom_extension.py`](src/custom_extension.py). During local experiments, a short name such as `--method reflexion` loads `methods/reflexion.py` and its exported `Method` class. The whole root `methods/` directory is git-ignored so private or experimental implementations cannot be committed accidentally.
+External extensions can use `package.module:Class`; see [`src/custom_extension.py`](src/custom_extension.py). A short name such as `--method reflexion` loads the corresponding version-controlled `methods/reflexion.py` plug-in. The repository includes Reflexion, Self-Refine, ACE, ExpeL, ReasoningBank/MaTTS, Tree of Thoughts, CodeEvolve, SEAL, RAGEN, and TTT-Discover; [`methods/METHODS_AUDIT.md`](methods/METHODS_AUDIT.md) records their paper adaptations, official-code comparisons, defaults, and reproduction caveats.
 
 ```bash
 pace-bench evaluate --task S_01 --env Stage-1 \
   --provider custom_extension:CustomModel --model my-model \
   --method custom_extension:CustomMethod --attempts 2
 
-# Local methods/my_search.py exporting Method
+# Custom methods/my_search.py exporting Method
 pace-bench evaluate --task S_01 --env Stage-1 \
   --provider openai-compatible --model <model-name> \
   --method my_search --method-option beam_width=3 \
@@ -268,7 +268,7 @@ pace-bench evaluate --task S_01 --env Stage-1 \
 
 A provider implements `generate(GenerationRequest) -> GenerationResult` and `close()`. A simple method may implement the original one-request interface shown in `custom_extension.py`. Search, memory, or training methods can implement the typed V2 hooks `initialize(context, runtime)`, `build_step(history, remaining_attempts)`, `observe(attempts)`, `snapshot()`, and `finalize(result)`. A step may submit one candidate or a batch; the engine truncates it to the remaining budget, validates every candidate, and records every Box2D verification as one attempt. The runtime separately audits auxiliary LLM calls, which do not consume sandbox attempts. Repeated `--method-option KEY=VALUE` arguments are JSON-decoded and saved with the run configuration.
 
-PACE-Bench ships only the vanilla Previous-One + Best baseline. Local method files are evaluator plug-ins, not benchmark internals: they must not import `evaluation_old/`, access task source through side channels, or perform their own unrecorded verification.
+Vanilla Previous-One + Best remains the primary baseline and all methods inherit the same paper-wide generation defaults (`temperature=0.7`, `top_p=0.95`, and 65,536 output tokens). Method-specific search, memory, and training parameters follow the paper adaptation notes. Plug-ins must not import `evaluation_old/`, access task source through side channels, or perform unrecorded verification. SEAL, RAGEN, and TTT-Discover require the local-transformers provider for LoRA updates; the official CodeEvolve subprocess path additionally requires its external CLI.
 
 ## Validation and results
 
@@ -349,6 +349,6 @@ These Markdown prompts document the construction-time workflows and are not publ
 
 PACE-Bench models 2D rigid-body systems in Box2D; it does not cover 3D/deformable physics, full fluids, perception, navigation, or multi-agent coordination. Prompts and feedback are currently English-only.
 
-Generated code is statically checked and executed with a restricted namespace, but evaluators should still use a dedicated host without unrelated credentials. Contributions must preserve physics, reference behavior, exposure rules, seeds, timing, budgets, and canonical pair identities; experimental methods should remain external.
+Generated code is statically checked and executed with a restricted namespace, but evaluators should still use a dedicated host without unrelated credentials. Contributions must preserve physics, reference behavior, exposure rules, seeds, timing, budgets, and canonical pair identities. New comparison methods should use the narrow plug-in interface and document any departure from their paper or official implementation.
 
 PACE-Bench is released under the [MIT License](LICENSE).
