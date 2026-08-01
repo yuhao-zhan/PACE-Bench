@@ -1,6 +1,6 @@
 import math
 
-from pace_bench.primitives import compute_constraint_penalty
+from pace_bench.core.primitives import compute_constraint_penalty
 
 def _build_constraint_dashboard(
     load_caught, beam_angle_deg, max_angle_seen_deg, max_angle_deviation_deg,

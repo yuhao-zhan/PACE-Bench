@@ -32,7 +32,7 @@ from pace_bench.tasks.registry import (
     get_registry,
     max_steps_for_task,
 )
-from pace_bench.types import (
+from pace_bench.core.types import (
     AttemptRecord,
     EnvironmentId,
     EvaluationResult,

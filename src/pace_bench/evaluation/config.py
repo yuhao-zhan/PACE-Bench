@@ -7,8 +7,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
-from pace_bench.errors import ConfigurationError
-from pace_bench.types import (
+from pace_bench.core.errors import ConfigurationError
+from pace_bench.core.types import (
     AttemptRecord,
     EnvironmentId,
     EvaluationResult,

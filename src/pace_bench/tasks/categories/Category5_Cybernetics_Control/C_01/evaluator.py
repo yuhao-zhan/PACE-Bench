@@ -20,7 +20,7 @@ except ImportError:
 
 BALANCE_HOLD_EVALS_REQUIRED = BALANCE_HOLD_STEPS_REQUIRED
 
-from pace_bench.primitives import compute_constraint_penalty
+from pace_bench.core.primitives import compute_constraint_penalty
 
 class Evaluator:
     def __init__(self, sandbox: Any):

@@ -16,7 +16,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from pace_bench.agents.session import AgentSession, AgentSessionServer
-from pace_bench.errors import AgentRuntimeError
+from pace_bench.core.errors import AgentRuntimeError
 
 DEFAULT_IMAGE = "pace-bench-agent-runtime:0.2.0"
 DEFAULT_CODEX_VERSION = "0.144.4"

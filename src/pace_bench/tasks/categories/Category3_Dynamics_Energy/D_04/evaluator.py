@@ -4,7 +4,7 @@ APEX_SPEED_THRESHOLD = 1.0
 
 VERTICAL_FALL_VX_THRESHOLD = 1.35
 
-from pace_bench.primitives import compute_constraint_penalty
+from pace_bench.core.primitives import compute_constraint_penalty
 
 class Evaluator:
     def __init__(self, terrain_bounds, environment=None):

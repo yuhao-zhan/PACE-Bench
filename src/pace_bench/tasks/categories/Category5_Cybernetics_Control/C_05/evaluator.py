@@ -2,7 +2,7 @@ import math
 
 _PARTIAL_SCORE_MAX = 80.0
 
-from pace_bench.primitives import compute_constraint_penalty
+from pace_bench.core.primitives import compute_constraint_penalty
 
 def _distance_point_to_switch_zone(x: float, y: float, cx: float, cy: float, hw: float, hh: float) -> float:
     closest_x = min(max(x, cx - hw), cx + hw)

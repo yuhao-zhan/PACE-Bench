@@ -9,14 +9,14 @@ from pathlib import Path
 from typing import Any
 
 from pace_bench import __version__
-from pace_bench.errors import ConfigurationError, PaceBenchError
+from pace_bench.core.errors import ConfigurationError, PaceBenchError
 from pace_bench.evaluation.config import RunConfig
 from pace_bench.evaluation.results import aggregate, load_result, load_results
 from pace_bench.evaluation.runner import enumerate_work_items
 from pace_bench.evaluation.runner import run_work_items
 from pace_bench.evaluation.runner import validate_task_references
 from pace_bench.tasks.registry import CATEGORIES, get_registry
-from pace_bench.types import EnvironmentId, EvaluationResult, RunMode
+from pace_bench.core.types import EnvironmentId, EvaluationResult, RunMode
 
 
 def build_parser() -> argparse.ArgumentParser:

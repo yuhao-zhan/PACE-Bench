@@ -2,7 +2,7 @@ import os
 import importlib.util
 import pygame
 
-from pace_bench.renderer import Renderer
+from pace_bench.core.renderer import Renderer
 
 _rdir = os.path.dirname(os.path.abspath(__file__))
 _spec_vis = importlib.util.spec_from_file_location(

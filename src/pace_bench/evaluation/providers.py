@@ -9,9 +9,9 @@ from collections import deque
 from collections.abc import Iterable
 from typing import Any
 
-from pace_bench.errors import ConfigurationError, ProviderError
+from pace_bench.core.errors import ConfigurationError, ProviderError
 from pace_bench.evaluation.config import ModelProvider
-from pace_bench.types import GenerationRequest, GenerationResult
+from pace_bench.core.types import GenerationRequest, GenerationResult
 
 DEFAULT_MOCK_CODE = """def build_agent(sandbox):
     body = sandbox.add_box(position=(5.0, 5.0), size=(2.0, 0.5), density=1.0)

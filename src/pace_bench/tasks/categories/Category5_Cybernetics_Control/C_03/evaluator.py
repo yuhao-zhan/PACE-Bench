@@ -47,7 +47,7 @@ TRACK_DISTANCE_DEF = TRACK_DISTANCE_DEFAULT
 
 RENDEZVOUS_HEADING_TOLERANCE_DEG_DEF = RENDEZVOUS_HEADING_TOLERANCE_DEG_DEFAULT
 
-from pace_bench.primitives import compute_constraint_penalty
+from pace_bench.core.primitives import compute_constraint_penalty
 
 class Evaluator:
     def __init__(self, terrain_bounds, environment=None):

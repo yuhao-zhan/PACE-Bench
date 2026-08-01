@@ -1,7 +1,7 @@
 import math
 
-from pace_bench.primitives import compute_constraint_penalty
-from pace_bench.simulator import TIME_STEP
+from pace_bench.core.primitives import compute_constraint_penalty
+from pace_bench.core.simulator import TIME_STEP
 
 def _segment_intersects_rect(x0, y0, x1, y1, rx_min, ry_min, rx_max, ry_max):
     if rx_min <= x0 <= rx_max and ry_min <= y0 <= ry_max:

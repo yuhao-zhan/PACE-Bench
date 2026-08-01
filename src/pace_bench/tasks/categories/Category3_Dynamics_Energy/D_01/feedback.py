@@ -1,6 +1,6 @@
 from typing import Dict, Any, List, Optional
 import math
-from pace_bench.simulator import TIME_STEP
+from pace_bench.core.simulator import TIME_STEP
 
 def _f(val, default=None):
     if val is None:

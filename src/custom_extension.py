@@ -6,7 +6,7 @@ from collections.abc import Sequence
 
 from pace_bench.evaluation.prompts import PromptBuilder
 from pace_bench.evaluation.config import StrategyContext
-from pace_bench.types import (
+from pace_bench.core.types import (
     AttemptRecord,
     EvaluationResult,
     GenerationRequest,

@@ -14,10 +14,10 @@ from pathlib import Path
 from types import ModuleType
 from typing import Any
 
-from pace_bench.errors import TaskContractError, TaskNotFoundError
-from pace_bench.paths import TASK_CATEGORIES_ROOT, TASK_DEMOS_ROOT, repository_root
+from pace_bench.core.errors import TaskContractError, TaskNotFoundError
+from pace_bench.core.paths import TASK_CATEGORIES_ROOT, TASK_DEMOS_ROOT, repository_root
 from pace_bench.tasks.stage_prompt import uniform_suffix_for_task
-from pace_bench.types import EnvironmentId, EnvironmentPair, TaskId
+from pace_bench.core.types import EnvironmentId, EnvironmentPair, TaskId
 
 CATEGORIES: dict[int, tuple[str, str, str]] = {
     1: ("Category1_Statics_Equilibrium", "S", "Statics / Equilibrium"),

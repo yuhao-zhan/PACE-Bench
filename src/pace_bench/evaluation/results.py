@@ -7,16 +7,22 @@ import os
 import re
 import tempfile
 from hashlib import sha256
-from collections import Counter, defaultdict
-from collections.abc import Sequence
+from collections import Counter
 from pathlib import Path
 from typing import Any
 
-from pace_bench.errors import ResultSchemaError
+from pace_bench.core.errors import ResultSchemaError
 from pace_bench.evaluation.config import RunConfig
-from pace_bench.paths import ensure_output_path
+from pace_bench.evaluation.metrics import (
+    _constraint_violations,
+    _physical_summary,
+    _result_run_index,
+    aggregate as aggregate,
+    trajectory_metrics,
+)
+from pace_bench.core.paths import ensure_output_path
 from pace_bench.tasks.registry import TaskSpec
-from pace_bench.types import (
+from pace_bench.core.types import (
     RESULT_SCHEMA_VERSION,
     AttemptRecord,
     EvaluationResult,
@@ -27,6 +33,19 @@ from pace_bench.types import (
 )
 
 FULL_RESULT_SCHEMA_VERSION = "1.0"
+
+__all__ = [
+    "aggregate",
+    "artifact_directory",
+    "decode_result",
+    "is_complete",
+    "load_result",
+    "load_results",
+    "migrate_legacy_result",
+    "result_path",
+    "save_result",
+    "trajectory_metrics",
+]
 
 
 def decode_result(data: dict[str, Any]) -> EvaluationResult:
@@ -333,173 +352,11 @@ def load_results(root: Path) -> tuple[list[EvaluationResult], list[tuple[Path, s
     return results, errors
 
 
-def _pass_rate(results: Sequence[EvaluationResult]) -> float:
-    return (
-        0.0 if not results else sum(result.success for result in results) / len(results)
-    )
-
-
-def _mean_score(results: Sequence[EvaluationResult]) -> float:
-    return (
-        0.0
-        if not results
-        else sum(result.best_score for result in results) / len(results)
-    )
-
-
-def _score_std(results: Sequence[EvaluationResult]) -> float:
-    if len(results) < 2:
-        return 0.0
-    mean = _mean_score(results)
-    return (
-        sum((result.best_score - mean) ** 2 for result in results) / (len(results) - 1)
-    ) ** 0.5
-
-
-def _result_run_index(result: EvaluationResult) -> int:
-    try:
-        return int(result.config.get("run_index", 1))
-    except (TypeError, ValueError):
-        return 1
-
-
-def _pair_key(result: EvaluationResult) -> tuple[str, ...]:
-    environment = result.environment_pair or result.target_environment or "unknown"
-    return (
-        result.task_path,
-        environment,
-        result.mode,
-        result.provider,
-        result.model,
-        result.strategy,
-    )
-
-
-def _pass_at_k(results: Sequence[EvaluationResult]) -> dict[str, Any]:
-    grouped: dict[tuple[str, ...], list[EvaluationResult]] = defaultdict(list)
-    for result in results:
-        grouped[_pair_key(result)].append(result)
-    for trajectories in grouped.values():
-        trajectories.sort(key=_result_run_index)
-    max_runs = max((len(items) for items in grouped.values()), default=0)
-    values: dict[str, Any] = {}
-    for k in range(1, max_runs + 1):
-        eligible = [items for items in grouped.values() if len(items) >= k]
-        passed = sum(any(item.success for item in items[:k]) for items in eligible)
-        values[f"Pass@{k}"] = {
-            "rate": 0.0 if not eligible else passed / len(eligible),
-            "passed_pairs": passed,
-            "pair_count": len(eligible),
-        }
-    return values
-
-
-def _run_count_summary(results: Sequence[EvaluationResult]) -> dict[str, int]:
-    counts = Counter(_pair_key(result) for result in results)
-    values = list(counts.values())
-    return {
-        "minimum": min(values, default=0),
-        "maximum": max(values, default=0),
-    }
-
-
-def _error_taxonomy_summary(results: Sequence[EvaluationResult]) -> dict[str, Any]:
-    counts = Counter(_trajectory_error_type(result) for result in results)
-    total = len(results)
-    failures = total - counts.get("success", 0)
-    return {
-        "counts": dict(sorted(counts.items())),
-        "rates": {key: count / total for key, count in sorted(counts.items())}
-        if total
-        else {},
-        "failure_only_rates": {
-            key: count / failures
-            for key, count in sorted(counts.items())
-            if key != "success"
-        }
-        if failures
-        else {},
-    }
-
-
-def _pair_error_taxonomy_summary(
-    results: Sequence[EvaluationResult],
-) -> dict[str, Any]:
-    grouped: dict[tuple[str, ...], list[EvaluationResult]] = defaultdict(list)
-    for result in results:
-        grouped[_pair_key(result)].append(result)
-    labels: list[str] = []
-    for trajectories in grouped.values():
-        if any(item.success for item in trajectories):
-            labels.append("success")
-            continue
-        counts = Counter(_trajectory_error_type(item) for item in trajectories)
-        labels.append(sorted(counts, key=lambda key: (-counts[key], key))[0])
-    synthetic = Counter(labels)
-    total = len(labels)
-    failures = total - synthetic.get("success", 0)
-    return {
-        "counts": dict(sorted(synthetic.items())),
-        "rates": {key: count / total for key, count in sorted(synthetic.items())}
-        if total
-        else {},
-        "failure_only_rates": {
-            key: count / failures
-            for key, count in sorted(synthetic.items())
-            if key != "success"
-        }
-        if failures
-        else {},
-    }
-
-
-def aggregate(results: list[EvaluationResult]) -> dict[str, Any]:
-    by_category: dict[str, list[EvaluationResult]] = defaultdict(list)
-    for result in results:
-        category = (
-            result.task_path.split("/", 1)[0] if "/" in result.task_path else "other"
-        )
-        by_category[category].append(result)
-    return {
-        "result_count": len(results),
-        "trajectory_count": len(results),
-        "pair_count": len({_pair_key(result) for result in results}),
-        "pass_rate": _pass_rate(results),
-        "trajectory_pass_rate": _pass_rate(results),
-        "pass_at_k": _pass_at_k(results),
-        "runs_per_pair": _run_count_summary(results),
-        "error_taxonomy": _pair_error_taxonomy_summary(results),
-        "trajectory_error_taxonomy": _error_taxonomy_summary(results),
-        "mean_best_score": _mean_score(results),
-        "best_score_std": _score_std(results),
-        "mean_verified_attempts": (
-            0.0
-            if not results
-            else sum(len(result.attempts) for result in results) / len(results)
-        ),
-        "stop_reasons": dict(
-            sorted(Counter(item.stop_reason for item in results).items())
-        ),
-        "by_category": {
-            category: {
-                "result_count": len(items),
-                "trajectory_pass_rate": _pass_rate(items),
-                "pair_count": len({_pair_key(item) for item in items}),
-                "pass_at_k": _pass_at_k(items),
-                "error_taxonomy": _pair_error_taxonomy_summary(items),
-                "trajectory_error_taxonomy": _error_taxonomy_summary(items),
-                "mean_best_score": _mean_score(items),
-                "best_score_std": _score_std(items),
-            }
-            for category, items in sorted(by_category.items())
-        },
-    }
-
-
 def _compact_result(result: EvaluationResult, path: Path) -> dict[str, Any]:
     """Serialize only reproducibility and analysis fields, not prompts/raw metrics."""
 
     run_index = _result_run_index(result)
+    analysis = trajectory_metrics(result)
     token_usage: Counter[str] = Counter()
     for attempt in result.attempts:
         if attempt.generation:
@@ -534,20 +391,19 @@ def _compact_result(result: EvaluationResult, path: Path) -> dict[str, Any]:
         "target_environment": result.target_environment,
         "environment_pair": result.environment_pair,
         "attempt_budget": int(result.config.get("attempts", 0) or 0),
-        "verified_attempts": len(result.attempts),
-        "revision_attempts": sum(item.attempt > 0 for item in result.attempts),
-        "success_attempt": min(
-            (item.attempt for item in result.attempts if item.success), default=None
-        ),
+        "verified_attempts": analysis["verified_attempts"],
+        "revision_attempts": analysis["revision_attempts"],
+        "success_attempt": analysis["success_attempt"],
         "success": result.success,
         "best_score": result.best_score,
         "best_attempt": result.best_attempt,
         "stop_reason": result.stop_reason,
-        "error_type": _trajectory_error_type(result),
+        "error_type": analysis["error_type"],
         "started_at": result.started_at,
         "finished_at": result.finished_at,
         "total_time_seconds": result.total_time_seconds,
         "token_usage": dict(sorted(token_usage.items())),
+        "analysis": analysis,
         "config": config,
         "attempts": [_compact_attempt(item, path) for item in result.attempts],
         "metadata": _compact_metadata(result.metadata),
@@ -606,117 +462,6 @@ def _compact_attempt(attempt: AttemptRecord, result_path_value: Path) -> dict[st
             for item in attempt.verification.artifact_paths
         ],
     }
-
-
-def _constraint_violations(
-    metrics: dict[str, Any], failure_reason: str | None
-) -> list[str]:
-    values: list[str] = []
-    for key in ("constraint_violations", "design_violations", "violations"):
-        raw = metrics.get(key)
-        if isinstance(raw, str):
-            values.append(raw)
-        elif isinstance(raw, Sequence) and not isinstance(raw, (str, bytes)):
-            values.extend(str(item) for item in raw if item is not None)
-    if not values and failure_reason and "constraint" in failure_reason.lower():
-        detail = (
-            failure_reason.split(":", 1)[1] if ":" in failure_reason else failure_reason
-        )
-        values.extend(item.strip() for item in detail.split(";") if item.strip())
-    return list(dict.fromkeys(values))
-
-
-def _physical_summary(metrics: dict[str, Any]) -> dict[str, Any]:
-    """Retain only physical scalars consumed by benchmark error analysis."""
-
-    summary: dict[str, Any] = {}
-    if "structure_broken" in metrics:
-        summary["structure_broken"] = bool(metrics["structure_broken"])
-    broken = metrics.get("joints_broken_count")
-    if broken is None:
-        events = metrics.get("joint_failure_events")
-        if isinstance(events, Sequence) and not isinstance(events, (str, bytes)):
-            broken = len(events)
-        elif isinstance(events, (int, float)):
-            broken = int(events)
-    if broken is not None:
-        summary["joints_broken_count"] = int(broken)
-    progress = metrics.get("progress")
-    if progress is None:
-        progress = metrics.get("progress_pct")
-    if isinstance(progress, (int, float)):
-        summary["progress"] = float(progress)
-    return summary
-
-
-def _trajectory_error_type(result: EvaluationResult) -> str:
-    """Classify a trajectory using the lightweight signals from old result.py."""
-
-    if result.success:
-        return "success"
-    if not result.attempts:
-        return "stagnation"
-    best = max(result.attempts, key=lambda item: item.score)
-    best_metrics = best.verification.metrics
-    if result.best_score <= -60:
-        return "catastrophic_collapse"
-    if _constraint_violations(
-        best_metrics, _optional_text(best_metrics.get("failure_reason"))
-    ):
-        return "constraint_violation"
-    physics = _physical_summary(best_metrics)
-    if physics.get("structure_broken") or physics.get("joints_broken_count", 0) > 0:
-        return "structural_failure"
-    if result.best_score < 0:
-        return "numerical_instability"
-
-    attempts = sorted(result.attempts, key=lambda item: item.attempt)
-    scores = [item.score for item in attempts]
-    first_positive = next(
-        (index for index, score in enumerate(scores) if score > 0), -1
-    )
-    third = max(1, len(scores) // 3)
-    early_mean = sum(scores[:third]) / third
-    late_start = max(third * 2, len(scores) - third)
-    late_values = scores[late_start:]
-    late_mean = sum(late_values) / max(1, len(late_values))
-    score_trend = late_mean - early_mean
-    improved_late = False
-    if len(scores) >= 10:
-        midpoint = len(scores) // 2
-        improved_late = max(scores[midpoint:]) > max(scores[:midpoint]) + 2
-
-    failure_reasons = {
-        str(item.verification.metrics.get("failure_reason") or "").strip().lower()[:80]
-        for item in attempts
-        if item.verification.metrics.get("failure_reason")
-    }
-    similarities: list[float] = []
-    for previous, current in zip(attempts, attempts[1:]):
-        previous_tokens = set(previous.code.split())
-        current_tokens = set(current.code.split())
-        if previous_tokens and current_tokens:
-            similarities.append(
-                len(previous_tokens & current_tokens)
-                / max(1, len(previous_tokens | current_tokens))
-            )
-    recent = similarities[-5:]
-    mean_recent_similarity = sum(recent) / len(recent) if recent else 0.0
-    if (
-        mean_recent_similarity > 0.85
-        and abs(score_trend) < 3
-        and result.best_score < 50
-    ):
-        return "design_fixation"
-    if improved_late and result.best_score >= 30:
-        return "late_convergence"
-    if first_positive < 0 and abs(score_trend) < 2 and len(failure_reasons) <= 1:
-        return "stagnation"
-    if first_positive < 0 and len(failure_reasons) >= 3:
-        return "exploration"
-    if 0 < result.best_score < 100:
-        return "late_convergence" if improved_late else "budget_exhaustion"
-    return "stagnation"
 
 
 def _error_category(

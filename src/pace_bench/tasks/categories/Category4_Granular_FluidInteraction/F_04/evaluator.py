@@ -1,4 +1,4 @@
-from pace_bench.primitives import compute_constraint_penalty
+from pace_bench.core.primitives import compute_constraint_penalty
 
 from Box2D.b2 import staticBody
 

@@ -7,8 +7,8 @@ from collections.abc import Callable
 from dataclasses import replace
 from typing import Protocol
 
-from pace_bench.errors import ProviderError
-from pace_bench.types import (
+from pace_bench.core.errors import ProviderError
+from pace_bench.core.types import (
     AttemptRecord,
     EvaluationResult,
     GenerationRequest,
