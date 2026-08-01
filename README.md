@@ -30,6 +30,7 @@ The categories are statics, kinematics, dynamics, granular/fluid interaction, co
 PACE-Bench/
 ├── assets/                         # README figures
 ├── dataset_validation/             # dataset-construction audit prompts
+├── methods/                        # optional local method plug-ins (git-ignored)
 ├── src/
 │   ├── custom_extension.py         # external provider/method example
 │   └── pace_bench/
@@ -231,15 +232,23 @@ The isolation path blocks ordinary Agent access to benchmark source, but it is n
 
 ## Bring your own model or method
 
-External extensions use `package.module:Class`; see [`src/custom_extension.py`](src/custom_extension.py).
+External extensions can use `package.module:Class`; see [`src/custom_extension.py`](src/custom_extension.py). During local experiments, a short name such as `--method reflexion` loads `methods/reflexion.py` and its exported `Method` class. The whole root `methods/` directory is git-ignored so private or experimental implementations cannot be committed accidentally.
 
 ```bash
 pace-bench evaluate --task S_01 --env Stage-1 \
   --provider custom_extension:CustomModel --model my-model \
   --method custom_extension:CustomMethod --attempts 2
+
+# Local methods/my_search.py exporting Method
+pace-bench evaluate --task S_01 --env Stage-1 \
+  --provider openai-compatible --model <model-name> \
+  --method my_search --method-option beam_width=3 \
+  --method-option use_memory=true --attempts 20
 ```
 
-A provider implements `generate(GenerationRequest) -> GenerationResult` and `close()`. A method implements `initialize(context)`, initial/revision request builders, `observe(attempt)`, and `finalize(result)`. PACE-Bench retains task selection, budgets, solver retries, verification, serialization, and environment-pair identity.
+A provider implements `generate(GenerationRequest) -> GenerationResult` and `close()`. A simple method may implement the original one-request interface shown in `custom_extension.py`. Search, memory, or training methods can implement the typed V2 hooks `initialize(context, runtime)`, `build_step(history, remaining_attempts)`, `observe(attempts)`, `snapshot()`, and `finalize(result)`. A step may submit one candidate or a batch; the engine truncates it to the remaining budget, validates every candidate, and records every Box2D verification as one attempt. The runtime separately audits auxiliary LLM calls, which do not consume sandbox attempts. Repeated `--method-option KEY=VALUE` arguments are JSON-decoded and saved with the run configuration.
+
+PACE-Bench ships only the vanilla Previous-One + Best baseline. Local method files are evaluator plug-ins, not benchmark internals: they must not import `evaluation_old/`, access task source through side channels, or perform their own unrecorded verification.
 
 ## Validation and results
 
@@ -265,7 +274,7 @@ results/<experiment>/
     └── ...
 ```
 
-One schema `2.0` JSON represents one task-pair trajectory. It stores identity and run configuration; per-attempt code and hash, score, success, error category, failure reason, hard-constraint violations, essential structural/progress signals, token use, timing, and artifacts; plus a compact analysis block. Full prompts, raw responses, formatted feedback, tracebacks, snapshots, coordinates, and stress arrays are omitted.
+One schema `2.0` JSON represents one task-pair trajectory. It stores identity and run configuration; per-attempt code and hash, score, success, error category, failure reason, hard-constraint violations, essential structural/progress signals, token use, timing, and artifacts; plus a compact analysis block. Strategy state, batch decisions, and candidate-versus-auxiliary call totals are stored as compact JSON-safe audit metadata. Full prompts, raw responses, formatted feedback, tracebacks, coordinates, and stress arrays are omitted.
 
 `pace-bench report` preserves every generic metric used by the former result plots and tables: Pass@k across independent runs; pass and score curves by attempt; score deviation; attempts and adaptation efficiency; prompt/completion cost; best-code size; error taxonomy; early/middle/late code similarity and radicality; budget saturation; stage/model/category/strategy breakdowns; model scale; strategy cost/Pareto data and Cohen's kappa; mutation counts; and reference-solution similarity. The report includes an explicit `legacy_metric_coverage` map from old metric names to current JSON paths. Removed-method, VLM, CE, and paper-specific plot emitters are intentionally not runtime features; their underlying generic measurements remain available. Schema `1.0` and older unversioned result JSON remain readable.
 
@@ -273,7 +282,7 @@ Completed JSON resumes by default; use `--no-resume` to rerun. For reproducibili
 
 ## Architecture notes
 
-The evaluation engine owns attempt accounting and verification; providers only generate code, and methods only construct requests and observe attempts. `evaluation/verification/` separates candidate safety, task loading, simulation, diagnostics, and verifier coordination because those pieces have different security and lifecycle responsibilities.
+The evaluation engine owns attempt accounting and verification; providers generate text, while methods construct single or batched requests and observe recorded attempts. The strategy runtime exposes audited auxiliary generation without exposing a second verification path. `evaluation/verification/` separates candidate safety, task loading, simulation, diagnostics, and verifier coordination because those pieces have different security and lifecycle responsibilities.
 
 ### Task prompts and shared prompt data
 

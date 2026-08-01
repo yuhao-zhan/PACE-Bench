@@ -7,7 +7,7 @@ from collections.abc import Callable
 from dataclasses import replace
 from typing import Protocol
 
-from pace_bench.core.errors import ProviderError
+from pace_bench.core.errors import ConfigurationError, ProviderError
 from pace_bench.core.types import (
     AttemptRecord,
     EvaluationResult,
@@ -15,15 +15,20 @@ from pace_bench.core.types import (
     GenerationResult,
     RunMode,
     VerificationResult,
+    to_jsonable,
+)
+from pace_bench.evaluation.config import (
+    CandidateSubmission,
+    EvaluationStrategy,
+    EvaluationStrategyV2,
+    ModelProvider,
+    StrategyRuntime,
+    StrategyStep,
+    StrategyContext,
 )
 from pace_bench.evaluation.config import RunConfig
 from pace_bench.evaluation.method import VanillaMethod, load_method
 from pace_bench.evaluation.prompts import PromptBuilder
-from pace_bench.evaluation.config import (
-    EvaluationStrategy,
-    ModelProvider,
-    StrategyContext,
-)
 from pace_bench.evaluation.providers import load_provider
 from pace_bench.evaluation.results import artifact_directory
 from pace_bench.evaluation.verification.safety import (
@@ -31,10 +36,14 @@ from pace_bench.evaluation.verification.safety import (
     validate_solver_output,
 )
 from pace_bench.evaluation.verification.verifier import PhysicsVerifier
-from pace_bench.tasks.registry import get_reference_solution
-from pace_bench.tasks.registry import TaskRegistry, get_registry
-from pace_bench.tasks.registry import max_steps_for_task
-from pace_bench.tasks.registry import EnvironmentSpec, TaskSpec
+from pace_bench.tasks.registry import (
+    EnvironmentSpec,
+    TaskRegistry,
+    TaskSpec,
+    get_reference_solution,
+    get_registry,
+    max_steps_for_task,
+)
 
 
 class CandidateVerifier(Protocol):
@@ -55,7 +64,7 @@ class EvaluationEngine:
         *,
         registry: TaskRegistry | None = None,
         provider: ModelProvider | None = None,
-        strategy: EvaluationStrategy | None = None,
+        strategy: EvaluationStrategy | EvaluationStrategyV2 | None = None,
         verifier_factory: VerifierFactory | None = None,
     ) -> None:
         self.config = config
@@ -68,7 +77,8 @@ class EvaluationEngine:
         elif config.strategy in {"iterative", "vanilla"}:
             self.strategy = VanillaMethod(PromptBuilder(self.registry))
         else:
-            self.strategy = load_method(config.strategy)
+            self.strategy = load_method(config.strategy, options=config.method_options)
+        self.strategy_runtime = StrategyRuntime(self.provider)
         self.verifier_factory = verifier_factory or self._physics_verifier_factory
 
     def run(self) -> EvaluationResult:
@@ -109,37 +119,72 @@ class EvaluationEngine:
                 reference_feedback = reference_attempt.verification.feedback
                 if reference_attempt.success:
                     stop_reason = "reference_passes_target"
-            self.strategy.initialize(
-                StrategyContext(
-                    config=self.config,
-                    task_context=task_context,
-                    reference_code=reference_code,
-                    reference_feedback=reference_feedback,
-                )
+            strategy_context = StrategyContext(
+                config=self.config,
+                task_context=task_context,
+                reference_code=reference_code,
+                reference_feedback=reference_feedback,
             )
-            for attempt_number in self._attempt_numbers(stop_reason):
-                request = (
-                    self.strategy.build_initial_request()
-                    if not history
-                    else self.strategy.build_revision_request(history)
+            is_v2 = isinstance(self.strategy, EvaluationStrategyV2)
+            if is_v2:
+                self.strategy.initialize(strategy_context, self.strategy_runtime)
+            else:
+                self.strategy.initialize(strategy_context)
+
+            verified_submissions = 0
+            next_attempt = 1
+            while (
+                stop_reason != "reference_passes_target"
+                and verified_submissions < self.config.attempts
+                and self.config.mode not in {RunMode.REFERENCE, RunMode.SINGLE}
+            ):
+                remaining_attempts = self.config.attempts - verified_submissions
+                step = self._build_step(
+                    history,
+                    remaining_attempts=remaining_attempts,
+                    is_v2=is_v2,
                 )
-                generation, code, invalid_error = self._generate_valid_candidate(
-                    request, attempt_number
+                accepted = step.submissions[:remaining_attempts]
+                self.strategy_runtime.record_step(
+                    step,
+                    remaining_attempts=remaining_attempts,
+                    accepted_submissions=len(accepted),
                 )
-                if generation is None or code is None:
-                    stop_reason = "invalid_solver_output"
+                observed: list[AttemptRecord] = []
+                batch_invalid = False
+                for submission in accepted:
+                    generation, code, invalid_error = self._generate_valid_candidate(
+                        submission, next_attempt
+                    )
+                    if generation is None or code is None:
+                        stop_reason = "invalid_solver_output"
+                        batch_invalid = True
+                        break
+                    attempt = self._verify_attempt(
+                        verifier,
+                        attempt=next_attempt,
+                        code=code,
+                        phase=(
+                            "initial"
+                            if self.config.mode == RunMode.FROM_SCRATCH
+                            and verified_submissions == 0
+                            else "revision"
+                        ),
+                        request=submission.request,
+                        generation=generation,
+                    )
+                    history.append(attempt)
+                    observed.append(attempt)
+                    verified_submissions += 1
+                    next_attempt += 1
+                if observed:
+                    if is_v2:
+                        self.strategy.observe(tuple(observed))
+                    else:
+                        self.strategy.observe(observed[0])
+                if batch_invalid:
                     break
-                attempt = self._verify_attempt(
-                    verifier,
-                    attempt=attempt_number,
-                    code=code,
-                    phase="initial" if not history else "revision",
-                    request=request,
-                    generation=generation,
-                )
-                history.append(attempt)
-                self.strategy.observe(attempt)
-                if attempt.success:
+                if any(attempt.success for attempt in observed):
                     stop_reason = "success"
                     break
             if self.config.mode in {RunMode.REFERENCE, RunMode.SINGLE} and not history:
@@ -186,22 +231,63 @@ class EvaluationEngine:
             metadata={"invalid_solver_error": invalid_error} if invalid_error else {},
         )
         self.strategy.finalize(result)
+        strategy_snapshot = self.strategy.snapshot() if is_v2 else {}
+        result.metadata.update(
+            {
+                "strategy_snapshot": to_jsonable(strategy_snapshot),
+                "strategy_runtime": self.strategy_runtime.snapshot(),
+                "auxiliary_usage": self.strategy_runtime.auxiliary_usage,
+            }
+        )
         return result
 
-    def _attempt_numbers(self, stop_reason: str) -> range:
-        if stop_reason == "reference_passes_target":
-            return range(0)
-        if self.config.mode == RunMode.FROM_SCRATCH:
-            return range(1, self.config.attempts + 1)
-        if self.config.mode == RunMode.ADAPTATION:
-            return range(1, self.config.attempts + 1)
-        return range(0)
+    def _build_step(
+        self,
+        history: list[AttemptRecord],
+        *,
+        remaining_attempts: int,
+        is_v2: bool,
+    ) -> StrategyStep:
+        if is_v2:
+            step = self.strategy.build_step(history, remaining_attempts)
+        else:
+            request = (
+                self.strategy.build_initial_request()
+                if not history
+                else self.strategy.build_revision_request(history)
+            )
+            step = StrategyStep.one(request)
+        if not isinstance(step, StrategyStep):
+            raise ConfigurationError(
+                f"Strategy {getattr(self.strategy, 'name', '<unknown>')!r} "
+                "build_step() must return StrategyStep"
+            )
+        return step
 
     def _generate_valid_candidate(
-        self, request: GenerationRequest, attempt: int
+        self, submission: CandidateSubmission, attempt: int
     ) -> tuple[GenerationResult | None, str | None, str | None]:
+        request = submission.request
         last_error = "provider produced no candidate"
-        for retry in range(self.config.generation_retries + 1):
+        first_retry = 0
+        total_provider_calls = self.config.generation_retries + 1
+        if submission.generation is not None:
+            generation = submission.generation
+            code = (
+                generation.code
+                if generation.code is not None
+                else extract_code(generation.text)
+            )
+            valid, reason = validate_solver_output(generation.text, code)
+            if valid:
+                generation.code = code
+                return generation, code, None
+            last_error = reason
+            # The strategy-owned generation was the initial call. Preserve the
+            # configured policy by making only the remaining retry calls.
+            first_retry = 1
+            total_provider_calls = self.config.generation_retries + 1
+        for retry in range(first_retry, total_provider_calls):
             retry_request = replace(
                 request,
                 # Preserve the legacy trial/iteration seed separation while
@@ -215,7 +301,12 @@ class EvaluationEngine:
                 metadata={**request.metadata, "retry": retry},
             )
             try:
-                generation = self.provider.generate(retry_request)
+                generation = self.strategy_runtime.generate_candidate(
+                    retry_request,
+                    attempt=attempt,
+                    retry=retry,
+                    label=submission.label,
+                )
             except ProviderError as exc:
                 last_error = str(exc)
                 continue

@@ -2,14 +2,28 @@
 
 from __future__ import annotations
 
+import importlib.util
+import re
+import sys
 from collections.abc import Sequence
 from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
 
 from pace_bench.core.errors import ConfigurationError
+from pace_bench.core.types import (
+    AttemptRecord,
+    EvaluationResult,
+    GenerationRequest,
+    RunMode,
+)
+from pace_bench.evaluation.config import (
+    EvaluationStrategy,
+    EvaluationStrategyV2,
+    StrategyContext,
+)
 from pace_bench.evaluation.prompts import PromptBuilder
-from pace_bench.evaluation.config import EvaluationStrategy, StrategyContext
 from pace_bench.evaluation.providers import load_object
-from pace_bench.core.types import AttemptRecord, EvaluationResult, GenerationRequest, RunMode
 
 
 @dataclass(frozen=True)
@@ -104,19 +118,34 @@ class VanillaMethod:
         return self.context
 
 
-def load_method(name: str) -> EvaluationStrategy:
+def load_method(
+    name: str, *, options: dict[str, Any] | None = None
+) -> EvaluationStrategy | EvaluationStrategyV2:
     """Load vanilla or a user-owned dotted-import implementation."""
 
     if name in {"vanilla", "iterative"}:
+        if options:
+            raise ConfigurationError(
+                "The built-in vanilla method has no method options"
+            )
         return VanillaMethod()
-    method = load_object(name)()
-    required = (
-        "initialize",
-        "build_initial_request",
-        "build_revision_request",
-        "observe",
-        "finalize",
-    )
+    method_class = load_object(name) if ":" in name else _load_local_method_class(name)
+    try:
+        method = method_class(**dict(options or {}))
+    except TypeError as exc:
+        raise ConfigurationError(
+            f"Cannot initialize method {name!r} with the supplied options: {exc}"
+        ) from exc
+    if callable(getattr(method, "build_step", None)):
+        required = ("initialize", "build_step", "observe", "snapshot", "finalize")
+    else:
+        required = (
+            "initialize",
+            "build_initial_request",
+            "build_revision_request",
+            "observe",
+            "finalize",
+        )
     missing = [
         attribute
         for attribute in required
@@ -127,3 +156,32 @@ def load_method(name: str) -> EvaluationStrategy:
             f"Method {name!r} is missing required callables: {', '.join(missing)}"
         )
     return method
+
+
+def _load_local_method_class(name: str) -> Any:
+    """Load ``Method`` from an ignored ``methods/<name>.py`` local plugin."""
+
+    if not re.fullmatch(r"[A-Za-z0-9_-]+", name):
+        raise ConfigurationError(
+            f"Invalid local method name {name!r}; use a simple filename or dotted path"
+        )
+    path = Path.cwd() / "methods" / f"{name}.py"
+    if not path.is_file():
+        raise ConfigurationError(
+            f"Unknown method {name!r}. Expected {path} exporting Method, or use "
+            "package.module:MethodClass."
+        )
+    module_name = f"_pace_bench_local_method_{name.replace('-', '_')}"
+    spec = importlib.util.spec_from_file_location(module_name, path)
+    if spec is None or spec.loader is None:
+        raise ConfigurationError(f"Cannot create an import specification for {path}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    try:
+        spec.loader.exec_module(module)
+        return getattr(module, "Method")
+    except (ImportError, AttributeError) as exc:
+        sys.modules.pop(module_name, None)
+        raise ConfigurationError(
+            f"Cannot load local method {path}; it must export Method ({exc})"
+        ) from exc
