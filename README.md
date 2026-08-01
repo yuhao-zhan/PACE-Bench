@@ -112,8 +112,9 @@ export PYGAME_HIDE_SUPPORT_PROMPT=1
 
 | Provider | Use |
 | --- | --- |
-| `openai-compatible` | OpenAI API or any compatible HTTP endpoint |
-| `local-transformers` | Local Hugging Face/Transformers model |
+| `vllm` | Recommended local/cluster inference through a vLLM server |
+| `openai-compatible` | OpenAI API or another compatible HTTP endpoint |
+| `local-transformers` | Direct in-process Hugging Face/Transformers loading |
 | `mock` | Deterministic tests and dry runs |
 | `package.module:Class` | External provider |
 
@@ -128,7 +129,25 @@ pace-bench evaluate --task S_01 --env Stage-1 \
 
 For another compatible server, add `--base-url http://host:port/v1` or set `OPENAI_BASE_URL`.
 
-### Local model
+### vLLM (recommended for local models)
+
+Run vLLM in its own Linux/GPU environment or on a serving host, following the [vLLM installation guide](https://docs.vllm.ai/en/latest/getting_started/installation/). PACE-Bench connects over HTTP, so `vllm` is deliberately not part of the benchmark's cross-platform `requirements.txt`.
+
+```bash
+# Serving host; install vLLM according to its hardware-specific instructions.
+vllm serve Qwen/Qwen2.5-Coder-7B-Instruct \
+  --dtype auto --generation-config vllm
+
+# Benchmark host; the default endpoint is http://127.0.0.1:8000/v1.
+pace-bench evaluate --task K_03 --env Stage-2 \
+  --method vanilla --provider vllm \
+  --model Qwen/Qwen2.5-Coder-7B-Instruct \
+  --attempts 20 --runs 3 --output results/qwen-vllm
+```
+
+`--model` must match the model ID exposed by vLLM (or its configured `--served-model-name`). For a remote server, pass `--base-url http://host:port/v1` or set `VLLM_BASE_URL`. If the server uses `vllm serve --api-key ...`, pass the same value with `--api-key` or `VLLM_API_KEY`. Without server authentication, PACE-Bench supplies only the placeholder required by the OpenAI client. `--workers N` may issue concurrent trajectories to the shared server; size it for the server's capacity.
+
+### Direct Transformers loading
 
 ```bash
 pace-bench evaluate --task K_03 --env Stage-2 \

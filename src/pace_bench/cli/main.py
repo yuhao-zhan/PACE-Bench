@@ -75,15 +75,21 @@ def build_parser() -> argparse.ArgumentParser:
     evaluate_parser.add_argument(
         "--provider",
         default="mock",
-        help="openai-compatible, local-transformers, mock, or package.module:Provider",
+        help=(
+            "vllm, openai-compatible, local-transformers, mock, "
+            "or package.module:Provider"
+        ),
     )
     evaluate_parser.add_argument(
         "--model", default="mock", help="Model name or local path"
     )
     evaluate_parser.add_argument(
-        "--api-key", help="Prefer OPENAI_API_KEY for normal use"
+        "--api-key", help="API key; otherwise use OPENAI_API_KEY or VLLM_API_KEY"
     )
-    evaluate_parser.add_argument("--base-url", help="OpenAI-compatible API endpoint")
+    evaluate_parser.add_argument(
+        "--base-url",
+        help="OpenAI-compatible endpoint; vLLM defaults to http://127.0.0.1:8000/v1",
+    )
     evaluate_parser.add_argument("--device", default="auto")
     evaluate_parser.add_argument(
         "--devices",
@@ -281,7 +287,7 @@ def _evaluate_command(args: argparse.Namespace) -> int:
 
 def _config_from_args(args: argparse.Namespace, mode: RunMode) -> RunConfig:
     options: dict[str, Any] = {}
-    if args.provider in {"openai", "openai-compatible"}:
+    if args.provider in {"openai", "openai-compatible", "vllm"}:
         if args.api_key:
             options["api_key"] = args.api_key
         if args.base_url:
