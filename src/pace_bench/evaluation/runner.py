@@ -51,6 +51,8 @@ def enumerate_work_items(
 ) -> tuple[WorkItem, ...]:
     """Enumerate selected task/environment/run triples in canonical order."""
 
+    if runs < 1:
+        raise ValueError("runs must be at least 1")
     registry = registry or get_registry()
     tasks = registry.select(task_selectors)
     if isinstance(stages, str):

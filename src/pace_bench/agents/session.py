@@ -23,7 +23,7 @@ from typing import Any
 from pace_bench.evaluation.config import RunConfig, StrategyContext
 from pace_bench.evaluation.method import VanillaMethod
 from pace_bench.evaluation.prompts import PromptBuilder
-from pace_bench.evaluation.results import result_path, save_result
+from pace_bench.evaluation.results import artifact_directory, result_path, save_result
 from pace_bench.evaluation.verification.safety import validate_solver_output
 from pace_bench.evaluation.verification.verifier import PhysicsVerifier
 from pace_bench.tasks.registry import (
@@ -50,7 +50,7 @@ class AgentSessionConfig:
     target: EnvironmentId
     attempts: int = 20
     max_steps: int | None = None
-    output: Path = Path("outputs/agent")
+    output: Path = Path("results")
     agent: str = "custom"
     model: str = "unspecified"
     headless: bool = True
@@ -121,14 +121,18 @@ class AgentSession:
                 f"Agent result already exists: {self.result_file}; use a different "
                 "--run-index or pass --overwrite"
             )
-        artifact_directory = self.result_file.parent / "artifacts"
+        gif_directory = artifact_directory(
+            self.run_config,
+            self.task,
+            environment_identity=self.environment_pair,
+        )
         self.verifier = PhysicsVerifier(
             self.task,
             self.environment,
             max_steps=config.max_steps or max_steps_for_task(self.task),
             headless=config.headless,
             save_gif=config.save_gif,
-            artifact_directory=artifact_directory,
+            artifact_directory=gif_directory,
             registry=self.registry,
         )
         self.token = secrets.token_urlsafe(32)

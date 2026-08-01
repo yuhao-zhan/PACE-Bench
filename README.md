@@ -94,7 +94,7 @@ pace-bench list --task S_01
 pace-bench validate --task all --contracts-only
 pace-bench evaluate --task S_01 --env Stage-1 \
   --method vanilla --provider mock --model mock --attempts 1 \
-  --output outputs/smoke --no-resume
+  --output results/smoke --no-resume
 ```
 
 For headless Linux:
@@ -120,7 +120,7 @@ export PYGAME_HIDE_SUPPORT_PROMPT=1
 export OPENAI_API_KEY=<your-key>
 pace-bench evaluate --task S_01 --env Stage-1 \
   --method vanilla --provider openai-compatible --model <model-name> \
-  --attempts 20 --output outputs/my-run
+  --attempts 20 --runs 3 --output results/my-run
 ```
 
 For another compatible server, add `--base-url http://host:port/v1` or set `OPENAI_BASE_URL`.
@@ -183,8 +183,8 @@ flowchart LR
 ```bash
 export CODEX_API_KEY=<dedicated-openai-api-key>
 pace-bench agent --task S_01 --env Stage-1 --agent codex \
-  --model <codex-model> --attempts 20 --timeout-seconds 3600 \
-  --output outputs/codex-s01
+  --model <codex-model> --attempts 20 --runs 2 --timeout-seconds 3600 \
+  --output results/codex-s01
 ```
 
 `OPENAI_API_KEY` is accepted as a fallback. Codex runs non-interactively with `codex exec --ephemeral`; project rules, MCP servers, and web search are not loaded.
@@ -195,7 +195,7 @@ pace-bench agent --task S_01 --env Stage-1 --agent codex \
 export ANTHROPIC_API_KEY=<dedicated-anthropic-api-key>
 pace-bench agent --task K_03 --env Stage-2 --agent claude \
   --model <claude-model-or-alias> --attempts 20 --max-turns 200 \
-  --timeout-seconds 3600 --output outputs/claude-k03
+  --timeout-seconds 3600 --output results/claude-k03
 ```
 
 Claude runs in non-interactive print mode with telemetry, updates, `WebSearch`, and `WebFetch` disabled.
@@ -209,7 +209,7 @@ docker build -t my-physics-agent:latest path/to/my-agent
 pace-bench agent --task D_01 --env Stage-3 --agent custom \
   --image my-physics-agent:latest \
   --agent-command "my-agent --prompt {prompt_file}" \
-  --model my-agent-model --attempts 20 --output outputs/my-agent
+  --model my-agent-model --attempts 20 --output results/my-agent
 ```
 
 `--agent-command` is parsed as arguments and supports `{prompt_file}`, `{task_file}`, and `{workspace}`. A hosted custom Agent can use `--custom-base-url` and `--custom-api-key-env`; inside the container it reads `PACE_AGENT_API_BASE` and the placeholder `PACE_AGENT_API_KEY`.
@@ -223,7 +223,7 @@ The default `AGENT_PROMPT.md` starts with the vanilla model's exact initial requ
 ./pace-submit solution.py     # verify one candidate
 ```
 
-Malformed or structurally unusable submissions are rejected without consuming the valid-submission budget; valid code that fails construction, runtime, constraints, or physics consumes one attempt normally. Accepted submissions store code, score, metrics, feedback, errors, timing, and artifacts server-side. Use `--run-index` for another run or `--overwrite` intentionally.
+Malformed or structurally unusable submissions are rejected without consuming the valid-submission budget; valid code that fails construction, runtime, constraints, or physics consumes one attempt normally. Accepted submissions use the same compact trajectory schema as model runs. Use `--run-index` for another run or `--overwrite` intentionally.
 
 The isolation path blocks ordinary Agent access to benchmark source, but it is not a general multi-tenant sandbox. Use a dedicated evaluator host without unrelated secrets, keep Docker patched, use short-lived keys, and never expose the evaluator port publicly.
 
@@ -246,16 +246,25 @@ pace-bench list                                      # tasks and environments
 pace-bench validate --task all --contracts-only     # imports/contracts
 pace-bench validate --task S_01                     # one reference matrix
 pace-bench validate --task all                      # full 36-task validation
-pace-bench report --input outputs/my-run             # aggregate JSON results
+pace-bench report --input results/my-run             # aggregate JSON results
 ```
 
-Results are stored as:
+`--runs K` executes `K` complete trajectories for every selected task pair in model or Agent mode. Each trajectory receives the configured attempt budget (20 by default). Model-generation seeds deterministically combine the base `--seed`, run index, attempt index, and retry index, preserving independent legacy trial semantics. `--run-index` can select the first Agent run index. The CLI and `pace-bench report` calculate pair-level `Pass@1` through `Pass@K`, where `Pass@k` means that at least one of the pair's first `k` trajectories succeeds.
+
+`--output` selects an experiment root. JSON is always saved; `--save-gif` additionally saves one GIF for every verified attempt, including adaptation attempt 0. The JSON and GIF trees intentionally mirror one another:
 
 ```text
-outputs/<run>/<category>/<task>/<model>/<method>/run-<N>/Initial_to_Stage-<K>.json
+results/<experiment>/
+├── json/<task>/<model>/<method>/run-<N>/Initial_to_Stage-<K>.json
+└── gif/<task>/<model>/<method>/run-<N>/Initial_to_Stage-<K>/
+    ├── attempt-00.gif
+    ├── attempt-01.gif
+    └── ...
 ```
 
-Schema `1.0` records task/pair identity, config, seeds, requests, candidates, metrics, feedback, scores, errors, token usage, timing, and artifact paths. Completed results resume by default; use `--no-resume` to rerun. For reproducibility, report the model revision, hardware, seed, attempt budget, runs, temperature, maximum tokens, and display/headless setting.
+One schema `2.0` JSON represents one task-pair trajectory. It stores identity and run configuration; per-attempt code and hash, score, success, error category, failure reason, hard-constraint violations, step count, structural-break count, progress when available, token use, timing, and artifact references; and final success, best score/attempt, success attempt, stop reason, and trajectory error type. These are the signals used by the original score, code-similarity, budget, and error-taxonomy analyses. Full prompts, raw provider responses, formatted feedback, tracebacks, granular snapshots, body coordinates, stress arrays, and other high-volume physics metrics are deliberately omitted. `pace-bench report` aggregates Pass@k, score mean/deviation, stop reasons, and both pair-level and trajectory-level error taxonomy; schema `1.0` and older unversioned result JSON remain readable.
+
+Completed JSON resumes by default; use `--no-resume` to rerun. For reproducibility, report the model revision, hardware, base seed, attempt budget, number of runs, temperature, maximum tokens, and display/headless setting.
 
 ## Architecture notes
 

@@ -11,12 +11,12 @@ from typing import Any
 from pace_bench import __version__
 from pace_bench.errors import ConfigurationError, PaceBenchError
 from pace_bench.evaluation.config import RunConfig
-from pace_bench.evaluation.results import aggregate, load_results
+from pace_bench.evaluation.results import aggregate, load_result, load_results
 from pace_bench.evaluation.runner import enumerate_work_items
 from pace_bench.evaluation.runner import run_work_items
 from pace_bench.evaluation.runner import validate_task_references
 from pace_bench.tasks.registry import CATEGORIES, get_registry
-from pace_bench.types import EnvironmentId, RunMode
+from pace_bench.types import EnvironmentId, EvaluationResult, RunMode
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -81,7 +81,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     evaluate_parser.add_argument("--dtype", default="auto")
     evaluate_parser.add_argument("--attempts", type=int, default=20)
-    evaluate_parser.add_argument("--runs", type=int, default=1)
+    evaluate_parser.add_argument(
+        "--runs",
+        type=int,
+        default=1,
+        help="Independent complete trajectories per selected task pair (for Pass@k)",
+    )
     evaluate_parser.add_argument("--workers", type=int, default=1)
     evaluate_parser.add_argument("--max-steps", type=int)
     evaluate_parser.add_argument("--generation-retries", type=int, default=2)
@@ -89,8 +94,17 @@ def build_parser() -> argparse.ArgumentParser:
     evaluate_parser.add_argument("--seed", type=int, default=0)
     evaluate_parser.add_argument("--temperature", type=float, default=0.7)
     evaluate_parser.add_argument("--max-tokens", type=int, default=8192)
-    evaluate_parser.add_argument("--output", type=Path, default=Path("outputs/default"))
-    evaluate_parser.add_argument("--save-gif", action="store_true")
+    evaluate_parser.add_argument(
+        "--output",
+        type=Path,
+        default=Path("results"),
+        help="Result root; JSON and GIF files are separated below this directory",
+    )
+    evaluate_parser.add_argument(
+        "--save-gif",
+        action="store_true",
+        help="Save one rendered GIF for every verified attempt",
+    )
     evaluate_parser.add_argument("--display", action="store_true")
     evaluate_parser.add_argument("--no-resume", action="store_true")
     evaluate_parser.add_argument("--dry-run", action="store_true")
@@ -112,10 +126,15 @@ def build_parser() -> argparse.ArgumentParser:
     )
     agent_parser.add_argument("--attempts", type=int, default=20)
     agent_parser.add_argument("--max-steps", type=int)
-    agent_parser.add_argument("--run-index", type=int, default=1)
+    agent_parser.add_argument(
+        "--runs", type=int, default=1, help="Complete agent trajectories to execute"
+    )
+    agent_parser.add_argument(
+        "--run-index", type=int, default=1, help="Index of the first trajectory"
+    )
     agent_parser.add_argument("--overwrite", action="store_true")
     agent_parser.add_argument("--seed", type=int, default=0)
-    agent_parser.add_argument("--output", type=Path, default=Path("outputs/agent"))
+    agent_parser.add_argument("--output", type=Path, default=Path("results"))
     agent_parser.add_argument("--workspace", type=Path)
     agent_parser.add_argument(
         "--prompt-file", type=Path, help="Replace the default agent instruction"
@@ -236,6 +255,16 @@ def _evaluate_command(args: argparse.Namespace) -> int:
                 f"DONE {outcome.work_item.identity}: success={result.success} "
                 f"best_score={result.best_score:.3f} stop={result.stop_reason}"
             )
+    completed = [outcome.result for outcome in outcomes if outcome.result is not None]
+    if completed and not args.dry_run:
+        pass_at_k = aggregate(completed)["pass_at_k"]
+        rendered = " ".join(
+            f"{name}={values['rate']:.3f} ({values['passed_pairs']}/"
+            f"{values['pair_count']} pairs)"
+            for name, values in pass_at_k.items()
+        )
+        if rendered:
+            print(rendered)
     print(f"{len(outcomes)} work item(s), {failures} orchestration error(s)")
     return 1 if failures else 0
 
@@ -286,6 +315,34 @@ def _config_from_args(args: argparse.Namespace, mode: RunMode) -> RunConfig:
 def _agent_command(args: argparse.Namespace) -> int:
     """Run one coding agent without exposing the installed benchmark package."""
 
+    if args.runs < 1:
+        raise ConfigurationError("--runs must be at least 1")
+    results = []
+    failed = False
+    for offset in range(args.runs):
+        result, run_failed = _agent_run_once(
+            args,
+            run_index=args.run_index + offset,
+            seed=args.seed + offset,
+        )
+        results.append(result)
+        failed = failed or run_failed
+    pass_at_k = aggregate(results)["pass_at_k"]
+    rendered = " ".join(
+        f"{name}={values['rate']:.3f} ({values['passed_pairs']}/"
+        f"{values['pair_count']} pairs)"
+        for name, values in pass_at_k.items()
+    )
+    if rendered:
+        print(rendered)
+    return 1 if failed else 0
+
+
+def _agent_run_once(
+    args: argparse.Namespace, *, run_index: int, seed: int
+) -> tuple[EvaluationResult, bool]:
+    """Execute and persist one isolated coding-agent trajectory."""
+
     from pace_bench.agents.container import AgentContainerConfig, run_agent_container
     from pace_bench.agents.session import (
         AgentSession,
@@ -306,14 +363,29 @@ def _agent_command(args: argparse.Namespace) -> int:
             model=args.model,
             headless=not args.display,
             save_gif=args.save_gif,
-            seed=args.seed,
-            run_index=args.run_index,
+            seed=seed,
+            run_index=run_index,
             prompt_file=args.prompt_file,
             overwrite=args.overwrite,
         )
     )
-    workspace = args.workspace or (
-        session.result_file.parent / f"workspace-{int(session.started_at)}"
+    json_root = next(
+        parent for parent in session.result_file.parents if parent.name == "json"
+    )
+    result_root = json_root.parent
+    result_identity = session.result_file.relative_to(result_root / "json").with_suffix(
+        ""
+    )
+    requested_workspace = (
+        args.workspace / f"run-{run_index}"
+        if args.workspace is not None and args.runs > 1
+        else args.workspace
+    )
+    workspace = requested_workspace or (
+        result_root
+        / "workspaces"
+        / result_identity
+        / f"session-{int(session.started_at)}"
     )
     if workspace.exists() and any(workspace.iterdir()):
         session.close()
@@ -331,7 +403,7 @@ def _agent_command(args: argparse.Namespace) -> int:
             f"DONE success=True stop={session.stop_reason} result={session.result_file}"
         )
         session.close()
-        return 0
+        return load_result(session.result_file), False
 
     server = AgentSessionServer(session)
     server.start()
@@ -380,7 +452,8 @@ def _agent_command(args: argparse.Namespace) -> int:
     )
     print(f"Result: {session.result_file}")
     print(f"Workspace and agent log: {workspace}")
-    return 1 if status["stop_reason"] in {"agent_error", "agent_timeout"} else 0
+    failed = status["stop_reason"] in {"agent_error", "agent_timeout"}
+    return load_result(session.result_file), failed
 
 
 def _validate_command(args: argparse.Namespace) -> int:

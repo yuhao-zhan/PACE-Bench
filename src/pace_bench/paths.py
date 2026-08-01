@@ -27,7 +27,7 @@ def default_output_root() -> Path:
     if override:
         return Path(override).expanduser().resolve()
     root = repository_root()
-    return (root / "outputs" if root else Path.cwd() / "outputs").resolve()
+    return (root / "results" if root else Path.cwd() / "results").resolve()
 
 
 def ensure_output_path(path: str | Path | None) -> Path:

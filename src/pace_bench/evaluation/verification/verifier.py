@@ -232,6 +232,12 @@ class PhysicsVerifier:
             )
         finally:
             self.verifier.cleanup()
+        if gif_path and not gif_path.is_file():
+            _save_no_frames_gif(
+                gif_path,
+                attempt=attempt,
+                message=error or str((metrics or {}).get("failure_reason") or ""),
+            )
         if gif_path and gif_path.is_file():
             artifact_paths.append(str(gif_path))
         metrics = dict(metrics or {})
@@ -258,3 +264,24 @@ class PhysicsVerifier:
 
     def close(self) -> None:
         self.verifier.cleanup()
+
+
+def _save_no_frames_gif(path: Path, *, attempt: int, message: str) -> None:
+    """Create an explicit artifact when verification ends before rendering."""
+
+    try:
+        from PIL import Image, ImageDraw
+
+        image = Image.new("RGB", (720, 160), "white")
+        draw = ImageDraw.Draw(image)
+        text = (
+            f"PACE-Bench attempt {attempt}\n"
+            "No simulation frames were produced.\n"
+            f"{message[:180]}"
+        )
+        draw.multiline_text((20, 20), text, fill="black", spacing=8)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        image.save(path, format="GIF")
+    except (ImportError, OSError, UnicodeError, ValueError):
+        # GIF capture is optional and must never alter evaluation semantics.
+        return

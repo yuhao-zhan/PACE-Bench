@@ -5,7 +5,6 @@ from __future__ import annotations
 import time
 from collections.abc import Callable
 from dataclasses import replace
-from pathlib import Path
 from typing import Protocol
 
 from pace_bench.errors import ProviderError
@@ -26,6 +25,7 @@ from pace_bench.evaluation.config import (
     StrategyContext,
 )
 from pace_bench.evaluation.providers import load_provider
+from pace_bench.evaluation.results import artifact_directory
 from pace_bench.evaluation.verification.safety import (
     extract_code,
     validate_solver_output,
@@ -204,7 +204,14 @@ class EvaluationEngine:
         for retry in range(self.config.generation_retries + 1):
             retry_request = replace(
                 request,
-                seed=self.config.seed + attempt * 1000 + retry,
+                # Preserve the legacy trial/iteration seed separation while
+                # keeping an explicit user-controlled base seed.
+                seed=(
+                    self.config.seed
+                    + self.config.run_index * 1000
+                    + attempt
+                    + retry * 100
+                ),
                 metadata={**request.metadata, "retry": retry},
             )
             try:
@@ -248,13 +255,15 @@ class EvaluationEngine:
         self, task: TaskSpec, environment: EnvironmentSpec, config: RunConfig
     ) -> PhysicsVerifier:
         max_steps = config.max_steps or max_steps_for_task(task)
-        artifact_directory = None
-        if config.output is not None:
-            artifact_directory = (
-                Path(config.output)
-                / "artifacts"
-                / task.name
-                / str(environment.environment_id)
+        gif_directory = None
+        if config.save_gif:
+            identity = (
+                f"{config.source}_to_{config.target}"
+                if config.mode == RunMode.ADAPTATION
+                else str(config.target)
+            )
+            gif_directory = artifact_directory(
+                config, task, environment_identity=identity
             )
         return PhysicsVerifier(
             task,
@@ -262,6 +271,6 @@ class EvaluationEngine:
             max_steps=max_steps,
             headless=config.headless,
             save_gif=config.save_gif,
-            artifact_directory=artifact_directory,
+            artifact_directory=gif_directory,
             registry=self.registry,
         )
