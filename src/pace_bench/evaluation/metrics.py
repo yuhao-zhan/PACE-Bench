@@ -435,11 +435,16 @@ def _pair_error_taxonomy_summary(
         grouped[_pair_key(result)].append(result)
     labels: list[str] = []
     for trajectories in grouped.values():
+        trajectories.sort(key=_result_run_index)
         if any(item.success for item in trajectories):
             labels.append("success")
             continue
-        counts = Counter(_trajectory_error_type(item) for item in trajectories)
-        labels.append(sorted(counts, key=lambda key: (-counts[key], key))[0])
+        labels.append(
+            _majority(
+                [_trajectory_error_type(item) for item in trajectories],
+                default="stagnation",
+            )
+        )
     synthetic = Counter(labels)
     total = len(labels)
     failures = total - synthetic.get("success", 0)
@@ -463,8 +468,10 @@ def _mean(values: Sequence[float]) -> float:
 
 
 def _majority(values: Sequence[str], *, default: str) -> str:
+    """Return the mode, preserving DaVinci result.py's first-seen tie break."""
+
     counts = Counter(values)
-    return min(counts, key=lambda value: (-counts[value], value)) if counts else default
+    return max(counts, key=counts.get) if counts else default
 
 
 def _target_stage(result: EvaluationResult) -> str:
