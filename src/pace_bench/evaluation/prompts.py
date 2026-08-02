@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import inspect
+import re
 from collections.abc import Callable
 from functools import cache
 from pathlib import Path
@@ -260,6 +261,8 @@ class PromptBuilder:
         self,
         task: TaskSpec,
         target: EnvironmentSpec | None = None,
+        *,
+        include_source_comparison: bool = True,
     ) -> dict[str, Any]:
         prompt_module = self.registry.load_module(task, "prompt")
         context = dict(prompt_module.TASK_PROMPT)
@@ -290,6 +293,10 @@ class PromptBuilder:
             context["prompt_trailer"] = target.task_description_suffix
         else:
             context.pop("prompt_trailer", None)
+        if not include_source_comparison:
+            for key in ("task_description", "success_criteria", "prompt_trailer"):
+                if key in context:
+                    context[key] = _remove_source_comparisons(str(context[key]))
         return context
 
     def initial(self, task_context: dict[str, Any]) -> str:
@@ -363,3 +370,50 @@ def _call_update_function(
     )
     values: list[Any] = [base_text, terrain, {}, physics, {}]
     return function(*values[:positional], **keyword_arguments)
+
+
+def _remove_source_comparisons(text: str) -> str:
+    """Remove transition-only annotations while retaining current target values."""
+
+    def clean_parentheses(
+        value: str, start: int = 0, *, stop_at_close: bool = False
+    ) -> tuple[str, int]:
+        pieces: list[str] = []
+        index = start
+        while index < len(value):
+            character = value[index]
+            if character == ")":
+                if stop_at_close:
+                    return "".join(pieces), index + 1
+                pieces.append(character)
+                index += 1
+                continue
+            if character != "(":
+                pieces.append(character)
+                index += 1
+                continue
+            inner, index = clean_parentheses(value, index + 1, stop_at_close=True)
+            lowered = inner.lower()
+            marker = lowered.find("originally")
+            if marker < 0:
+                pieces.append(f"({inner})")
+                continue
+            prefix = inner[:marker].rstrip(" ;,")
+            if prefix:
+                pieces.append(f"({prefix})")
+        return "".join(pieces), index
+
+    cleaned, _ = clean_parentheses(text)
+    cleaned = re.sub(
+        r"(?i)(?:[;,]\s*|\.\s+)originally\b[^\n]*(?:source environment|source env)\.?",
+        ".",
+        cleaned,
+    )
+    cleaned = re.sub(
+        r"(?i)\b(?:the\s+)?source environment\b|\bsource env\b",
+        "current environment",
+        cleaned,
+    )
+    cleaned = re.sub(r"[ \t]+([,.;:)])", r"\1", cleaned)
+    cleaned = re.sub(r"\.{2,}", ".", cleaned)
+    return cleaned

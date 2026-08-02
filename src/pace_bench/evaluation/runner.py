@@ -29,9 +29,13 @@ class WorkItem:
 
     @property
     def identity(self) -> str:
+        environment = (
+            f"{self.config.source}_to_{self.config.target}"
+            if self.config.mode == RunMode.ADAPTATION
+            else str(self.config.target)
+        )
         return (
-            f"{self.config.task}:{self.config.source}_to_{self.config.target}:"
-            f"run-{self.config.run_index}"
+            f"{self.config.task}:{environment}:run-{self.config.run_index}"
         )
 
 

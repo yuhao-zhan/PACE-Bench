@@ -114,8 +114,11 @@ def build_parser() -> argparse.ArgumentParser:
     evaluate_parser.add_argument(
         "--output",
         type=Path,
-        default=Path("results"),
-        help="Result root; JSON and GIF files are separated below this directory",
+        default=None,
+        help=(
+            "Result root; defaults to results for adaptation and results_scratch "
+            "for from-scratch runs"
+        ),
     )
     evaluate_parser.add_argument(
         "--save-gif",
@@ -324,7 +327,8 @@ def _config_from_args(args: argparse.Namespace, mode: RunMode) -> RunConfig:
         max_tokens=args.max_tokens,
         headless=not args.display,
         save_gif=args.save_gif,
-        output=args.output,
+        output=args.output
+        or Path("results_scratch" if mode == RunMode.FROM_SCRATCH else "results"),
         resume=not args.no_resume,
         provider_options=options,
         method_options=_key_value_options(args.method_option, "--method-option"),

@@ -89,7 +89,11 @@ class EvaluationEngine:
             str(item.environment_id): item for item in self.registry.environments(task)
         }
         target = environments[str(self.config.target)]
-        task_context = PromptBuilder(self.registry).load_task_context(task, target)
+        task_context = PromptBuilder(self.registry).load_task_context(
+            task,
+            target,
+            include_source_comparison=self.config.mode != RunMode.FROM_SCRATCH,
+        )
         verifier = self.verifier_factory(task, target, self.config)
         history: list[AttemptRecord] = []
         stop_reason = "budget_exhausted"

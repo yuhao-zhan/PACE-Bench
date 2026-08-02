@@ -179,6 +179,21 @@ pace-bench evaluate --task all --env all --provider mock --model mock \
 # Solve Initial without a source reference
 pace-bench evaluate --task D_01 --env Initial --from-scratch \
   --provider openai-compatible --model <model-name>
+
+# Solve a curriculum environment directly, without an Initial -> Stage transition
+pace-bench evaluate --task D_01 --env Stage-1 --from-scratch \
+  --provider vllm --model <model-name>
+```
+
+From-scratch runs default to `results_scratch`; adaptation runs default to
+`results`. Passing `--output` overrides either default.
+
+When a matching vLLM endpoint is already running, the repository helper exposes
+the same selection flags plus `--from-scratch`:
+
+```bash
+bash run_pace_vllm.sh --model Qwen3-4B --method vanilla \
+  --task S_01 --env Stage-1 --from-scratch
 ```
 
 ## Evaluate a coding agent as a black box
@@ -296,6 +311,15 @@ results/<experiment>/
     ├── attempt-00.gif
     ├── attempt-01.gif
     └── ...
+```
+
+From-scratch trajectories are kept separately and use a single environment
+identity rather than an environment-pair identity:
+
+```text
+results_scratch/
+├── json/<category>/<task>/<model>/<method>/run-<N>/<environment>.json
+└── gif/<category>/<task>/<model>/<method>/run-<N>/<environment>/
 ```
 
 For example, an `S_01` result is stored below
