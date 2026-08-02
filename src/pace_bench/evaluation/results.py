@@ -49,6 +49,7 @@ __all__ = [
     "load_results",
     "migrate_legacy_result",
     "result_path",
+    "result_path_candidates",
     "save_result",
     "trajectory_metrics",
 ]
@@ -296,6 +297,19 @@ def result_path(
     )
 
 
+def result_path_candidates(
+    config: RunConfig, task: TaskSpec, *, environment_identity: str
+) -> tuple[Path, ...]:
+    """Return the current path followed by readable pre-category paths."""
+
+    filename = f"{_safe_segment(environment_identity)}.json"
+    return (
+        _run_directory(config, task, kind="json") / filename,
+        _run_directory(config, task, kind="json", include_category=False)
+        / filename,
+    )
+
+
 def artifact_directory(
     config: RunConfig, task: TaskSpec, *, environment_identity: str
 ) -> Path:
@@ -306,11 +320,18 @@ def artifact_directory(
     )
 
 
-def _run_directory(config: RunConfig, task: TaskSpec, *, kind: str) -> Path:
+def _run_directory(
+    config: RunConfig,
+    task: TaskSpec,
+    *,
+    kind: str,
+    include_category: bool = True,
+) -> Path:
+    root = ensure_output_path(config.output) / kind
+    if include_category:
+        root /= _task_category_segment(task)
     return (
-        ensure_output_path(config.output)
-        / kind
-        / _task_category_segment(task)
+        root
         / _safe_segment(task.name)
         / _safe_segment(config.model)
         / _safe_segment(config.strategy)

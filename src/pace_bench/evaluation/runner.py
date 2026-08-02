@@ -11,6 +11,7 @@ from pace_bench.evaluation.results import (
     is_complete,
     load_result,
     result_path,
+    result_path_candidates,
     save_result,
 )
 from pace_bench.evaluation.verification.verifier import PhysicsVerifier
@@ -106,8 +107,12 @@ def run_single(
         else str(config.target)
     )
     path = result_path(config, task, environment_identity=identity)
-    if config.resume and is_complete(path):
-        return load_result(path)
+    if config.resume:
+        for candidate in result_path_candidates(
+            config, task, environment_identity=identity
+        ):
+            if is_complete(candidate):
+                return load_result(candidate)
     result = EvaluationEngine(config, registry=registry).run()
     save_result(path, result)
     return result

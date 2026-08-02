@@ -297,7 +297,7 @@ results/<experiment>/
 For example, an `S_01` result is stored below
 `json/Category1_Statics_Equilibrium/S_01/`. Demo tasks use `demo` as their
 category directory. Older result trees without the category level remain
-readable by `pace-bench report`.
+readable by `pace-bench report` and are recognized by resume checks.
 
 One schema `2.0` JSON represents one task-pair trajectory. It stores identity and run configuration; per-attempt code and hash, score, success, error category, failure reason, hard-constraint violations, essential structural/progress signals, token use, timing, and artifacts; plus a compact analysis block. Strategy state, batch decisions, and candidate-versus-auxiliary call totals are stored as compact JSON-safe audit metadata. Full prompts, raw responses, formatted feedback, tracebacks, coordinates, and stress arrays are omitted.
 

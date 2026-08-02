@@ -23,7 +23,7 @@ from typing import Any
 
 from pace_bench.core.errors import PaceBenchError
 from pace_bench.core.types import AttemptRecord, EvaluationResult
-from pace_bench.tasks.registry import get_registry
+from pace_bench.tasks.registry import CATEGORIES, get_registry
 
 INVISIBLE_PARAMETER_KEYWORDS = (
     "gravity",
@@ -33,6 +33,14 @@ INVISIBLE_PARAMETER_KEYWORDS = (
     "viscosity",
     "restitution",
 )
+
+CATEGORY_NAMES_BY_NUMBER = {
+    number: category_name
+    for number, (category_name, _prefix, _title) in CATEGORIES.items()
+}
+CATEGORY_NAMES_BY_PREFIX = {
+    prefix: category_name for category_name, prefix, _title in CATEGORIES.values()
+}
 
 # Audit map for the former plot/table metric families. It is documentation only:
 # this package never imports or executes the local legacy analysis directory.
@@ -468,7 +476,15 @@ def _target_stage(result: EvaluationResult) -> str:
 
 
 def _category(result: EvaluationResult) -> str:
-    return result.task_path.split("/", 1)[0] if "/" in result.task_path else "other"
+    if "/" in result.task_path:
+        return result.task_path.split("/", 1)[0]
+    prefix = result.task_id.upper().split("_", 1)[0]
+    if prefix in CATEGORY_NAMES_BY_PREFIX:
+        return CATEGORY_NAMES_BY_PREFIX[prefix]
+    match = re.search(r"category[_-]?(\d+)", result.task_path, re.IGNORECASE)
+    if match:
+        return CATEGORY_NAMES_BY_NUMBER.get(int(match.group(1)), "other")
+    return "other"
 
 
 def _pair_records(results: Sequence[EvaluationResult]) -> list[dict[str, Any]]:

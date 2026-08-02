@@ -23,7 +23,12 @@ from typing import Any
 from pace_bench.evaluation.config import RunConfig, StrategyContext
 from pace_bench.evaluation.method import VanillaMethod
 from pace_bench.evaluation.prompts import PromptBuilder
-from pace_bench.evaluation.results import artifact_directory, result_path, save_result
+from pace_bench.evaluation.results import (
+    artifact_directory,
+    result_path,
+    result_path_candidates,
+    save_result,
+)
 from pace_bench.evaluation.verification.safety import validate_solver_output
 from pace_bench.evaluation.verification.verifier import PhysicsVerifier
 from pace_bench.tasks.registry import (
@@ -116,9 +121,21 @@ class AgentSession:
             self.task,
             environment_identity=self.environment_pair,
         )
-        if self.result_file.exists() and not config.overwrite:
+        existing_result = next(
+            (
+                path
+                for path in result_path_candidates(
+                    self.run_config,
+                    self.task,
+                    environment_identity=self.environment_pair,
+                )
+                if path.exists()
+            ),
+            None,
+        )
+        if existing_result is not None and not config.overwrite:
             raise ValueError(
-                f"Agent result already exists: {self.result_file}; use a different "
+                f"Agent result already exists: {existing_result}; use a different "
                 "--run-index or pass --overwrite"
             )
         gif_directory = artifact_directory(
