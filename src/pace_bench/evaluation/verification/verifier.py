@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib.util
 import random
 import sys
+import threading
 import time
 import traceback
 from pathlib import Path
@@ -19,6 +20,13 @@ from pace_bench.evaluation.verification.task_runtime import TaskRuntimeMixin
 from pace_bench.tasks.registry import TaskRegistry, get_registry
 from pace_bench.tasks.registry import EnvironmentSpec, TaskSpec
 from pace_bench.core.types import VerificationResult
+
+
+# pygame, Box2D task modules, ``random.seed()``, ``sys.path``, and the legacy
+# module aliases used by CodeVerifier are process-global. Model generation may
+# run concurrently, but the native verification lifecycle must not overlap
+# across worker threads.
+_NATIVE_VERIFICATION_LOCK = threading.RLock()
 
 
 class CodeVerifier(CodeSafetyMixin, TaskRuntimeMixin, SimulationMixin):
@@ -209,12 +217,8 @@ class PhysicsVerifier:
         self.headless = headless
         self.save_gif = save_gif
         self.artifact_directory = artifact_directory
-        self.verifier = CodeVerifier(
-            task.full_name,
-            max_steps=max_steps,
-            env_overrides=environment.overrides,
-            registry=registry,
-        )
+        self.max_steps = max_steps
+        self.registry = registry
 
     def verify(self, code: str, attempt: int) -> VerificationResult:
         artifact_paths: list[str] = []
@@ -222,48 +226,56 @@ class PhysicsVerifier:
         if self.save_gif and self.artifact_directory is not None:
             self.artifact_directory.mkdir(parents=True, exist_ok=True)
             gif_path = self.artifact_directory / f"attempt-{attempt:02d}.gif"
-        started = time.perf_counter()
-        try:
-            success, score, metrics, error = self.verifier.verify_code(
-                code,
-                headless=self.headless,
-                save_gif_path=str(gif_path) if gif_path else None,
-                granularity="outcome-based",
+        with _NATIVE_VERIFICATION_LOCK:
+            started = time.perf_counter()
+            verifier = CodeVerifier(
+                self.task.full_name,
+                max_steps=self.max_steps,
+                env_overrides=self.environment.overrides,
+                registry=self.registry,
             )
-        finally:
-            self.verifier.cleanup()
-        if gif_path and not gif_path.is_file():
-            _save_no_frames_gif(
-                gif_path,
-                attempt=attempt,
-                message=error or str((metrics or {}).get("failure_reason") or ""),
+            try:
+                success, score, metrics, error = verifier.verify_code(
+                    code,
+                    headless=self.headless,
+                    save_gif_path=str(gif_path) if gif_path else None,
+                    granularity="outcome-based",
+                )
+            finally:
+                verifier.cleanup()
+            if gif_path and not gif_path.is_file():
+                _save_no_frames_gif(
+                    gif_path,
+                    attempt=attempt,
+                    message=error
+                    or str((metrics or {}).get("failure_reason") or ""),
+                )
+            if gif_path and gif_path.is_file():
+                artifact_paths.append(str(gif_path))
+            metrics = dict(metrics or {})
+            feedback = format_feedback(
+                metrics,
+                float(score),
+                bool(success),
+                bool(metrics.get("failed", not success)),
+                metrics.get("failure_reason"),
+                iteration=attempt,
+                error=error,
+                task_name=self.task.full_name,
+                include_suggestions=False,
             )
-        if gif_path and gif_path.is_file():
-            artifact_paths.append(str(gif_path))
-        metrics = dict(metrics or {})
-        feedback = format_feedback(
-            metrics,
-            float(score),
-            bool(success),
-            bool(metrics.get("failed", not success)),
-            metrics.get("failure_reason"),
-            iteration=attempt,
-            error=error,
-            task_name=self.task.full_name,
-            include_suggestions=False,
-        )
-        return VerificationResult(
-            success=bool(success),
-            score=float(score),
-            metrics=metrics,
-            feedback=feedback,
-            error=error,
-            artifact_paths=artifact_paths,
-            duration_seconds=time.perf_counter() - started,
-        )
+            return VerificationResult(
+                success=bool(success),
+                score=float(score),
+                metrics=metrics,
+                feedback=feedback,
+                error=error,
+                artifact_paths=artifact_paths,
+                duration_seconds=time.perf_counter() - started,
+            )
 
     def close(self) -> None:
-        self.verifier.cleanup()
+        """Each verification owns and cleans its native verifier eagerly."""
 
 
 def _save_no_frames_gif(path: Path, *, attempt: int, message: str) -> None:

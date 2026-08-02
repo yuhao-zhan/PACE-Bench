@@ -147,6 +147,10 @@ pace-bench evaluate --task K_03 --env Stage-2 \
 
 `--model` must match the model ID exposed by vLLM (or its configured `--served-model-name`). For a remote server, pass `--base-url http://host:port/v1` or set `VLLM_BASE_URL`. If the server uses `vllm serve --api-key ...`, pass the same value with `--api-key` or `VLLM_API_KEY`. Without server authentication, PACE-Bench supplies only the placeholder required by the OpenAI client. `--workers N` may issue concurrent trajectories to the shared server; size it for the server's capacity.
 
+Worker threads may generate model responses concurrently. Native Box2D/pygame
+verification is serialized within each PACE-Bench process because pygame and
+the legacy task-module aliases use process-global state.
+
 ### Direct Transformers loading
 
 ```bash
