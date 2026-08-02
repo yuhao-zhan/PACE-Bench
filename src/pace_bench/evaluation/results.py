@@ -280,6 +280,14 @@ def _safe_segment(value: str) -> str:
     return re.sub(r"[^A-Za-z0-9_.-]+", "_", value).strip("._") or "unknown"
 
 
+def _task_category_segment(task: TaskSpec) -> str:
+    """Return the stable category directory used by both result trees."""
+
+    if task.category_name:
+        return _safe_segment(task.category_name)
+    return "uncategorized" if task.benchmark else "demo"
+
+
 def result_path(
     config: RunConfig, task: TaskSpec, *, environment_identity: str
 ) -> Path:
@@ -302,6 +310,7 @@ def _run_directory(config: RunConfig, task: TaskSpec, *, kind: str) -> Path:
     return (
         ensure_output_path(config.output)
         / kind
+        / _task_category_segment(task)
         / _safe_segment(task.name)
         / _safe_segment(config.model)
         / _safe_segment(config.strategy)
