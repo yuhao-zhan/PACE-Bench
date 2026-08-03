@@ -1,0 +1,1587 @@
+{
+  "analysis": {
+    "best_attempt_diagnostics": {
+      "constraint_violation_count": 0,
+      "failure_reason": null,
+      "joints_broken_count": 0,
+      "progress": 0.0,
+      "step_count": 2400,
+      "structure_broken": false
+    },
+    "best_code_tokens": 610,
+    "cumulative_best_scores": [
+      {
+        "attempt": 0,
+        "best_score": -50.0
+      },
+      {
+        "attempt": 1,
+        "best_score": 0.0
+      },
+      {
+        "attempt": 2,
+        "best_score": 0.0
+      },
+      {
+        "attempt": 3,
+        "best_score": 0.0
+      },
+      {
+        "attempt": 4,
+        "best_score": 0.0
+      },
+      {
+        "attempt": 5,
+        "best_score": 0.0
+      },
+      {
+        "attempt": 6,
+        "best_score": 0.0
+      },
+      {
+        "attempt": 7,
+        "best_score": 0.0
+      },
+      {
+        "attempt": 8,
+        "best_score": 0.0
+      },
+      {
+        "attempt": 9,
+        "best_score": 0.0
+      },
+      {
+        "attempt": 10,
+        "best_score": 0.0
+      },
+      {
+        "attempt": 11,
+        "best_score": 0.0
+      },
+      {
+        "attempt": 12,
+        "best_score": 0.0
+      },
+      {
+        "attempt": 13,
+        "best_score": 0.0
+      },
+      {
+        "attempt": 14,
+        "best_score": 0.0
+      },
+      {
+        "attempt": 15,
+        "best_score": 100.0
+      }
+    ],
+    "error_type": "success",
+    "revision_attempts": 15,
+    "success_attempt": 15,
+    "tokens": {
+      "all_calls_total": 301909,
+      "auxiliary_completion": 29608,
+      "auxiliary_prompt": 31608,
+      "auxiliary_total": 61216,
+      "completion": 114128,
+      "prompt": 126565,
+      "total": 240693
+    },
+    "trajectory_diagnostics": {
+      "code_length_trend": 0.433007,
+      "code_radicality": 0.245988,
+      "code_similarity_early": 0.783434,
+      "code_similarity_global": 0.754012,
+      "code_similarity_late": 0.890896,
+      "code_similarity_middle": 0.587706,
+      "code_similarity_recent": 0.890896,
+      "code_similarity_trend": 0.107462,
+      "first_positive_index": 15,
+      "improved_late": true,
+      "persistent_constraint_violation": false,
+      "score_trend": 30.0,
+      "total_constraint_violations": 7,
+      "unique_failure_reasons": 9
+    },
+    "verified_attempts": 16
+  },
+  "attempt_budget": 20,
+  "attempts": [
+    {
+      "artifacts": [],
+      "attempt": 0,
+      "code": "import math\n\n\ndef _build_agent_internal(sandbox, torque=3000.0, arm_config=None, initial_angle=0.0, beam_density=20.0, scoop_density=20.0, tower_density=400.0, bucket_torque=None):\n    if bucket_torque is None:\n        bucket_torque = torque\n    sandbox.add_anchored_base(-2.0, 0.2, 0.4, 0.4, angle=0, density=10.0)\n    tower = sandbox.add_anchored_base(-2.0, 0.75, 0.4, 1.5, angle=0, density=tower_density)\n    if arm_config is None:\n        arm_config = [1.5, 1.5, 1.0]\n    prev_body = tower\n    prev_anchor = (-2.0, 1.5)\n    current_x, current_y = -2.0, 1.5\n    arm_joint = None\n    for i, length in enumerate(arm_config):\n        center_x = current_x + (length / 2.0) * math.cos(initial_angle)\n        center_y = current_y + (length / 2.0) * math.sin(initial_angle)\n        body = sandbox.add_beam(center_x, center_y, length, 0.2, angle=initial_angle, density=beam_density)\n        if i == 0:\n            arm_joint = sandbox.add_revolute_joint(\n                prev_body,\n                body,\n                prev_anchor,\n                enable_motor=True,\n                max_motor_torque=torque,\n            )\n        else:\n            sandbox.add_joint(prev_body, body, (current_x, current_y))\n        prev_body = body\n        current_x += length * math.cos(initial_angle)\n        current_y += length * math.sin(initial_angle)\n    scoop_w, scoop_h = 2.0, 1.0\n    if arm_joint is None:\n        raise ValueError(\"arm_config must contain at least one segment\")\n    scoop = sandbox.add_scoop(current_x, current_y, scoop_w, scoop_h, angle=initial_angle, density=scoop_density)\n    bucket_joint = sandbox.add_revolute_joint(\n        prev_body,\n        scoop,\n        (current_x, current_y),\n        enable_motor=True,\n        max_motor_torque=bucket_torque,\n    )\n    return {\n        \"body\": scoop,\n        \"arm_joint\": arm_joint,\n        \"bucket_joint\": bucket_joint,\n    }\n\n\n\ndef _control_components(agent_components):\n    if not isinstance(agent_components, dict):\n        return None, None, None\n    return (\n        agent_components.get(\"body\"),\n        agent_components.get(\"arm_joint\"),\n        agent_components.get(\"bucket_joint\"),\n    )\n\n\ndef build_agent(sandbox):\n    return _build_agent_internal(sandbox, torque=3000.0)\n\n\ndef agent_action(sandbox, agent_body, step_count):\n    scoop, _aj, _bj = _control_components(agent_body)\n    if scoop is None or not _aj or not _bj:\n        return\n    dt = 1.0 / 60.0\n    t = step_count * dt\n    phase_duration = 10.0\n    phase = (t % phase_duration) / phase_duration\n    arm_angle = _aj.angle\n    bucket_world_angle = scoop.angle\n    if phase < 0.3:\n        ta, tb = -0.2, 0.5\n    elif phase < 0.5:\n        ta, tb = 0.0, 0.0\n    elif phase < 0.8:\n        ta, tb = 2.4, 0.0\n    elif phase < 0.9:\n        ta, tb = 2.4, 1.2\n    else:\n        ta, tb = 0.5, 1.2\n    _aj.motorSpeed = 1.0 * (ta - arm_angle)\n    _bj.motorSpeed = 3.0 * (tb - bucket_world_angle)\n    _aj.motorEnabled = True\n    _bj.motorEnabled = True\n",
+      "code_sha256": "248360024d1e39629633fd0c813e6b637fe8c602089eb66f5b42115d3c1dcce0",
+      "constraints": {
+        "count": 1,
+        "violated": true,
+        "violations": [
+          "Structure mass 277.60 kg exceeds maximum 30.0 kg"
+        ]
+      },
+      "generation": null,
+      "outcome": {
+        "category": "constraint_violation",
+        "failure_reason": "Design constraint violated: Structure mass 277.60 kg exceeds maximum 30.0 kg"
+      },
+      "phase": "reference",
+      "physics": {
+        "structure_broken": false
+      },
+      "score": -50.0,
+      "step_count": 0,
+      "success": false,
+      "timestamp": 1785726724.7083127,
+      "verification_seconds": 0.13217548839747906
+    },
+    {
+      "artifacts": [],
+      "attempt": 1,
+      "code": "import math\n\ndef _build_agent_internal(sandbox, torque=3000.0, arm_config=None, initial_angle=0.0, beam_density=10.0, scoop_density=10.0, bucket_torque=None):\n    if bucket_torque is None:\n        bucket_torque = torque\n    # Add base anchored at x=-2.0, y=0.0\n    base = sandbox.add_anchored_base(-2.0, 0.0, 0.4, 0.4, angle=0, density=10.0)\n    prev_body = base\n    prev_anchor = (-2.0, 0.0)\n    current_x, current_y = -2.0, 0.0\n    arm_joint = None\n    # Define arm segments\n    if arm_config is None:\n        arm_config = [1.5, 1.0]  # Two-segment arm for minimal mass and complexity\n    for i, length in enumerate(arm_config):\n        center_x = current_x + (length / 2.0) * math.cos(initial_angle)\n        center_y = current_y + (length / 2.0) * math.sin(initial_angle)\n        body = sandbox.add_beam(center_x, center_y, length, 0.2, angle=initial_angle, density=beam_density)\n        if i == 0:\n            arm_joint = sandbox.add_revolute_joint(\n                prev_body,\n                body,\n                prev_anchor,\n                enable_motor=True,\n                max_motor_torque=torque,\n            )\n        else:\n            sandbox.add_joint(prev_body, body, (current_x, current_y))\n        prev_body = body\n        current_x += length * math.cos(initial_angle)\n        current_y += length * math.sin(initial_angle)\n    # Add scoop with reduced size and density\n    scoop_w, scoop_h = 1.0, 0.5\n    scoop = sandbox.add_scoop(current_x, current_y, scoop_w, scoop_h, angle=initial_angle, density=scoop_density)\n    bucket_joint = sandbox.add_revolute_joint(\n        prev_body,\n        scoop,\n        (current_x, current_y),\n        enable_motor=True,\n        max_motor_torque=bucket_torque,\n    )\n    return {\n        \"body\": scoop,\n        \"arm_joint\": arm_joint,\n        \"bucket_joint\": bucket_joint,\n    }\n\ndef _control_components(agent_components):\n    if not isinstance(agent_components, dict):\n        return None, None, None\n    return (\n        agent_components.get(\"body\"),\n        agent_components.get(\"arm_joint\"),\n        agent_components.get(\"bucket_joint\"),\n    )\n\ndef build_agent(sandbox):\n    return _build_agent_internal(sandbox, torque=3000.0, arm_config=[1.5, 1.0], beam_density=10.0, scoop_density=10.0)\n\ndef agent_action(sandbox, agent_body, step_count):\n    scoop, _aj, _bj = _control_components(agent_body)\n    if scoop is None or not _aj or not _bj:\n        return\n    dt = 1.0 / 60.0\n    t = step_count * dt\n    phase_duration = 10.0\n    phase = (t % phase_duration) / phase_duration\n    arm_angle = _aj.angle\n    bucket_world_angle = scoop.angle\n    if phase < 0.3:\n        ta, tb = -0.2, 0.5\n    elif phase < 0.5:\n        ta, tb = 0.0, 0.0\n    elif phase < 0.8:\n        ta, tb = 2.4, 0.0\n    elif phase < 0.9:\n        ta, tb = 2.4, 1.2\n    else:\n        ta, tb = 0.5, 1.2\n    _aj.motorSpeed = 1.0 * (ta - arm_angle)\n    _bj.motorSpeed = 3.0 * (tb - bucket_world_angle)\n    _aj.motorEnabled = True\n    _bj.motorEnabled = True",
+      "code_sha256": "905cfc1f440d7ba84def99d89164bd35293da93914788094ac3eecbe0940a46a",
+      "constraints": {
+        "count": 0,
+        "violated": false,
+        "violations": []
+      },
+      "generation": {
+        "latency_seconds": 78.34457202628255,
+        "model": "Qwen3-8B",
+        "token_usage": {
+          "completion_tokens": 5023,
+          "prompt_tokens": 6453,
+          "total_tokens": 11476
+        }
+      },
+      "outcome": {
+        "category": "simulation_failure",
+        "failure_reason": "Deposited 0/200 particles (need at least 15 in hopper)"
+      },
+      "phase": "revision",
+      "physics": {
+        "structure_broken": false
+      },
+      "score": 0.0,
+      "step_count": 2400,
+      "success": false,
+      "timestamp": 1785726839.2785153,
+      "verification_seconds": 3.0384693909436464
+    },
+    {
+      "artifacts": [],
+      "attempt": 2,
+      "code": "import math\n\ndef build_agent(sandbox):\n    # Add base anchored at x=-2.0, y=0.0\n    base = sandbox.add_anchored_base(-2.0, 0.0, 0.4, 0.4, angle=0, density=10.0)\n    prev_body = base\n    prev_anchor = (-2.0, 0.0)\n    current_x, current_y = -2.0, 0.0\n    arm_joint = None\n\n    # Define arm segments\n    arm_config = [1.5, 1.0]  # Two-segment arm for minimal mass and complexity\n    initial_angle = -math.pi / 2  # Start arm pointing downward\n\n    for i, length in enumerate(arm_config):\n        center_x = current_x + (length / 2.0) * math.cos(initial_angle)\n        center_y = current_y + (length / 2.0) * math.sin(initial_angle)\n        body = sandbox.add_beam(center_x, center_y, length, 0.2, angle=initial_angle, density=10.0)\n        if i == 0:\n            arm_joint = sandbox.add_revolute_joint(\n                prev_body,\n                body,\n                prev_anchor,\n                enable_motor=True,\n                max_motor_torque=3000.0,\n            )\n        else:\n            sandbox.add_joint(prev_body, body, (current_x, current_y))\n        prev_body = body\n        current_x += length * math.cos(initial_angle)\n        current_y += length * math.sin(initial_angle)\n\n    # Add scoop\n    scoop_w, scoop_h = 1.0, 0.5\n    scoop = sandbox.add_scoop(current_x, current_y, scoop_w, scoop_h, angle=initial_angle, density=10.0)\n    bucket_joint = sandbox.add_revolute_joint(\n        prev_body,\n        scoop,\n        (current_x, current_y),\n        enable_motor=True,\n        max_motor_torque=3000.0,\n    )\n    return {\n        \"body\": scoop,\n        \"arm_joint\": arm_joint,\n        \"bucket_joint\": bucket_joint,\n    }\n\ndef _control_components(agent_components):\n    if not isinstance(agent_components, dict):\n        return None, None, None\n    return (\n        agent_components.get(\"body\"),\n        agent_components.get(\"arm_joint\"),\n        agent_components.get(\"bucket_joint\"),\n    )\n\ndef agent_action(sandbox, agent_body, step_count):\n    scoop, arm_joint, bucket_joint = _control_components(agent_body)\n    if scoop is None or not arm_joint or not bucket_joint:\n        return\n    dt = 1.0 / 60.0\n    t = step_count * dt\n    phase_duration = 10.0\n    phase = (t % phase_duration) / phase_duration\n\n    if phase < 0.3:\n        # Phase 0–0.3: Swing arm to position scoop at x < -1.0\n        arm_target_angle = -math.pi / 2 + 1.0 * (phase * 2.0)  # Swing arm upward\n        bucket_target_angle = 0.0\n    elif phase < 0.5:\n        # Phase 0.3–0.5: Lift scoop over wall\n        arm_target_angle = -math.pi / 2 + 1.0  # Final arm angle\n        bucket_target_angle = 0.5\n    elif phase < 0.8:\n        # Phase 0.5–0.8: Lift bucket to clear wall\n        arm_target_angle = -math.pi / 2 + 1.0\n        bucket_target_angle = 1.5\n    else:\n        # Phase 0.8–1.0: Dump particles into hopper\n        arm_target_angle = -math.pi / 2 + 1.0\n        bucket_target_angle = 2.0\n\n    arm_joint.motorSpeed = 1.0 * (arm_target_angle - arm_joint.angle)\n    bucket_joint.motorSpeed = 3.0 * (bucket_target_angle - bucket_joint.angle)\n    arm_joint.motorEnabled = True\n    bucket_joint.motorEnabled = True",
+      "code_sha256": "efed66e63f36f459d220ffde44504e874ab7a12c3ed4c378632f4c34ca73225e",
+      "constraints": {
+        "count": 3,
+        "violated": true,
+        "violations": [
+          "Component at (-2.00, -0.75) outside build zone x=[-4.0, 2.0], y=[0.0, 5.0]",
+          "Component at (-2.00, -2.00) outside build zone x=[-4.0, 2.0], y=[0.0, 5.0]",
+          "Component at (-2.00, -2.50) outside build zone x=[-4.0, 2.0], y=[0.0, 5.0]"
+        ]
+      },
+      "generation": {
+        "latency_seconds": 82.38673890568316,
+        "model": "Qwen3-8B",
+        "token_usage": {
+          "completion_tokens": 5034,
+          "prompt_tokens": 6806,
+          "total_tokens": 11840
+        }
+      },
+      "outcome": {
+        "category": "constraint_violation",
+        "failure_reason": "Design constraint violated: Component at (-2.00, -0.75) outside build zone x=[-4.0, 2.0], y=[0.0, 5.0]; Component at (-2.00, -2.00) outside build zone x=[-4.0, 2.0], y=[0.0, 5.0]; Component at (-2.00, -2.50) outside build zone x=[-4.0, 2.0], y=[0.0, 5.0]"
+      },
+      "phase": "revision",
+      "physics": {
+        "structure_broken": false
+      },
+      "score": -33.333333333333336,
+      "step_count": 0,
+      "success": false,
+      "timestamp": 1785726934.8914385,
+      "verification_seconds": 0.04459540545940399
+    },
+    {
+      "artifacts": [],
+      "attempt": 3,
+      "code": "import math\n\ndef build_agent(sandbox):\n    # Add base anchored at x=-2.0, y=0.0\n    base = sandbox.add_anchored_base(-2.0, 0.0, 0.4, 0.4, angle=0, density=10.0)\n    prev_body = base\n    prev_anchor = (-2.0, 0.0)\n    current_x, current_y = -2.0, 0.0\n    arm_joint = None\n\n    # Define arm segments\n    arm_config = [1.5, 1.0]  # Two-segment arm for minimal mass and complexity\n    initial_angle = math.pi / 2  # Start arm pointing upward\n\n    for i, length in enumerate(arm_config):\n        center_x = current_x + (length / 2.0) * math.cos(initial_angle)\n        center_y = current_y + (length / 2.0) * math.sin(initial_angle)\n        body = sandbox.add_beam(center_x, center_y, length, 0.2, angle=initial_angle, density=10.0)\n        if i == 0:\n            arm_joint = sandbox.add_revolute_joint(\n                prev_body,\n                body,\n                prev_anchor,\n                enable_motor=True,\n                max_motor_torque=3000.0,\n            )\n        else:\n            sandbox.add_joint(prev_body, body, (current_x, current_y))\n        prev_body = body\n        current_x += length * math.cos(initial_angle)\n        current_y += length * math.sin(initial_angle)\n\n    # Add scoop with reduced size and density\n    scoop_w, scoop_h = 1.0, 0.5\n    scoop = sandbox.add_scoop(current_x, current_y, scoop_w, scoop_h, angle=initial_angle, density=10.0)\n    bucket_joint = sandbox.add_revolute_joint(\n        prev_body,\n        scoop,\n        (current_x, current_y),\n        enable_motor=True,\n        max_motor_torque=3000.0,\n    )\n    return {\n        \"body\": scoop,\n        \"arm_joint\": arm_joint,\n        \"bucket_joint\": bucket_joint,\n    }\n\ndef _control_components(agent_components):\n    if not isinstance(agent_components, dict):\n        return None, None, None\n    return (\n        agent_components.get(\"body\"),\n        agent_components.get(\"arm_joint\"),\n        agent_components.get(\"bucket_joint\"),\n    )\n\ndef agent_action(sandbox, agent_body, step_count):\n    scoop, arm_joint, bucket_joint = _control_components(agent_body)\n    if scoop is None or not arm_joint or not bucket_joint:\n        return\n    dt = 1.0 / 60.0\n    t = step_count * dt\n    phase_duration = 10.0\n    phase = (t % phase_duration) / phase_duration\n\n    if phase < 0.3:\n        # Phase 0–0.3: Swing arm to position scoop at x < -1.0\n        arm_target_angle = math.pi / 2 - 1.5  # Swing arm left to position over wall\n        bucket_target_angle = 0.0\n    elif phase < 0.5:\n        # Phase 0.3–0.5: Lift scoop over wall\n        arm_target_angle = math.pi / 2 - 1.5\n        bucket_target_angle = 1.5  # Lift scoop to clear wall\n    elif phase < 0.8:\n        # Phase 0.5–0.8: Move scoop to hopper position\n        arm_target_angle = math.pi / 2 - 1.5\n        bucket_target_angle = 2.5  # Raise scoop to dump position\n    else:\n        # Phase 0.8–1.0: Dump particles into hopper\n        arm_target_angle = math.pi / 2 - 1.5\n        bucket_target_angle = 3.0  # Rotate scoop downward to dump\n\n    arm_joint.motorSpeed = 1.0 * (arm_target_angle - arm_joint.angle)\n    bucket_joint.motorSpeed = 3.0 * (bucket_target_angle - bucket_joint.angle)\n    arm_joint.motorEnabled = True\n    bucket_joint.motorEnabled = True",
+      "code_sha256": "e755b9a20c17e1fa97090590b7eab91305e82861c4af7dde71fcb7085ba434ff",
+      "constraints": {
+        "count": 0,
+        "violated": false,
+        "violations": []
+      },
+      "generation": {
+        "latency_seconds": 168.82922648265958,
+        "model": "Qwen3-8B",
+        "token_usage": {
+          "completion_tokens": 9575,
+          "prompt_tokens": 8622,
+          "total_tokens": 18197
+        }
+      },
+      "outcome": {
+        "category": "simulation_failure",
+        "failure_reason": "Deposited 0/200 particles (need at least 15 in hopper)"
+      },
+      "phase": "revision",
+      "physics": {
+        "structure_broken": false
+      },
+      "score": 0.0,
+      "step_count": 2400,
+      "success": false,
+      "timestamp": 1785727131.003079,
+      "verification_seconds": 2.706260135397315
+    },
+    {
+      "artifacts": [],
+      "attempt": 4,
+      "code": "import math\n\ndef build_agent(sandbox):\n    # Add base anchored at x=-2.0, y=0.0\n    base = sandbox.add_anchored_base(-2.0, 0.0, 0.4, 0.4, angle=0, density=10.0)\n    prev_body = base\n    prev_anchor = (-2.0, 0.0)\n    current_x, current_y = -2.0, 0.0\n    arm_joint = None\n\n    # Define arm segments with increased reach and optimized mass\n    arm_config = [1.5, 1.0, 0.5]  # Three-segment arm for extended reach\n    initial_angle = math.pi / 2  # Start arm pointing upward to stay within build zone\n\n    for i, length in enumerate(arm_config):\n        center_x = current_x + (length / 2.0) * math.cos(initial_angle)\n        center_y = current_y + (length / 2.0) * math.sin(initial_angle)\n        body = sandbox.add_beam(center_x, center_y, length, 0.2, angle=initial_angle, density=10.0)\n        if i == 0:\n            arm_joint = sandbox.add_revolute_joint(\n                prev_body,\n                body,\n                prev_anchor,\n                enable_motor=True,\n                max_motor_torque=3000.0,\n            )\n        else:\n            sandbox.add_joint(prev_body, body, (current_x, current_y))\n        prev_body = body\n        current_x += length * math.cos(initial_angle)\n        current_y += length * math.sin(initial_angle)\n\n    # Add larger scoop with optimal dimensions for particle capture\n    scoop_w, scoop_h = 2.0, 1.0  # Increased size for better particle retention\n    scoop = sandbox.add_scoop(current_x, current_y, scoop_w, scoop_h, angle=initial_angle, density=10.0)\n    bucket_joint = sandbox.add_revolute_joint(\n        prev_body,\n        scoop,\n        (current_x, current_y),\n        enable_motor=True,\n        max_motor_torque=3000.0,\n    )\n    return {\n        \"body\": scoop,\n        \"arm_joint\": arm_joint,\n        \"bucket_joint\": bucket_joint,\n    }\n\ndef _control_components(agent_components):\n    if not isinstance(agent_components, dict):\n        return None, None, None\n    return (\n        agent_components.get(\"body\"),\n        agent_components.get(\"arm_joint\"),\n        agent_components.get(\"bucket_joint\"),\n    )\n\ndef agent_action(sandbox, agent_body, step_count):\n    scoop, arm_joint, bucket_joint = _control_components(agent_body)\n    if scoop is None or not arm_joint or not bucket_joint:\n        return\n    dt = 1.0 / 60.0\n    t = step_count * dt\n    phase_duration = 10.0\n    phase = (t % phase_duration) / phase_duration\n\n    if phase < 0.3:\n        # Phase 0–0.3: Swing arm to position scoop at x < -1.0\n        arm_target_angle = math.pi / 2 - 1.5  # Swing arm left to position over wall\n        bucket_target_angle = 0.0\n    elif phase < 0.5:\n        # Phase 0.3–0.5: Lift scoop over wall\n        arm_target_angle = math.pi / 2 - 1.5\n        bucket_target_angle = 1.5  # Lift scoop to clear wall\n    elif phase < 0.8:\n        # Phase 0.5–0.8: Move scoop to hopper position (x=-5.0)\n        arm_target_angle = math.pi / 2 - 2.0  # Extend arm fully to reach hopper\n        bucket_target_angle = 2.5  # Raise scoop to dump position\n    else:\n        # Phase 0.8–1.0: Dump particles into hopper\n        arm_target_angle = math.pi / 2 - 2.0  # Maintain arm position\n        bucket_target_angle = 3.0  # Rotate scoop downward to dump\n\n    arm_joint.motorSpeed = 1.0 * (arm_target_angle - arm_joint.angle)\n    bucket_joint.motorSpeed = 3.0 * (bucket_target_angle - bucket_joint.angle)\n    arm_joint.motorEnabled = True\n    bucket_joint.motorEnabled = True",
+      "code_sha256": "82ef986645f7bd9d379cb7c9b7295d2aea29e51949f30d786ea1e8c121097c93",
+      "constraints": {
+        "count": 0,
+        "violated": false,
+        "violations": []
+      },
+      "generation": {
+        "latency_seconds": 104.79471070319414,
+        "model": "Qwen3-8B",
+        "token_usage": {
+          "completion_tokens": 5855,
+          "prompt_tokens": 8456,
+          "total_tokens": 14311
+        }
+      },
+      "outcome": {
+        "category": "simulation_failure",
+        "failure_reason": "Deposited 0/200 particles (need at least 15 in hopper)"
+      },
+      "phase": "revision",
+      "physics": {
+        "structure_broken": false
+      },
+      "score": 0.0,
+      "step_count": 2400,
+      "success": false,
+      "timestamp": 1785727254.4328747,
+      "verification_seconds": 2.794738421216607
+    },
+    {
+      "artifacts": [],
+      "attempt": 5,
+      "code": "import math\n\ndef build_agent(sandbox):\n    # Add base anchored at x=-2.0, y=0.0 with minimal mass\n    base = sandbox.add_anchored_base(-2.0, 0.0, 0.4, 0.4, angle=0, density=10.0)\n    prev_body = base\n    prev_anchor = (-2.0, 0.0)\n    current_x, current_y = -2.0, 0.0\n    arm_joint = None\n    \n    # Two-segment arm with total length 3.0 m for pit reach and hopper access\n    arm_config = [1.5, 1.5]  # Lengths of arm segments\n    initial_angle = math.pi / 2  # Start arm pointing upward to stay within build zone\n    \n    for i, length in enumerate(arm_config):\n        center_x = current_x + (length / 2.0) * math.cos(initial_angle)\n        center_y = current_y + (length / 2.0) * math.sin(initial_angle)\n        body = sandbox.add_beam(center_x, center_y, length, 0.2, angle=initial_angle, density=10.0)\n        if i == 0:\n            arm_joint = sandbox.add_revolute_joint(\n                prev_body,\n                body,\n                prev_anchor,\n                enable_motor=True,\n                max_motor_torque=3000.0,\n            )\n        else:\n            sandbox.add_joint(prev_body, body, (current_x, current_y))\n        prev_body = body\n        current_x += length * math.cos(initial_angle)\n        current_y += length * math.sin(initial_angle)\n    \n    # Scoop with optimized dimensions for particle retention and mass\n    scoop_w, scoop_h = 1.0, 0.5  # Width and height for sufficient capacity without excess mass\n    scoop = sandbox.add_scoop(current_x, current_y, scoop_w, scoop_h, angle=initial_angle, density=10.0)\n    bucket_joint = sandbox.add_revolute_joint(\n        prev_body,\n        scoop,\n        (current_x, current_y),\n        enable_motor=True,\n        max_motor_torque=3000.0,\n    )\n    return {\n        \"body\": scoop,\n        \"arm_joint\": arm_joint,\n        \"bucket_joint\": bucket_joint,\n    }\n\ndef agent_action(sandbox, agent_body, step_count):\n    scoop, arm_joint, bucket_joint = _control_components(agent_body)\n    if scoop is None or not arm_joint or not bucket_joint:\n        return\n    dt = 1.0 / 60.0\n    t = step_count * dt\n    phase_duration = 10.0\n    phase = (t % phase_duration) / phase_duration\n    \n    # Phase 0–0.3: Swing arm to right to reach pit\n    if phase < 0.3:\n        arm_target_angle = math.pi / 2 - 1.5  # Swing arm to right (0 radians)\n        bucket_target_angle = 0.0  # Scoop horizontal to collect particles\n    # Phase 0.3–0.5: Lift scoop over wall\n    elif phase < 0.5:\n        arm_target_angle = 0.0  # Maintain arm position\n        bucket_target_angle = 1.5  # Lift scoop to clear wall\n    # Phase 0.5–0.8: Swing arm to left over wall to hopper\n    elif phase < 0.8:\n        arm_target_angle = math.pi / 2 + 1.5  # Swing arm to left (π radians)\n        bucket_target_angle = 2.0  # Position scoop over wall\n    # Phase 0.8–1.0: Dump particles into hopper\n    else:\n        arm_target_angle = math.pi  # Maintain arm position at hopper\n        bucket_target_angle = 2.5  # Rotate scoop downward to dump\n    \n    arm_joint.motorSpeed = 1.0 * (arm_target_angle - arm_joint.angle)\n    bucket_joint.motorSpeed = 3.0 * (bucket_target_angle - bucket_joint.angle)\n    arm_joint.motorEnabled = True\n    bucket_joint.motorEnabled = True\n\ndef _control_components(agent_components):\n    if not isinstance(agent_components, dict):\n        return None, None, None\n    return (\n        agent_components.get(\"body\"),\n        agent_components.get(\"arm_joint\"),\n        agent_components.get(\"bucket_joint\"),\n    )",
+      "code_sha256": "ff034ba6a449b7238159679fe0a7002f6404f03126443bd9252ce634b209d95d",
+      "constraints": {
+        "count": 0,
+        "violated": false,
+        "violations": []
+      },
+      "generation": {
+        "latency_seconds": 121.46041381545365,
+        "model": "Qwen3-8B",
+        "token_usage": {
+          "completion_tokens": 6954,
+          "prompt_tokens": 8529,
+          "total_tokens": 15483
+        }
+      },
+      "outcome": {
+        "category": "simulation_failure",
+        "failure_reason": "Deposited 0/200 particles (need at least 15 in hopper)"
+      },
+      "phase": "revision",
+      "physics": {
+        "structure_broken": false
+      },
+      "score": 0.0,
+      "step_count": 2400,
+      "success": false,
+      "timestamp": 1785727440.6350193,
+      "verification_seconds": 2.485236583277583
+    },
+    {
+      "artifacts": [],
+      "attempt": 6,
+      "code": "import math\n\ndef build_agent(sandbox):\n    # Add base anchored at x=-2.0, y=0.0 with minimal mass\n    base = sandbox.add_anchored_base(-2.0, 0.0, 0.4, 0.4, angle=0, density=10.0)\n    prev_body = base\n    prev_anchor = (-2.0, 0.0)\n    current_x, current_y = -2.0, 0.0\n    arm_joint = None\n    \n    # Two-segment arm with total length 3.0 m for pit reach and hopper access\n    arm_config = [1.5, 1.5]  # Lengths of arm segments\n    initial_angle = 0.0  # Start arm pointing right to reach pit\n    \n    for i, length in enumerate(arm_config):\n        center_x = current_x + (length / 2.0) * math.cos(initial_angle)\n        center_y = current_y + (length / 2.0) * math.sin(initial_angle)\n        body = sandbox.add_beam(center_x, center_y, length, 0.2, angle=initial_angle, density=10.0)\n        if i == 0:\n            arm_joint = sandbox.add_revolute_joint(\n                prev_body,\n                body,\n                prev_anchor,\n                enable_motor=True,\n                max_motor_torque=3000.0,\n            )\n        else:\n            sandbox.add_joint(prev_body, body, (current_x, current_y))\n        prev_body = body\n        current_x += length * math.cos(initial_angle)\n        current_y += length * math.sin(initial_angle)\n    \n    # Scoop with optimized dimensions for particle retention and mass\n    scoop_w, scoop_h = 1.5, 0.6  # Width and height for sufficient capacity without excess mass\n    scoop = sandbox.add_scoop(current_x, current_y, scoop_w, scoop_h, angle=initial_angle, density=10.0)\n    bucket_joint = sandbox.add_revolute_joint(\n        prev_body,\n        scoop,\n        (current_x, current_y),\n        enable_motor=True,\n        max_motor_torque=3000.0,\n    )\n    return {\n        \"body\": scoop,\n        \"arm_joint\": arm_joint,\n        \"bucket_joint\": bucket_joint,\n    }\n\ndef agent_action(sandbox, agent_body, step_count):\n    scoop, arm_joint, bucket_joint = _control_components(agent_body)\n    if scoop is None or not arm_joint or not bucket_joint:\n        return\n    dt = 1.0 / 60.0\n    t = step_count * dt\n    phase_duration = 10.0\n    phase = (t % phase_duration) / phase_duration\n    \n    # Phase 0–0.3: Swing arm to right to reach pit\n    if phase < 0.3:\n        arm_target_angle = 0.0  # Arm horizontal to reach pit\n        bucket_target_angle = 0.0  # Scoop horizontal to collect particles\n    # Phase 0.3–0.5: Lift scoop over wall\n    elif phase < 0.5:\n        arm_target_angle = 0.0  # Maintain arm position\n        bucket_target_angle = 1.5  # Lift scoop to clear wall\n    # Phase 0.5–0.8: Swing arm to left over wall to hopper\n    elif phase < 0.8:\n        arm_target_angle = -1.5  # Swing arm left to reach hopper\n        bucket_target_angle = 2.0  # Position scoop over wall\n    # Phase 0.8–1.0: Dump particles into hopper\n    else:\n        arm_target_angle = -1.5  # Maintain arm position at hopper\n        bucket_target_angle = 2.5  # Rotate scoop downward to dump\n    \n    arm_joint.motorSpeed = 1.0 * (arm_target_angle - arm_joint.angle)\n    bucket_joint.motorSpeed = 3.0 * (bucket_target_angle - bucket_joint.angle)\n    arm_joint.motorEnabled = True\n    bucket_joint.motorEnabled = True\n\ndef _control_components(agent_components):\n    if not isinstance(agent_components, dict):\n        return None, None, None\n    return (\n        agent_components.get(\"body\"),\n        agent_components.get(\"arm_joint\"),\n        agent_components.get(\"bucket_joint\"),\n    )",
+      "code_sha256": "082baa4a4ef5329706810586e1f2511be5e6589b357484886ef8df7fc5611d10",
+      "constraints": {
+        "count": 0,
+        "violated": false,
+        "violations": []
+      },
+      "generation": {
+        "latency_seconds": 97.36196929588914,
+        "model": "Qwen3-8B",
+        "token_usage": {
+          "completion_tokens": 5573,
+          "prompt_tokens": 8632,
+          "total_tokens": 14205
+        }
+      },
+      "outcome": {
+        "category": "simulation_failure",
+        "failure_reason": "Deposited 0/200 particles (need at least 15 in hopper)"
+      },
+      "phase": "revision",
+      "physics": {
+        "structure_broken": false
+      },
+      "score": 0.0,
+      "step_count": 2400,
+      "success": false,
+      "timestamp": 1785727569.2464018,
+      "verification_seconds": 3.3457477670162916
+    },
+    {
+      "artifacts": [],
+      "attempt": 7,
+      "code": "import math\n\ndef build_agent(sandbox):\n    # Add base anchored at x=-2.0, y=0.0 with minimal mass\n    base = sandbox.add_anchored_base(-2.0, 0.0, 0.4, 0.4, angle=0, density=10.0)\n    # Create a single arm segment of 3.5 m length with reduced density\n    arm_length = 3.5\n    arm_width = 0.2\n    arm_height = 0.2\n    arm_density = 200.0  # kg/m³ to keep mass under 30 kg\n    arm = sandbox.add_beam(-2.0, 0.0, arm_length, arm_width, angle=0, density=arm_density)\n    # Add revolute joint to rotate the arm\n    arm_joint = sandbox.add_revolute_joint(\n        base,\n        arm,\n        (-2.0, 0.0),\n        enable_motor=True,\n        max_motor_torque=3000.0,\n    )\n    # Add scoop with optimized dimensions and density\n    scoop_width = 0.4\n    scoop_height = 0.2\n    scoop_density = 5.0  # kg/m³ to minimize mass\n    # Position scoop at end of arm\n    scoop = sandbox.add_scoop(arm.position[0] + arm_length / 2 * math.cos(0), \n                              arm.position[1] + arm_length / 2 * math.sin(0), \n                              scoop_width, scoop_height, angle=0, density=scoop_density)\n    # Add revolute joint for bucket control\n    bucket_joint = sandbox.add_revolute_joint(\n        arm,\n        scoop,\n        (arm.position[0] + arm_length / 2 * math.cos(0), \n         arm.position[1] + arm_length / 2 * math.sin(0)),\n        enable_motor=True,\n        max_motor_torque=3000.0,\n    )\n    return {\n        \"body\": scoop,\n        \"arm_joint\": arm_joint,\n        \"bucket_joint\": bucket_joint,\n    }\n\ndef agent_action(sandbox, agent_body, step_count):\n    scoop, arm_joint, bucket_joint = _control_components(agent_body)\n    if scoop is None or not arm_joint or not bucket_joint:\n        return\n    dt = 1.0 / 60.0\n    t = step_count * dt\n    phase_duration = 10.0\n    phase = (t % phase_duration) / phase_duration\n    \n    # Phase 0–0.3: Swing arm to right to reach pit\n    if phase < 0.3:\n        arm_target_angle = 0.0  # Arm horizontal to reach pit\n        bucket_target_angle = 0.0  # Scoop horizontal to collect particles\n    # Phase 0.3–0.5: Lift scoop over wall\n    elif phase < 0.5:\n        arm_target_angle = 0.0  # Maintain arm position\n        bucket_target_angle = 1.5  # Lift scoop to clear wall\n    # Phase 0.5–0.8: Swing arm to left over wall to hopper\n    elif phase < 0.8:\n        arm_target_angle = -math.pi  # Swing arm fully left to reach hopper\n        bucket_target_angle = 2.0  # Position scoop over wall\n    # Phase 0.8–1.0: Dump particles into hopper\n    else:\n        arm_target_angle = -math.pi  # Maintain arm position at hopper\n        bucket_target_angle = 2.5  # Rotate scoop downward to dump\n    \n    arm_joint.motorSpeed = 1.0 * (arm_target_angle - arm_joint.angle)\n    bucket_joint.motorSpeed = 3.0 * (bucket_target_angle - bucket_joint.angle)\n    arm_joint.motorEnabled = True\n    bucket_joint.motorEnabled = True\n\ndef _control_components(agent_components):\n    if not isinstance(agent_components, dict):\n        return None, None, None\n    return (\n        agent_components.get(\"body\"),\n        agent_components.get(\"arm_joint\"),\n        agent_components.get(\"bucket_joint\"),\n    )",
+      "code_sha256": "5a15ae8ba5075890969ad9267c6152a3fba1846abef456946f955c60e0ad20a9",
+      "constraints": {
+        "count": 1,
+        "violated": true,
+        "violations": [
+          "Structure mass 61.80 kg exceeds maximum 30.0 kg"
+        ]
+      },
+      "generation": {
+        "latency_seconds": 122.96639322675765,
+        "model": "Qwen3-8B",
+        "token_usage": {
+          "completion_tokens": 8975,
+          "prompt_tokens": 8746,
+          "total_tokens": 17721
+        }
+      },
+      "outcome": {
+        "category": "constraint_violation",
+        "failure_reason": "Design constraint violated: Structure mass 61.80 kg exceeds maximum 30.0 kg"
+      },
+      "phase": "revision",
+      "physics": {
+        "structure_broken": false
+      },
+      "score": -50.0,
+      "step_count": 0,
+      "success": false,
+      "timestamp": 1785727731.6860375,
+      "verification_seconds": 0.04143928177654743
+    },
+    {
+      "artifacts": [],
+      "attempt": 8,
+      "code": "def _build_agent_internal(sandbox, torque=3000.0, arm_config=None, initial_angle=0.0, beam_density=10.0, scoop_density=5.0, bucket_torque=None):\n    if bucket_torque is None:\n        bucket_torque = torque\n    # Add base anchored at x=-2.0, y=0.0\n    base = sandbox.add_anchored_base(-2.0, 0.0, 0.4, 0.4, angle=0, density=10.0)\n    prev_body = base\n    prev_anchor = (-2.0, 0.0)\n    current_x, current_y = -2.0, 0.0\n    arm_joint = None\n    # Define arm segments\n    if arm_config is None:\n        arm_config = [3.2]  # Single arm segment for optimized mass and reach\n    for i, length in enumerate(arm_config):\n        center_x = current_x + (length / 2.0) * math.cos(initial_angle)\n        center_y = current_y + (length / 2.0) * math.sin(initial_angle)\n        body = sandbox.add_beam(center_x, center_y, length, 0.2, angle=initial_angle, density=beam_density)\n        if i == 0:\n            arm_joint = sandbox.add_revolute_joint(\n                prev_body,\n                body,\n                prev_anchor,\n                enable_motor=True,\n                max_motor_torque=torque,\n            )\n        else:\n            sandbox.add_joint(prev_body, body, (current_x, current_y))\n        prev_body = body\n        current_x += length * math.cos(initial_angle)\n        current_y += length * math.sin(initial_angle)\n    # Add scoop with optimized dimensions and density\n    scoop_w, scoop_h = 0.5, 0.3\n    scoop = sandbox.add_scoop(current_x, current_y, scoop_w, scoop_h, angle=initial_angle, density=scoop_density)\n    bucket_joint = sandbox.add_revolute_joint(\n        prev_body,\n        scoop,\n        (current_x, current_y),\n        enable_motor=True,\n        max_motor_torque=bucket_torque,\n    )\n    return {\n        \"body\": scoop,\n        \"arm_joint\": arm_joint,\n        \"bucket_joint\": bucket_joint,\n    }\n\ndef _control_components(agent_components):\n    if not isinstance(agent_components, dict):\n        return None, None, None\n    return (\n        agent_components.get(\"body\"),\n        agent_components.get(\"arm_joint\"),\n        agent_components.get(\"bucket_joint\"),\n    )\n\ndef build_agent(sandbox):\n    return _build_agent_internal(sandbox, torque=3000.0, arm_config=[3.2], initial_angle=math.acos(2.0 / 3.2))\n\ndef agent_action(sandbox, agent_body, step_count):\n    scoop, arm_joint, bucket_joint = _control_components(agent_body)\n    if scoop is None or not arm_joint or not bucket_joint:\n        return\n    dt = 1.0 / 60.0\n    t = step_count * dt\n    phase_duration = 10.0\n    phase = (t % phase_duration) / phase_duration\n\n    # Retrieve arm length from agent_components\n    arm_length = 3.2  # Hardcoded for simplicity\n\n    # Phase 0–0.3: Position scoop in pit\n    if phase < 0.3:\n        arm_target_angle = math.acos(2.0 / arm_length)  # Already in correct position\n        bucket_target_angle = 0.0  # Scoop horizontal to collect\n    # Phase 0.3–0.5: Lift scoop over wall\n    elif phase < 0.5:\n        arm_target_angle = math.acos(2.0 / arm_length)  # Maintain arm position\n        bucket_target_angle = 2.0  # Lift to clear wall\n    # Phase 0.5–0.8: Swing arm to left over wall to hopper\n    elif phase < 0.8:\n        # Calculate angle to reach x=-5.0\n        target_x = -5.0\n        cos_theta = (target_x + 2.0) / arm_length\n        arm_target_angle = math.acos(cos_theta) if cos_theta <= 1 else 0\n        bucket_target_angle = 2.0  # Maintain elevated angle\n    # Phase 0.8–1.0: Lower scoop to dump\n    else:\n        arm_target_angle = math.acos((-5.0 + 2.0) / arm_length)  # Maintain arm position\n        bucket_target_angle = 0.0  # Lower scoop to dump\n\n    # Update motor speeds\n    arm_joint.motorSpeed = 1.0 * (arm_target_angle - arm_joint.angle)\n    bucket_joint.motorSpeed = 3.0 * (bucket_target_angle - bucket_joint.angle)\n    arm_joint.motorEnabled = True\n    bucket_joint.motorEnabled = True",
+      "code_sha256": "dbd628403221692bfa8660d024f3af4ccbb7c9850296cdbbbad493d235f57c26",
+      "constraints": {
+        "count": 0,
+        "violated": false,
+        "violations": []
+      },
+      "generation": {
+        "latency_seconds": 174.57506879791617,
+        "model": "Qwen3-8B",
+        "token_usage": {
+          "completion_tokens": 10145,
+          "prompt_tokens": 8508,
+          "total_tokens": 18653
+        }
+      },
+      "outcome": {
+        "category": "construction_error",
+        "error": "Error building agent: name 'math' is not defined",
+        "error_message": "name 'math' is not defined",
+        "error_stage": "agent_construction",
+        "error_type": "agent_building_error"
+      },
+      "phase": "revision",
+      "physics": {},
+      "score": 0.0,
+      "step_count": null,
+      "success": false,
+      "timestamp": 1785727924.8311706,
+      "verification_seconds": 0.007919978350400925
+    },
+    {
+      "artifacts": [],
+      "attempt": 9,
+      "code": "import math\n\ndef build_agent(sandbox):\n    # Add anchored base at x=-2.0, y=0.0\n    base = sandbox.add_anchored_base(-2.0, 0.0, 0.4, 0.4, angle=0, density=10.0)\n    \n    # Add arm segment (4.0 m length, 0.2 m width, 0.2 m height)\n    arm_length = 4.0\n    arm_width = 0.2\n    arm_height = 0.2\n    arm_density = 10.0\n    arm_body = sandbox.add_beam(-2.0, 0.0, arm_length, arm_width, angle=0, density=arm_density)\n    \n    # Add revolute joint between base and arm\n    arm_joint = sandbox.add_revolute_joint(\n        base, arm_body, (-2.0, 0.0), enable_motor=True, max_motor_torque=3000.0\n    )\n    \n    # Add scoop (1.2 m width, 0.8 m height, 5 kg/m³ density)\n    scoop_width = 1.2\n    scoop_height = 0.8\n    scoop_density = 5.0\n    scoop = sandbox.add_scoop(2.0, 0.0, scoop_width, scoop_height, angle=0, density=scoop_density)\n    \n    # Add revolute joint between arm and scoop\n    bucket_joint = sandbox.add_revolute_joint(\n        arm_body, scoop, (2.0, 0.0), enable_motor=True, max_motor_torque=3000.0\n    )\n    \n    return {\n        \"body\": scoop,\n        \"arm_joint\": arm_joint,\n        \"bucket_joint\": bucket_joint,\n    }\n\ndef agent_action(sandbox, agent_body, step_count):\n    scoop, arm_joint, bucket_joint = _control_components(agent_body)\n    if scoop is None or not arm_joint or not bucket_joint:\n        return\n    dt = 1.0 / 60.0\n    t = step_count * dt\n    phase_duration = 10.0\n    phase = (t % phase_duration) / phase_duration\n\n    # Phase 0–0.3: Position scoop in pit and lower to collect\n    if phase < 0.3:\n        arm_target_angle = 0.0\n        bucket_target_angle = -1.0  # Lower scoop to collect\n    # Phase 0.3–0.5: Swing arm to clear wall (x=-2.0)\n    elif phase < 0.5:\n        target_x = -2.0\n        cos_theta = (target_x + 2.0) / 4.0\n        arm_target_angle = math.acos(cos_theta) if cos_theta <= 1 else 0\n        bucket_target_angle = 2.0  # Lift to clear wall\n    # Phase 0.5–0.8: Swing arm to hopper (x=-5.0)\n    elif phase < 0.8:\n        target_x = -5.0\n        cos_theta = (target_x + 2.0) / 4.0\n        arm_target_angle = math.acos(cos_theta) if cos_theta <= 1 else 0\n        bucket_target_angle = 2.0  # Maintain elevated angle\n    # Phase 0.8–1.0: Lower scoop to dump\n    else:\n        arm_target_angle = math.acos((-5.0 + 2.0) / 4.0)\n        bucket_target_angle = 0.0  # Lower scoop to dump\n\n    # Update motor speeds\n    arm_joint.motorSpeed = 1.0 * (arm_target_angle - arm_joint.angle)\n    bucket_joint.motorSpeed = 3.0 * (bucket_target_angle - bucket_joint.angle)\n    arm_joint.motorEnabled = True\n    bucket_joint.motorEnabled = True\n\ndef _control_components(agent_components):\n    if not isinstance(agent_components, dict):\n        return None, None, None\n    return (\n        agent_components.get(\"body\"),\n        agent_components.get(\"arm_joint\"),\n        agent_components.get(\"bucket_joint\"),\n    )",
+      "code_sha256": "930238d4aa881de9493decce544dcf4da00a4a1953036fa8cd18d0e8c4dbb12b",
+      "constraints": {
+        "count": 0,
+        "violated": false,
+        "violations": []
+      },
+      "generation": {
+        "latency_seconds": 131.68269046768546,
+        "model": "Qwen3-8B",
+        "token_usage": {
+          "completion_tokens": 9096,
+          "prompt_tokens": 8267,
+          "total_tokens": 17363
+        }
+      },
+      "outcome": {
+        "category": "simulation_failure",
+        "failure_reason": "Deposited 0/200 particles (need at least 15 in hopper)"
+      },
+      "phase": "revision",
+      "physics": {
+        "structure_broken": false
+      },
+      "score": 0.0,
+      "step_count": 2400,
+      "success": false,
+      "timestamp": 1785728128.8371685,
+      "verification_seconds": 3.3802890926599503
+    },
+    {
+      "artifacts": [],
+      "attempt": 10,
+      "code": "import math\n\ndef build_agent(sandbox):\n    # Add anchored base at x=-2.0, y=0.0\n    base = sandbox.add_anchored_base(-2.0, 0.0, 0.4, 0.4, angle=0, density=10.0)\n    \n    # Arm segments: two segments for better control and mass efficiency\n    arm_config = [1.5, 1.0]  # Total length: 2.5m\n    arm_density = 100.0  # kg/m³ (reduced from 200 to meet mass budget)\n    prev_body = base\n    prev_anchor = (-2.0, 0.0)\n    current_x, current_y = -2.0, 0.0\n    arm_joint = None\n    \n    # Add first arm segment\n    center_x = current_x + (arm_config[0] / 2.0) * math.cos(0)\n    center_y = current_y + (arm_config[0] / 2.0) * math.sin(0)\n    arm1 = sandbox.add_beam(center_x, center_y, arm_config[0], 0.2, angle=0, density=arm_density)\n    arm_joint = sandbox.add_revolute_joint(\n        prev_body,\n        arm1,\n        prev_anchor,\n        enable_motor=True,\n        max_motor_torque=3000.0\n    )\n    prev_body = arm1\n    current_x += arm_config[0] * math.cos(0)\n    current_y += arm_config[0] * math.sin(0)\n    \n    # Add second arm segment\n    center_x = current_x + (arm_config[1] / 2.0) * math.cos(0)\n    center_y = current_y + (arm_config[1] / 2.0) * math.sin(0)\n    arm2 = sandbox.add_beam(center_x, center_y, arm_config[1], 0.2, angle=0, density=arm_density)\n    sandbox.add_joint(prev_body, arm2, (current_x, current_y))\n    prev_body = arm2\n    current_x += arm_config[1] * math.cos(0)\n    current_y += arm_config[1] * math.sin(0)\n    \n    # Scoop dimensions optimized for mass and capacity\n    scoop_width = 0.3  # m\n    scoop_height = 0.15  # m\n    scoop_density = 5.0  # kg/m³\n    scoop = sandbox.add_scoop(current_x, current_y, scoop_width, scoop_height, angle=0, density=scoop_density)\n    \n    # Bucket joint for scoop control\n    bucket_joint = sandbox.add_revolute_joint(\n        prev_body,\n        scoop,\n        (current_x, current_y),\n        enable_motor=True,\n        max_motor_torque=3000.0\n    )\n    \n    return {\n        \"body\": scoop,\n        \"arm_joint\": arm_joint,\n        \"bucket_joint\": bucket_joint,\n    }\n\ndef agent_action(sandbox, agent_body, step_count):\n    scoop, arm_joint, bucket_joint = _control_components(agent_body)\n    if scoop is None or not arm_joint or not bucket_joint:\n        return\n    dt = 1.0 / 60.0\n    t = step_count * dt\n    phase_duration = 10.0\n    phase = (t % phase_duration) / phase_duration\n\n    # Phase 0–0.3: Position scoop in pit and lower to collect\n    if phase < 0.3:\n        # Arm angle to position scoop at x=2.0 (pit edge) and y=0.0 (pit bottom)\n        arm_target_angle = math.atan2(0.0, 2.0)  # 0 rad, but adjust for scoop depth\n        # Lower scoop below y=0.0 (pit bottom) by adjusting bucket angle\n        bucket_target_angle = -1.0  # Ensure scoop dips into pit\n    # Phase 0.3–0.5: Swing arm to clear wall (x=-2.0)\n    elif phase < 0.5:\n        target_x = -2.0  # Clear central wall\n        # Calculate arm angle based on arm length and target x\n        arm_length = 2.5  # Total arm length\n        cos_theta = (target_x + 2.0) / arm_length  # x = -2.0, arm base at x=-2.0\n        arm_target_angle = math.acos(cos_theta) if cos_theta <= 1 else 0\n        bucket_target_angle = 2.0  # Lift to clear wall\n    # Phase 0.5–0.8: Swing arm to hopper (x=-5.0)\n    elif phase < 0.8:\n        target_x = -5.0  # Hopper position\n        arm_length = 2.5\n        cos_theta = (target_x + 2.0) / arm_length\n        arm_target_angle = math.acos(cos_theta) if cos_theta <= 1 else 0\n        bucket_target_angle = 2.0  # Maintain elevated angle\n    # Phase 0.8–1.0: Lower scoop to dump\n    else:\n        arm_target_angle = math.acos((-5.0 + 2.0) / 2.5)  # Final position\n        bucket_target_angle = 0.0  # Lower scoop to dump\n\n    # Update motor speeds\n    arm_joint.motorSpeed = 1.0 * (arm_target_angle - arm_joint.angle)\n    bucket_joint.motorSpeed = 3.0 * (bucket_target_angle - bucket_joint.angle)\n    arm_joint.motorEnabled = True\n    bucket_joint.motorEnabled = True\n\ndef _control_components(agent_components):\n    if not isinstance(agent_components, dict):\n        return None, None, None\n    return (\n        agent_components.get(\"body\"),\n        agent_components.get(\"arm_joint\"),\n        agent_components.get(\"bucket_joint\"),\n    )",
+      "code_sha256": "0ffd8174832d742e97048d4c570ce27c02ccd0c18d0bb7cbe9810ee09b3d6028",
+      "constraints": {
+        "count": 1,
+        "violated": true,
+        "violations": [
+          "Structure mass 51.71 kg exceeds maximum 30.0 kg"
+        ]
+      },
+      "generation": {
+        "latency_seconds": 43.593098966404796,
+        "model": "Qwen3-8B",
+        "token_usage": {
+          "completion_tokens": 2949,
+          "prompt_tokens": 8375,
+          "total_tokens": 11324
+        }
+      },
+      "outcome": {
+        "category": "constraint_violation",
+        "failure_reason": "Design constraint violated: Structure mass 51.71 kg exceeds maximum 30.0 kg"
+      },
+      "phase": "revision",
+      "physics": {
+        "structure_broken": false
+      },
+      "score": -50.0,
+      "step_count": 0,
+      "success": false,
+      "timestamp": 1785728207.6747677,
+      "verification_seconds": 0.042770564556121826
+    },
+    {
+      "artifacts": [],
+      "attempt": 11,
+      "code": "import math\n\ndef build_agent(sandbox):\n    # Add anchored base at x=-2.0, y=0.0\n    base = sandbox.add_anchored_base(-2.0, 0.0, 0.4, 0.4, angle=0, density=10.0)\n    \n    # Arm segments: three segments for sufficient reach and control\n    arm_config = [2.0, 1.5, 1.0]  # Total length: 4.5m\n    arm_density = 10.0  # kg/m³ (optimized for mass)\n    prev_body = base\n    prev_anchor = (-2.0, 0.0)\n    current_x, current_y = -2.0, 0.0\n    arm_joint = None\n    \n    # Add first arm segment\n    center_x = current_x + (arm_config[0] / 2.0) * math.cos(0)\n    center_y = current_y + (arm_config[0] / 2.0) * math.sin(0)\n    arm1 = sandbox.add_beam(center_x, center_y, arm_config[0], 0.2, angle=0, density=arm_density)\n    arm_joint = sandbox.add_revolute_joint(\n        prev_body,\n        arm1,\n        prev_anchor,\n        enable_motor=True,\n        max_motor_torque=3000.0\n    )\n    prev_body = arm1\n    current_x += arm_config[0] * math.cos(0)\n    current_y += arm_config[0] * math.sin(0)\n    \n    # Add second arm segment\n    center_x = current_x + (arm_config[1] / 2.0) * math.cos(0)\n    center_y = current_y + (arm_config[1] / 2.0) * math.sin(0)\n    arm2 = sandbox.add_beam(center_x, center_y, arm_config[1], 0.2, angle=0, density=arm_density)\n    sandbox.add_joint(prev_body, arm2, (current_x, current_y))\n    prev_body = arm2\n    current_x += arm_config[1] * math.cos(0)\n    current_y += arm_config[1] * math.sin(0)\n    \n    # Add third arm segment\n    center_x = current_x + (arm_config[2] / 2.0) * math.cos(0)\n    center_y = current_y + (arm_config[2] / 2.0) * math.sin(0)\n    arm3 = sandbox.add_beam(center_x, center_y, arm_config[2], 0.2, angle=0, density=arm_density)\n    sandbox.add_joint(prev_body, arm3, (current_x, current_y))\n    prev_body = arm3\n    current_x += arm_config[2] * math.cos(0)\n    current_y += arm_config[2] * math.sin(0)\n    \n    # Scoop dimensions optimized for capacity and mass\n    scoop_width = 0.6  # m\n    scoop_height = 0.3  # m\n    scoop_density = 5.0  # kg/m³\n    scoop = sandbox.add_scoop(current_x, current_y, scoop_width, scoop_height, angle=0, density=scoop_density)\n    \n    # Bucket joint for scoop control\n    bucket_joint = sandbox.add_revolute_joint(\n        prev_body,\n        scoop,\n        (current_x, current_y),\n        enable_motor=True,\n        max_motor_torque=3000.0\n    )\n    \n    return {\n        \"body\": scoop,\n        \"arm_joint\": arm_joint,\n        \"bucket_joint\": bucket_joint,\n    }\n\ndef agent_action(sandbox, agent_body, step_count):\n    scoop, arm_joint, bucket_joint = _control_components(agent_body)\n    if scoop is None or not arm_joint or not bucket_joint:\n        return\n    dt = 1.0 / 60.0\n    t = step_count * dt\n    phase_duration = 10.0\n    phase = (t % phase_duration) / phase_duration\n\n    # Phase 0–0.3: Position scoop in pit and lower to collect\n    if phase < 0.3:\n        # Arm angle to position scoop at x=2.0 (pit edge) and y=-0.5 (below pit)\n        arm_target_angle = math.asin(-0.5 / 4.5)  # Calculate angle to reach y=-0.5\n        # Lower scoop below y=0.0 (pit bottom) by adjusting bucket angle\n        bucket_target_angle = -1.0  # Ensure scoop dips into pit\n    # Phase 0.3–0.5: Swing arm to clear wall (x=-1.0)\n    elif phase < 0.5:\n        target_x = -1.0  # Clear central wall\n        arm_length = 4.5  # Total arm length\n        cos_theta = (target_x + 2.0) / arm_length  # x = -1.0, arm base at x=-2.0\n        arm_target_angle = math.acos(cos_theta) if cos_theta <= 1 else 0\n        bucket_target_angle = 2.0  # Lift to clear wall\n    # Phase 0.5–0.8: Swing arm to hopper (x=-5.0)\n    elif phase < 0.8:\n        target_x = -5.0  # Hopper position\n        arm_length = 4.5\n        cos_theta = (target_x + 2.0) / arm_length\n        arm_target_angle = math.acos(cos_theta) if cos_theta <= 1 else 0\n        bucket_target_angle = 2.0  # Maintain elevated angle\n    # Phase 0.8–1.0: Lower scoop to dump\n    else:\n        arm_target_angle = math.asin(-0.5 / 4.5)  # Final position\n        bucket_target_angle = 0.0  # Lower scoop to dump\n\n    # Update motor speeds\n    arm_joint.motorSpeed = 1.0 * (arm_target_angle - arm_joint.angle)\n    bucket_joint.motorSpeed = 3.0 * (bucket_target_angle - bucket_joint.angle)\n    arm_joint.motorEnabled = True\n    bucket_joint.motorEnabled = True\n\ndef _control_components(agent_components):\n    if not isinstance(agent_components, dict):\n        return None, None, None\n    return (\n        agent_components.get(\"body\"),\n        agent_components.get(\"arm_joint\"),\n        agent_components.get(\"bucket_joint\"),\n    )",
+      "code_sha256": "dfebb18027950a1a6b8766e565b1f094d5a11745a1d766c2edc5892c59819ab6",
+      "constraints": {
+        "count": 1,
+        "violated": true,
+        "violations": [
+          "Component at (2.50, 0.00) outside build zone x=[-4.0, 2.0], y=[0.0, 5.0]"
+        ]
+      },
+      "generation": {
+        "latency_seconds": 152.41617341153324,
+        "model": "Qwen3-8B",
+        "token_usage": {
+          "completion_tokens": 8457,
+          "prompt_tokens": 8735,
+          "total_tokens": 17192
+        }
+      },
+      "outcome": {
+        "category": "constraint_violation",
+        "failure_reason": "Design constraint violated: Component at (2.50, 0.00) outside build zone x=[-4.0, 2.0], y=[0.0, 5.0]"
+      },
+      "phase": "revision",
+      "physics": {
+        "structure_broken": false
+      },
+      "score": -33.333333333333336,
+      "step_count": 0,
+      "success": false,
+      "timestamp": 1785728394.6857202,
+      "verification_seconds": 0.100698446854949
+    },
+    {
+      "artifacts": [],
+      "attempt": 12,
+      "code": "import math\n\ndef build_agent(sandbox):\n    # Add anchored base at x=-2.0, y=0.0\n    base = sandbox.add_anchored_base(-2.0, 0.0, 0.4, 0.4, angle=0, density=10.0)\n    \n    # Arm segments: three segments for sufficient reach and control\n    arm_config = [1.5, 1.0, 1.5]  # Total length: 4.0 m\n    arm_density = 10.0  # kg/m³\n    prev_body = base\n    prev_anchor = (-2.0, 0.0)\n    current_x, current_y = -2.0, 0.0\n    arm_joint = None\n    \n    # Add first arm segment\n    center_x = current_x + (arm_config[0] / 2.0) * math.cos(0)\n    center_y = current_y + (arm_config[0] / 2.0) * math.sin(0)\n    arm1 = sandbox.add_beam(center_x, center_y, arm_config[0], 0.2, angle=0, density=arm_density)\n    arm_joint = sandbox.add_revolute_joint(\n        prev_body,\n        arm1,\n        prev_anchor,\n        enable_motor=True,\n        max_motor_torque=3000.0\n    )\n    prev_body = arm1\n    current_x += arm_config[0] * math.cos(0)\n    current_y += arm_config[0] * math.sin(0)\n    \n    # Add second arm segment\n    center_x = current_x + (arm_config[1] / 2.0) * math.cos(0)\n    center_y = current_y + (arm_config[1] / 2.0) * math.sin(0)\n    arm2 = sandbox.add_beam(center_x, center_y, arm_config[1], 0.2, angle=0, density=arm_density)\n    sandbox.add_joint(prev_body, arm2, (current_x, current_y))\n    prev_body = arm2\n    current_x += arm_config[1] * math.cos(0)\n    current_y += arm_config[1] * math.sin(0)\n    \n    # Add third arm segment\n    center_x = current_x + (arm_config[2] / 2.0) * math.cos(0)\n    center_y = current_y + (arm_config[2] / 2.0) * math.sin(0)\n    arm3 = sandbox.add_beam(center_x, center_y, arm_config[2], 0.2, angle=0, density=arm_density)\n    sandbox.add_joint(prev_body, arm3, (current_x, current_y))\n    prev_body = arm3\n    current_x += arm_config[2] * math.cos(0)\n    current_y += arm_config[2] * math.sin(0)\n    \n    # Scoop dimensions optimized for capacity and mass\n    scoop_width = 0.8  # m\n    scoop_height = 0.3  # m\n    scoop_density = 5.0  # kg/m³\n    scoop = sandbox.add_scoop(current_x, current_y, scoop_width, scoop_height, angle=0, density=scoop_density)\n    \n    # Bucket joint for scoop control\n    bucket_joint = sandbox.add_revolute_joint(\n        prev_body,\n        scoop,\n        (current_x, current_y),\n        enable_motor=True,\n        max_motor_torque=3000.0\n    )\n    \n    return {\n        \"body\": scoop,\n        \"arm_joint\": arm_joint,\n        \"bucket_joint\": bucket_joint,\n    }\n\ndef _control_components(agent_components):\n    if not isinstance(agent_components, dict):\n        return None, None, None\n    return (\n        agent_components.get(\"body\"),\n        agent_components.get(\"arm_joint\"),\n        agent_components.get(\"bucket_joint\"),\n    )\n\ndef agent_action(sandbox, agent_body, step_count):\n    scoop, arm_joint, bucket_joint = _control_components(agent_body)\n    if scoop is None or not arm_joint or not bucket_joint:\n        return\n    dt = 1.0 / 60.0\n    t = step_count * dt\n    phase_duration = 10.0\n    phase = (t % phase_duration) / phase_duration\n\n    # Phase 0–0.3: Position scoop in pit and lower to collect\n    if phase < 0.3:\n        # Arm angle to position scoop at x=0.0 (pit edge) and y=0.0 (pit bottom)\n        arm_target_angle = 1.047  # 60 degrees (cos(theta) = 0.5)\n        # Lower scoop below y=0.0 (pit bottom) by adjusting bucket angle\n        bucket_target_angle = -1.0  # Ensure scoop dips into pit\n    # Phase 0.3–0.5: Swing arm to clear wall (x=-1.0)\n    elif phase < 0.5:\n        target_x = -1.0  # Clear central wall\n        arm_length = 4.0  # Total arm length\n        cos_theta = (target_x + 2.0) / arm_length  # x = -1.0, arm base at x=-2.0\n        arm_target_angle = math.acos(cos_theta) if cos_theta <= 1 else 0\n        bucket_target_angle = 2.0  # Lift to clear wall\n    # Phase 0.5–0.8: Swing arm to hopper (x=-5.0)\n    elif phase < 0.8:\n        target_x = -5.0  # Hopper position\n        arm_length = 4.0\n        cos_theta = (target_x + 2.0) / arm_length\n        arm_target_angle = math.acos(cos_theta) if cos_theta <= 1 else 0\n        bucket_target_angle = 2.0  # Maintain elevated angle\n    # Phase 0.8–1.0: Lower scoop to dump\n    else:\n        arm_target_angle = 1.047  # Final position\n        bucket_target_angle = 0.0  # Lower scoop to dump\n\n    # Update motor speeds\n    arm_joint.motorSpeed = 1.0 * (arm_target_angle - arm_joint.angle)\n    bucket_joint.motorSpeed = 3.0 * (bucket_target_angle - bucket_joint.angle)\n    arm_joint.motorEnabled = True\n    bucket_joint.motorEnabled = True",
+      "code_sha256": "46f937552018a66b2ced5705efbb74c9d3fd0b93d0df9a513bb646fa454c868b",
+      "constraints": {
+        "count": 0,
+        "violated": false,
+        "violations": []
+      },
+      "generation": {
+        "latency_seconds": 128.45668525248766,
+        "model": "Qwen3-8B",
+        "token_usage": {
+          "completion_tokens": 11891,
+          "prompt_tokens": 8996,
+          "total_tokens": 20887
+        }
+      },
+      "outcome": {
+        "category": "simulation_failure",
+        "failure_reason": "Deposited 2/200 particles (need at least 15 in hopper)"
+      },
+      "phase": "revision",
+      "physics": {
+        "structure_broken": false
+      },
+      "score": 0.0,
+      "step_count": 2400,
+      "success": false,
+      "timestamp": 1785728629.4787614,
+      "verification_seconds": 3.1627738419920206
+    },
+    {
+      "artifacts": [],
+      "attempt": 13,
+      "code": "import math\n\ndef build_agent(sandbox):\n    # Add anchored base at x=-2.0, y=0.0\n    base = sandbox.add_anchored_base(-2.0, 0.0, 0.4, 0.4, angle=0, density=10.0)\n    \n    # Arm segments: two segments for sufficient reach and control\n    arm_config = [2.5, 1.5]  # Total length: 4.0 m\n    arm_density = 10.0  # kg/m³\n    prev_body = base\n    prev_anchor = (-2.0, 0.0)\n    current_x, current_y = -2.0, 0.0\n    arm_joint = None\n    \n    # Add first arm segment\n    center_x = current_x + (arm_config[0] / 2.0) * math.cos(0)\n    center_y = current_y + (arm_config[0] / 2.0) * math.sin(0)\n    arm1 = sandbox.add_beam(center_x, center_y, arm_config[0], 0.2, angle=0, density=arm_density)\n    arm_joint = sandbox.add_revolute_joint(\n        prev_body,\n        arm1,\n        prev_anchor,\n        enable_motor=True,\n        max_motor_torque=3000.0\n    )\n    prev_body = arm1\n    current_x += arm_config[0] * math.cos(0)\n    current_y += arm_config[0] * math.sin(0)\n    \n    # Add second arm segment\n    center_x = current_x + (arm_config[1] / 2.0) * math.cos(0)\n    center_y = current_y + (arm_config[1] / 2.0) * math.sin(0)\n    arm2 = sandbox.add_beam(center_x, center_y, arm_config[1], 0.2, angle=0, density=arm_density)\n    sandbox.add_joint(prev_body, arm2, (current_x, current_y))\n    prev_body = arm2\n    current_x += arm_config[1] * math.cos(0)\n    current_y += arm_config[1] * math.sin(0)\n    \n    # Scoop dimensions optimized for capacity and mass\n    scoop_width = 1.0  # m\n    scoop_height = 0.5  # m\n    scoop_density = 5.0  # kg/m³\n    # Position scoop at x=1.0 m to ensure it stays within build zone\n    scoop = sandbox.add_scoop(1.0, current_y, scoop_width, scoop_height, angle=0, density=scoop_density)\n    \n    # Bucket joint for scoop control\n    bucket_joint = sandbox.add_revolute_joint(\n        prev_body,\n        scoop,\n        (current_x, current_y),\n        enable_motor=True,\n        max_motor_torque=3000.0\n    )\n    \n    return {\n        \"body\": scoop,\n        \"arm_joint\": arm_joint,\n        \"bucket_joint\": bucket_joint,\n    }\n\ndef _control_components(agent_components):\n    if not isinstance(agent_components, dict):\n        return None, None, None\n    return (\n        agent_components.get(\"body\"),\n        agent_components.get(\"arm_joint\"),\n        agent_components.get(\"bucket_joint\"),\n    )\n\ndef agent_action(sandbox, agent_body, step_count):\n    scoop, arm_joint, bucket_joint = _control_components(agent_body)\n    if scoop is None or not arm_joint or not bucket_joint:\n        return\n    dt = 1.0 / 60.0\n    t = step_count * dt\n    phase_duration = 10.0\n    phase = (t % phase_duration) / phase_duration\n\n    # Phase 0–0.3: Position scoop in pit and lower to collect\n    if phase < 0.3:\n        # Arm angle to position scoop at x=0.0 (pit edge) and y=0.0 (pit bottom)\n        arm_length = 4.0  # Total arm length\n        target_x = 0.0  # Pit edge\n        cos_theta = (target_x + 2.0) / arm_length  # x = 0.0, arm base at x=-2.0\n        arm_target_angle = math.acos(cos_theta) if cos_theta <= 1 else 0\n        # Lower scoop below y=0.0 (pit bottom) by adjusting bucket angle\n        bucket_target_angle = -1.0  # Ensure scoop dips into pit\n    # Phase 0.3–0.5: Swing arm to clear wall (x=-1.0)\n    elif phase < 0.5:\n        target_x = -1.0  # Clear central wall\n        arm_length = 4.0\n        cos_theta = (target_x + 2.0) / arm_length\n        arm_target_angle = math.acos(cos_theta) if cos_theta <= 1 else 0\n        bucket_target_angle = 2.0  # Lift to clear wall\n    # Phase 0.5–0.8: Swing arm to hopper (x=-5.0)\n    elif phase < 0.8:\n        target_x = -5.0  # Hopper position\n        arm_length = 4.0\n        cos_theta = (target_x + 2.0) / arm_length\n        arm_target_angle = math.acos(cos_theta) if cos_theta <= 1 else 0\n        bucket_target_angle = 2.0  # Maintain elevated angle\n    # Phase 0.8–1.0: Lower scoop to dump\n    else:\n        arm_target_angle = 1.047  # Final position\n        bucket_target_angle = 0.0  # Lower scoop to dump\n\n    # Update motor speeds\n    arm_joint.motorSpeed = 1.0 * (arm_target_angle - arm_joint.angle)\n    bucket_joint.motorSpeed = 3.0 * (bucket_target_angle - bucket_joint.angle)\n    arm_joint.motorEnabled = True\n    bucket_joint.motorEnabled = True",
+      "code_sha256": "5a748fc4f97bfd1244ccf780e56bb55422121fc114d0e7178b3de0e91ad2e67b",
+      "constraints": {
+        "count": 0,
+        "violated": false,
+        "violations": []
+      },
+      "generation": {
+        "latency_seconds": 183.16575256548822,
+        "model": "Qwen3-8B",
+        "token_usage": {
+          "completion_tokens": 10116,
+          "prompt_tokens": 9120,
+          "total_tokens": 19236
+        }
+      },
+      "outcome": {
+        "category": "simulation_failure",
+        "failure_reason": "Deposited 8/200 particles (need at least 15 in hopper)"
+      },
+      "phase": "revision",
+      "physics": {
+        "structure_broken": false
+      },
+      "score": 0.0,
+      "step_count": 2400,
+      "success": false,
+      "timestamp": 1785728845.9824328,
+      "verification_seconds": 2.8070836570113897
+    },
+    {
+      "artifacts": [],
+      "attempt": 14,
+      "code": "import math\n\ndef build_agent(sandbox):\n    # Add anchored base at x=-2.0, y=0.0\n    base = sandbox.add_anchored_base(-2.0, 0.0, 0.4, 0.4, angle=0, density=10.0)\n    \n    # Arm segments: two segments for sufficient reach and control\n    arm_config = [1.5, 1.5]  # Total length: 3.0 m\n    arm_density = 10.0  # kg/m³\n    prev_body = base\n    prev_anchor = (-2.0, 0.0)\n    current_x, current_y = -2.0, 0.0\n    arm_joint = None\n    \n    # Add first arm segment\n    center_x = current_x + (arm_config[0] / 2.0) * math.cos(0)\n    center_y = current_y + (arm_config[0] / 2.0) * math.sin(0)\n    arm1 = sandbox.add_beam(center_x, center_y, arm_config[0], 0.2, angle=0, density=arm_density)\n    arm_joint = sandbox.add_revolute_joint(\n        prev_body,\n        arm1,\n        prev_anchor,\n        enable_motor=True,\n        max_motor_torque=3000.0\n    )\n    prev_body = arm1\n    current_x += arm_config[0] * math.cos(0)\n    current_y += arm_config[0] * math.sin(0)\n    \n    # Add second arm segment\n    center_x = current_x + (arm_config[1] / 2.0) * math.cos(0)\n    center_y = current_y + (arm_config[1] / 2.0) * math.sin(0)\n    arm2 = sandbox.add_beam(center_x, center_y, arm_config[1], 0.2, angle=0, density=arm_density)\n    sandbox.add_joint(prev_body, arm2, (current_x, current_y))\n    prev_body = arm2\n    current_x += arm_config[1] * math.cos(0)\n    current_y += arm_config[1] * math.sin(0)\n    \n    # Scoop dimensions optimized for capacity and mass\n    scoop_width = 1.2  # m\n    scoop_height = 0.5  # m\n    scoop_density = 5.0  # kg/m³\n    # Position scoop at the end of the arm\n    scoop = sandbox.add_scoop(current_x, current_y, scoop_width, scoop_height, angle=0, density=scoop_density)\n    \n    # Bucket joint for scoop control\n    bucket_joint = sandbox.add_revolute_joint(\n        prev_body,\n        scoop,\n        (current_x, current_y),\n        enable_motor=True,\n        max_motor_torque=3000.0\n    )\n    \n    return {\n        \"body\": scoop,\n        \"arm_joint\": arm_joint,\n        \"bucket_joint\": bucket_joint,\n    }\n\ndef _control_components(agent_components):\n    if not isinstance(agent_components, dict):\n        return None, None, None\n    return (\n        agent_components.get(\"body\"),\n        agent_components.get(\"arm_joint\"),\n        agent_components.get(\"bucket_joint\"),\n    )\n\ndef agent_action(sandbox, agent_body, step_count):\n    scoop, arm_joint, bucket_joint = _control_components(agent_body)\n    if scoop is None or not arm_joint or not bucket_joint:\n        return\n    dt = 1.0 / 60.0\n    t = step_count * dt\n    phase_duration = 10.0\n    phase = (t % phase_duration) / phase_duration\n\n    # Phase 0–0.3: Position scoop in pit and lower to collect\n    if phase < 0.3:\n        # Arm angle to position scoop at x=0.0 (pit edge) and y=0.0 (pit bottom)\n        arm_length = 3.0  # Total arm length\n        target_x = 0.0  # Pit edge\n        cos_theta = (target_x + 2.0) / arm_length  # x = 0.0, arm base at x=-2.0\n        arm_target_angle = math.acos(cos_theta) if cos_theta <= 1 else 0\n        # Lower scoop below y=0.0 (pit bottom) by adjusting bucket angle\n        bucket_target_angle = -1.5  # Ensure scoop dips into pit\n    # Phase 0.3–0.5: Swing arm to clear wall (x=-1.0)\n    elif phase < 0.5:\n        target_x = -1.0  # Clear central wall\n        arm_length = 3.0\n        cos_theta = (target_x + 2.0) / arm_length\n        arm_target_angle = math.acos(cos_theta) if cos_theta <= 1 else 0\n        bucket_target_angle = 2.0  # Lift to clear wall\n    # Phase 0.5–0.8: Swing arm to hopper (x=-5.0)\n    elif phase < 0.8:\n        target_x = -5.0  # Hopper position\n        arm_length = 3.0\n        cos_theta = (target_x + 2.0) / arm_length\n        arm_target_angle = math.acos(cos_theta) if cos_theta <= 1 else 0\n        bucket_target_angle = 1.0  # Maintain elevated angle\n    # Phase 0.8–1.0: Lower scoop to dump\n    else:\n        arm_target_angle = math.pi  # Final position at x=-5.0\n        bucket_target_angle = 0.0  # Lower scoop to dump\n\n    # Update motor speeds\n    arm_joint.motorSpeed = 1.0 * (arm_target_angle - arm_joint.angle)\n    bucket_joint.motorSpeed = 3.0 * (bucket_target_angle - bucket_joint.angle)\n    arm_joint.motorEnabled = True\n    bucket_joint.motorEnabled = True",
+      "code_sha256": "ea28d9f085eca2a20c75e08e6369fd897e5a3edace004e683c1e563b1beca13e",
+      "constraints": {
+        "count": 0,
+        "violated": false,
+        "violations": []
+      },
+      "generation": {
+        "latency_seconds": 71.47998309880495,
+        "model": "Qwen3-8B",
+        "token_usage": {
+          "completion_tokens": 3898,
+          "prompt_tokens": 9155,
+          "total_tokens": 13053
+        }
+      },
+      "outcome": {
+        "category": "simulation_failure",
+        "failure_reason": "Deposited 7/200 particles (need at least 15 in hopper)"
+      },
+      "phase": "revision",
+      "physics": {
+        "structure_broken": false
+      },
+      "score": 0.0,
+      "step_count": 2400,
+      "success": false,
+      "timestamp": 1785728967.395311,
+      "verification_seconds": 2.609678041189909
+    },
+    {
+      "artifacts": [],
+      "attempt": 15,
+      "code": "import math\n\ndef build_agent(sandbox):\n    # Add anchored base at x=-2.0, y=0.0\n    base = sandbox.add_anchored_base(-2.0, 0.0, 0.4, 0.4, angle=0, density=10.0)\n    \n    # Arm configuration: two segments for flexibility and reach\n    arm_config = [1.5, 1.5]  # Total length: 3.0 m\n    arm_density = 10.0  # kg/m³\n    prev_body = base\n    prev_anchor = (-2.0, 0.0)\n    current_x, current_y = -2.0, 0.0\n    arm_joint = None\n    \n    # Add first arm segment\n    center_x = current_x + (arm_config[0] / 2.0) * math.cos(0)\n    center_y = current_y + (arm_config[0] / 2.0) * math.sin(0)\n    arm1 = sandbox.add_beam(center_x, center_y, arm_config[0], 0.2, angle=0, density=arm_density)\n    arm_joint = sandbox.add_revolute_joint(\n        prev_body,\n        arm1,\n        prev_anchor,\n        enable_motor=True,\n        max_motor_torque=3000.0\n    )\n    prev_body = arm1\n    current_x += arm_config[0] * math.cos(0)\n    current_y += arm_config[0] * math.sin(0)\n    \n    # Add second arm segment\n    center_x = current_x + (arm_config[1] / 2.0) * math.cos(0)\n    center_y = current_y + (arm_config[1] / 2.0) * math.sin(0)\n    arm2 = sandbox.add_beam(center_x, center_y, arm_config[1], 0.2, angle=0, density=arm_density)\n    sandbox.add_joint(prev_body, arm2, (current_x, current_y))\n    prev_body = arm2\n    current_x += arm_config[1] * math.cos(0)\n    current_y += arm_config[1] * math.sin(0)\n    \n    # Scoop dimensions optimized for capacity and mass\n    scoop_width = 1.2  # m\n    scoop_height = 0.5  # m\n    scoop_density = 10.0  # kg/m³\n    # Position scoop at the end of the arm\n    scoop = sandbox.add_scoop(current_x, current_y, scoop_width, scoop_height, angle=0, density=scoop_density)\n    \n    # Bucket joint for scoop control\n    bucket_joint = sandbox.add_revolute_joint(\n        prev_body,\n        scoop,\n        (current_x, current_y),\n        enable_motor=True,\n        max_motor_torque=3000.0\n    )\n    \n    return {\n        \"body\": scoop,\n        \"arm_joint\": arm_joint,\n        \"bucket_joint\": bucket_joint,\n    }\n\ndef _control_components(agent_components):\n    if not isinstance(agent_components, dict):\n        return None, None, None\n    return (\n        agent_components.get(\"body\"),\n        agent_components.get(\"arm_joint\"),\n        agent_components.get(\"bucket_joint\"),\n    )\n\ndef agent_action(sandbox, agent_body, step_count):\n    scoop, arm_joint, bucket_joint = _control_components(agent_body)\n    if scoop is None or not arm_joint or not bucket_joint:\n        return\n    dt = 1.0 / 60.0\n    t = step_count * dt\n    phase_duration = 10.0\n    phase = (t % phase_duration) / phase_duration\n\n    # Phase 0–0.3: Position scoop in pit and lower to collect\n    if phase < 0.3:\n        # Arm angle to position scoop at x=0.0 (pit edge) and y=0.0 (pit bottom)\n        arm_length = 3.0  # Total arm length\n        target_x = 0.0  # Pit edge\n        cos_theta = (target_x + 2.0) / arm_length  # x = 0.0, arm base at x=-2.0\n        arm_target_angle = math.acos(cos_theta) if cos_theta <= 1 else 0\n        # Lower scoop below y=0.0 (pit bottom) by adjusting bucket angle\n        bucket_target_angle = -1.5  # Ensure scoop dips into pit\n    # Phase 0.3–0.5: Swing arm to clear wall (x=-1.0)\n    elif phase < 0.5:\n        target_x = -1.0  # Clear central wall\n        arm_length = 3.0\n        cos_theta = (target_x + 2.0) / arm_length\n        arm_target_angle = math.acos(cos_theta) if cos_theta <= 1 else 0\n        bucket_target_angle = 2.0  # Lift to clear wall\n    # Phase 0.5–0.8: Swing arm to hopper (x=-5.0)\n    elif phase < 0.8:\n        target_x = -5.0  # Hopper position\n        arm_length = 3.0\n        cos_theta = (target_x + 2.0) / arm_length\n        arm_target_angle = math.acos(cos_theta) if cos_theta <= 1 else 0\n        bucket_target_angle = 1.0  # Maintain elevated angle\n    # Phase 0.8–1.0: Lower scoop to dump\n    else:\n        arm_target_angle = math.pi  # Final position at x=-5.0\n        bucket_target_angle = 0.0  # Lower scoop to dump\n\n    # Update motor speeds with reduced torque for stability\n    arm_joint.motorSpeed = 0.5 * (arm_target_angle - arm_joint.angle)\n    bucket_joint.motorSpeed = 1.5 * (bucket_target_angle - bucket_joint.angle)\n    arm_joint.motorEnabled = True\n    bucket_joint.motorEnabled = True",
+      "code_sha256": "817c1e5997bbd97cc07b549e0c2bc4af482db4f7a026659f5842065a1fc37530",
+      "constraints": {
+        "count": 0,
+        "violated": false,
+        "violations": []
+      },
+      "generation": {
+        "latency_seconds": 193.19536112062633,
+        "model": "Qwen3-8B",
+        "token_usage": {
+          "completion_tokens": 10587,
+          "prompt_tokens": 9165,
+          "total_tokens": 19752
+        }
+      },
+      "outcome": {
+        "category": "success"
+      },
+      "phase": "revision",
+      "physics": {
+        "structure_broken": false
+      },
+      "score": 100.0,
+      "step_count": 2400,
+      "success": true,
+      "timestamp": 1785729188.2466042,
+      "verification_seconds": 3.0503810681402683
+    }
+  ],
+  "best_attempt": 15,
+  "best_score": 100.0,
+  "config": {
+    "attempts": 20,
+    "generation_retries": 2,
+    "headless": true,
+    "max_tokens": 24576,
+    "method_options": {},
+    "run_index": 2,
+    "save_gif": false,
+    "seed": 0,
+    "temperature": 0.7,
+    "timeout_seconds": 7200.0,
+    "top_p": 0.95
+  },
+  "environment_pair": "Initial_to_Stage-1",
+  "error_type": "success",
+  "finished_at": 1785729188.2467518,
+  "metadata": {
+    "auxiliary_usage": {
+      "calls": 15,
+      "failed_calls": 0,
+      "latency_seconds": 496.31755192764103,
+      "successful_calls": 15,
+      "token_usage": {
+        "completion_tokens": 29608,
+        "prompt_tokens": 31608,
+        "total_tokens": 61216
+      }
+    },
+    "strategy_runtime": {
+      "auxiliary_calls": [
+        {
+          "latency_seconds": 33.18661557883024,
+          "max_tokens": 24576,
+          "model": "Qwen3-8B",
+          "purpose": "reflexion",
+          "request_metadata": {
+            "attempt": 0,
+            "method": "reflexion",
+            "purpose": "reflection"
+          },
+          "seed": 0,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 1538,
+            "prompt_tokens": 1869,
+            "total_tokens": 3407
+          },
+          "top_p": 0.95
+        },
+        {
+          "latency_seconds": 13.180988552048802,
+          "max_tokens": 24576,
+          "model": "Qwen3-8B",
+          "purpose": "reflexion",
+          "request_metadata": {
+            "attempt": 1,
+            "method": "reflexion",
+            "purpose": "reflection"
+          },
+          "seed": 1,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 767,
+            "prompt_tokens": 1949,
+            "total_tokens": 2716
+          },
+          "top_p": 0.95
+        },
+        {
+          "latency_seconds": 24.575585328042507,
+          "max_tokens": 24576,
+          "model": "Qwen3-8B",
+          "purpose": "reflexion",
+          "request_metadata": {
+            "attempt": 2,
+            "method": "reflexion",
+            "purpose": "reflection"
+          },
+          "seed": 2,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 1476,
+            "prompt_tokens": 2191,
+            "total_tokens": 3667
+          },
+          "top_p": 0.95
+        },
+        {
+          "latency_seconds": 15.839738378301263,
+          "max_tokens": 24576,
+          "model": "Qwen3-8B",
+          "purpose": "reflexion",
+          "request_metadata": {
+            "attempt": 3,
+            "method": "reflexion",
+            "purpose": "reflection"
+          },
+          "seed": 3,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 992,
+            "prompt_tokens": 1972,
+            "total_tokens": 2964
+          },
+          "top_p": 0.95
+        },
+        {
+          "latency_seconds": 62.25603910535574,
+          "max_tokens": 24576,
+          "model": "Qwen3-8B",
+          "purpose": "reflexion",
+          "request_metadata": {
+            "attempt": 4,
+            "method": "reflexion",
+            "purpose": "reflection"
+          },
+          "seed": 4,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 3520,
+            "prompt_tokens": 2017,
+            "total_tokens": 5537
+          },
+          "top_p": 0.95
+        },
+        {
+          "latency_seconds": 27.9030887670815,
+          "max_tokens": 24576,
+          "model": "Qwen3-8B",
+          "purpose": "reflexion",
+          "request_metadata": {
+            "attempt": 5,
+            "method": "reflexion",
+            "purpose": "reflection"
+          },
+          "seed": 5,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 1551,
+            "prompt_tokens": 2024,
+            "total_tokens": 3575
+          },
+          "top_p": 0.95
+        },
+        {
+          "latency_seconds": 39.431276271119714,
+          "max_tokens": 24576,
+          "model": "Qwen3-8B",
+          "purpose": "reflexion",
+          "request_metadata": {
+            "attempt": 6,
+            "method": "reflexion",
+            "purpose": "reflection"
+          },
+          "seed": 6,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 2297,
+            "prompt_tokens": 2008,
+            "total_tokens": 4305
+          },
+          "top_p": 0.95
+        },
+        {
+          "latency_seconds": 18.561494778841734,
+          "max_tokens": 24576,
+          "model": "Qwen3-8B",
+          "purpose": "reflexion",
+          "request_metadata": {
+            "attempt": 7,
+            "method": "reflexion",
+            "purpose": "reflection"
+          },
+          "seed": 7,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 1549,
+            "prompt_tokens": 1881,
+            "total_tokens": 3430
+          },
+          "top_p": 0.95
+        },
+        {
+          "latency_seconds": 45.44828560017049,
+          "max_tokens": 24576,
+          "model": "Qwen3-8B",
+          "purpose": "reflexion",
+          "request_metadata": {
+            "attempt": 8,
+            "method": "reflexion",
+            "purpose": "reflection"
+          },
+          "seed": 8,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 2622,
+            "prompt_tokens": 1755,
+            "total_tokens": 4377
+          },
+          "top_p": 0.95
+        },
+        {
+          "latency_seconds": 27.944882430136204,
+          "max_tokens": 24576,
+          "model": "Qwen3-8B",
+          "purpose": "reflexion",
+          "request_metadata": {
+            "attempt": 9,
+            "method": "reflexion",
+            "purpose": "reflection"
+          },
+          "seed": 9,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 2454,
+            "prompt_tokens": 1970,
+            "total_tokens": 4424
+          },
+          "top_p": 0.95
+        },
+        {
+          "latency_seconds": 34.49359259754419,
+          "max_tokens": 24576,
+          "model": "Qwen3-8B",
+          "purpose": "reflexion",
+          "request_metadata": {
+            "attempt": 10,
+            "method": "reflexion",
+            "purpose": "reflection"
+          },
+          "seed": 10,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 2010,
+            "prompt_tokens": 2285,
+            "total_tokens": 4295
+          },
+          "top_p": 0.95
+        },
+        {
+          "latency_seconds": 51.03821662068367,
+          "max_tokens": 24576,
+          "model": "Qwen3-8B",
+          "purpose": "reflexion",
+          "request_metadata": {
+            "attempt": 11,
+            "method": "reflexion",
+            "purpose": "reflection"
+          },
+          "seed": 11,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 2912,
+            "prompt_tokens": 2470,
+            "total_tokens": 5382
+          },
+          "top_p": 0.95
+        },
+        {
+          "latency_seconds": 30.53022973239422,
+          "max_tokens": 24576,
+          "model": "Qwen3-8B",
+          "purpose": "reflexion",
+          "request_metadata": {
+            "attempt": 12,
+            "method": "reflexion",
+            "purpose": "reflection"
+          },
+          "seed": 12,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 1862,
+            "prompt_tokens": 2473,
+            "total_tokens": 4335
+          },
+          "top_p": 0.95
+        },
+        {
+          "latency_seconds": 47.322704039514065,
+          "max_tokens": 24576,
+          "model": "Qwen3-8B",
+          "purpose": "reflexion",
+          "request_metadata": {
+            "attempt": 13,
+            "method": "reflexion",
+            "purpose": "reflection"
+          },
+          "seed": 13,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 2689,
+            "prompt_tokens": 2376,
+            "total_tokens": 5065
+          },
+          "top_p": 0.95
+        },
+        {
+          "latency_seconds": 24.60481414757669,
+          "max_tokens": 24576,
+          "model": "Qwen3-8B",
+          "purpose": "reflexion",
+          "request_metadata": {
+            "attempt": 14,
+            "method": "reflexion",
+            "purpose": "reflection"
+          },
+          "seed": 14,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 1369,
+            "prompt_tokens": 2368,
+            "total_tokens": 3737
+          },
+          "top_p": 0.95
+        }
+      ],
+      "auxiliary_usage": {
+        "calls": 15,
+        "failed_calls": 0,
+        "latency_seconds": 496.31755192764103,
+        "successful_calls": 15,
+        "token_usage": {
+          "completion_tokens": 29608,
+          "prompt_tokens": 31608,
+          "total_tokens": 61216
+        }
+      },
+      "candidate_calls": [
+        {
+          "attempt": 1,
+          "label": "reflexion-candidate",
+          "latency_seconds": 78.34457202628255,
+          "max_tokens": 24576,
+          "model": "Qwen3-8B",
+          "request_metadata": {
+            "attempt": 1,
+            "method": "reflexion",
+            "purpose": "candidate",
+            "retry": 0
+          },
+          "retry": 0,
+          "seed": 2001,
+          "strategy_owned": false,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 5023,
+            "prompt_tokens": 6453,
+            "total_tokens": 11476
+          },
+          "top_p": 0.95
+        },
+        {
+          "attempt": 2,
+          "label": "reflexion-candidate",
+          "latency_seconds": 82.38673890568316,
+          "max_tokens": 24576,
+          "model": "Qwen3-8B",
+          "request_metadata": {
+            "attempt": 2,
+            "method": "reflexion",
+            "purpose": "candidate",
+            "retry": 0
+          },
+          "retry": 0,
+          "seed": 2002,
+          "strategy_owned": false,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 5034,
+            "prompt_tokens": 6806,
+            "total_tokens": 11840
+          },
+          "top_p": 0.95
+        },
+        {
+          "attempt": 3,
+          "label": "reflexion-candidate",
+          "latency_seconds": 168.82922648265958,
+          "max_tokens": 24576,
+          "model": "Qwen3-8B",
+          "request_metadata": {
+            "attempt": 3,
+            "method": "reflexion",
+            "purpose": "candidate",
+            "retry": 0
+          },
+          "retry": 0,
+          "seed": 2003,
+          "strategy_owned": false,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 9575,
+            "prompt_tokens": 8622,
+            "total_tokens": 18197
+          },
+          "top_p": 0.95
+        },
+        {
+          "attempt": 4,
+          "label": "reflexion-candidate",
+          "latency_seconds": 104.79471070319414,
+          "max_tokens": 24576,
+          "model": "Qwen3-8B",
+          "request_metadata": {
+            "attempt": 4,
+            "method": "reflexion",
+            "purpose": "candidate",
+            "retry": 0
+          },
+          "retry": 0,
+          "seed": 2004,
+          "strategy_owned": false,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 5855,
+            "prompt_tokens": 8456,
+            "total_tokens": 14311
+          },
+          "top_p": 0.95
+        },
+        {
+          "attempt": 5,
+          "label": "reflexion-candidate",
+          "latency_seconds": 121.46041381545365,
+          "max_tokens": 24576,
+          "model": "Qwen3-8B",
+          "request_metadata": {
+            "attempt": 5,
+            "method": "reflexion",
+            "purpose": "candidate",
+            "retry": 0
+          },
+          "retry": 0,
+          "seed": 2005,
+          "strategy_owned": false,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 6954,
+            "prompt_tokens": 8529,
+            "total_tokens": 15483
+          },
+          "top_p": 0.95
+        },
+        {
+          "attempt": 6,
+          "label": "reflexion-candidate",
+          "latency_seconds": 97.36196929588914,
+          "max_tokens": 24576,
+          "model": "Qwen3-8B",
+          "request_metadata": {
+            "attempt": 6,
+            "method": "reflexion",
+            "purpose": "candidate",
+            "retry": 0
+          },
+          "retry": 0,
+          "seed": 2006,
+          "strategy_owned": false,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 5573,
+            "prompt_tokens": 8632,
+            "total_tokens": 14205
+          },
+          "top_p": 0.95
+        },
+        {
+          "attempt": 7,
+          "label": "reflexion-candidate",
+          "latency_seconds": 122.96639322675765,
+          "max_tokens": 24576,
+          "model": "Qwen3-8B",
+          "request_metadata": {
+            "attempt": 7,
+            "method": "reflexion",
+            "purpose": "candidate",
+            "retry": 0
+          },
+          "retry": 0,
+          "seed": 2007,
+          "strategy_owned": false,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 8975,
+            "prompt_tokens": 8746,
+            "total_tokens": 17721
+          },
+          "top_p": 0.95
+        },
+        {
+          "attempt": 8,
+          "label": "reflexion-candidate",
+          "latency_seconds": 174.57506879791617,
+          "max_tokens": 24576,
+          "model": "Qwen3-8B",
+          "request_metadata": {
+            "attempt": 8,
+            "method": "reflexion",
+            "purpose": "candidate",
+            "retry": 0
+          },
+          "retry": 0,
+          "seed": 2008,
+          "strategy_owned": false,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 10145,
+            "prompt_tokens": 8508,
+            "total_tokens": 18653
+          },
+          "top_p": 0.95
+        },
+        {
+          "attempt": 9,
+          "label": "reflexion-candidate",
+          "latency_seconds": 131.68269046768546,
+          "max_tokens": 24576,
+          "model": "Qwen3-8B",
+          "request_metadata": {
+            "attempt": 9,
+            "method": "reflexion",
+            "purpose": "candidate",
+            "retry": 0
+          },
+          "retry": 0,
+          "seed": 2009,
+          "strategy_owned": false,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 9096,
+            "prompt_tokens": 8267,
+            "total_tokens": 17363
+          },
+          "top_p": 0.95
+        },
+        {
+          "attempt": 10,
+          "label": "reflexion-candidate",
+          "latency_seconds": 43.593098966404796,
+          "max_tokens": 24576,
+          "model": "Qwen3-8B",
+          "request_metadata": {
+            "attempt": 10,
+            "method": "reflexion",
+            "purpose": "candidate",
+            "retry": 0
+          },
+          "retry": 0,
+          "seed": 2010,
+          "strategy_owned": false,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 2949,
+            "prompt_tokens": 8375,
+            "total_tokens": 11324
+          },
+          "top_p": 0.95
+        },
+        {
+          "attempt": 11,
+          "label": "reflexion-candidate",
+          "latency_seconds": 152.41617341153324,
+          "max_tokens": 24576,
+          "model": "Qwen3-8B",
+          "request_metadata": {
+            "attempt": 11,
+            "method": "reflexion",
+            "purpose": "candidate",
+            "retry": 0
+          },
+          "retry": 0,
+          "seed": 2011,
+          "strategy_owned": false,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 8457,
+            "prompt_tokens": 8735,
+            "total_tokens": 17192
+          },
+          "top_p": 0.95
+        },
+        {
+          "attempt": 12,
+          "label": "reflexion-candidate",
+          "latency_seconds": 128.45668525248766,
+          "max_tokens": 24576,
+          "model": "Qwen3-8B",
+          "request_metadata": {
+            "attempt": 12,
+            "method": "reflexion",
+            "purpose": "candidate",
+            "retry": 0
+          },
+          "retry": 0,
+          "seed": 2012,
+          "strategy_owned": false,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 11891,
+            "prompt_tokens": 8996,
+            "total_tokens": 20887
+          },
+          "top_p": 0.95
+        },
+        {
+          "attempt": 13,
+          "label": "reflexion-candidate",
+          "latency_seconds": 183.16575256548822,
+          "max_tokens": 24576,
+          "model": "Qwen3-8B",
+          "request_metadata": {
+            "attempt": 13,
+            "method": "reflexion",
+            "purpose": "candidate",
+            "retry": 0
+          },
+          "retry": 0,
+          "seed": 2013,
+          "strategy_owned": false,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 10116,
+            "prompt_tokens": 9120,
+            "total_tokens": 19236
+          },
+          "top_p": 0.95
+        },
+        {
+          "attempt": 14,
+          "label": "reflexion-candidate",
+          "latency_seconds": 71.47998309880495,
+          "max_tokens": 24576,
+          "model": "Qwen3-8B",
+          "request_metadata": {
+            "attempt": 14,
+            "method": "reflexion",
+            "purpose": "candidate",
+            "retry": 0
+          },
+          "retry": 0,
+          "seed": 2014,
+          "strategy_owned": false,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 3898,
+            "prompt_tokens": 9155,
+            "total_tokens": 13053
+          },
+          "top_p": 0.95
+        },
+        {
+          "attempt": 15,
+          "label": "reflexion-candidate",
+          "latency_seconds": 193.19536112062633,
+          "max_tokens": 24576,
+          "model": "Qwen3-8B",
+          "request_metadata": {
+            "attempt": 15,
+            "method": "reflexion",
+            "purpose": "candidate",
+            "retry": 0
+          },
+          "retry": 0,
+          "seed": 2015,
+          "strategy_owned": false,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 10587,
+            "prompt_tokens": 9165,
+            "total_tokens": 19752
+          },
+          "top_p": 0.95
+        }
+      ],
+      "candidate_usage": {
+        "calls": 15,
+        "failed_calls": 0,
+        "latency_seconds": 1854.7088381368667,
+        "successful_calls": 15,
+        "token_usage": {
+          "completion_tokens": 114128,
+          "prompt_tokens": 126565,
+          "total_tokens": 240693
+        }
+      },
+      "steps": [
+        {
+          "accepted_submissions": 1,
+          "labels": [
+            "reflexion-candidate"
+          ],
+          "metadata": {},
+          "remaining_attempts": 20,
+          "requested_submissions": 1,
+          "submission_metadata": [
+            {}
+          ]
+        },
+        {
+          "accepted_submissions": 1,
+          "labels": [
+            "reflexion-candidate"
+          ],
+          "metadata": {},
+          "remaining_attempts": 19,
+          "requested_submissions": 1,
+          "submission_metadata": [
+            {}
+          ]
+        },
+        {
+          "accepted_submissions": 1,
+          "labels": [
+            "reflexion-candidate"
+          ],
+          "metadata": {},
+          "remaining_attempts": 18,
+          "requested_submissions": 1,
+          "submission_metadata": [
+            {}
+          ]
+        },
+        {
+          "accepted_submissions": 1,
+          "labels": [
+            "reflexion-candidate"
+          ],
+          "metadata": {},
+          "remaining_attempts": 17,
+          "requested_submissions": 1,
+          "submission_metadata": [
+            {}
+          ]
+        },
+        {
+          "accepted_submissions": 1,
+          "labels": [
+            "reflexion-candidate"
+          ],
+          "metadata": {},
+          "remaining_attempts": 16,
+          "requested_submissions": 1,
+          "submission_metadata": [
+            {}
+          ]
+        },
+        {
+          "accepted_submissions": 1,
+          "labels": [
+            "reflexion-candidate"
+          ],
+          "metadata": {},
+          "remaining_attempts": 15,
+          "requested_submissions": 1,
+          "submission_metadata": [
+            {}
+          ]
+        },
+        {
+          "accepted_submissions": 1,
+          "labels": [
+            "reflexion-candidate"
+          ],
+          "metadata": {},
+          "remaining_attempts": 14,
+          "requested_submissions": 1,
+          "submission_metadata": [
+            {}
+          ]
+        },
+        {
+          "accepted_submissions": 1,
+          "labels": [
+            "reflexion-candidate"
+          ],
+          "metadata": {},
+          "remaining_attempts": 13,
+          "requested_submissions": 1,
+          "submission_metadata": [
+            {}
+          ]
+        },
+        {
+          "accepted_submissions": 1,
+          "labels": [
+            "reflexion-candidate"
+          ],
+          "metadata": {},
+          "remaining_attempts": 12,
+          "requested_submissions": 1,
+          "submission_metadata": [
+            {}
+          ]
+        },
+        {
+          "accepted_submissions": 1,
+          "labels": [
+            "reflexion-candidate"
+          ],
+          "metadata": {},
+          "remaining_attempts": 11,
+          "requested_submissions": 1,
+          "submission_metadata": [
+            {}
+          ]
+        },
+        {
+          "accepted_submissions": 1,
+          "labels": [
+            "reflexion-candidate"
+          ],
+          "metadata": {},
+          "remaining_attempts": 10,
+          "requested_submissions": 1,
+          "submission_metadata": [
+            {}
+          ]
+        },
+        {
+          "accepted_submissions": 1,
+          "labels": [
+            "reflexion-candidate"
+          ],
+          "metadata": {},
+          "remaining_attempts": 9,
+          "requested_submissions": 1,
+          "submission_metadata": [
+            {}
+          ]
+        },
+        {
+          "accepted_submissions": 1,
+          "labels": [
+            "reflexion-candidate"
+          ],
+          "metadata": {},
+          "remaining_attempts": 8,
+          "requested_submissions": 1,
+          "submission_metadata": [
+            {}
+          ]
+        },
+        {
+          "accepted_submissions": 1,
+          "labels": [
+            "reflexion-candidate"
+          ],
+          "metadata": {},
+          "remaining_attempts": 7,
+          "requested_submissions": 1,
+          "submission_metadata": [
+            {}
+          ]
+        },
+        {
+          "accepted_submissions": 1,
+          "labels": [
+            "reflexion-candidate"
+          ],
+          "metadata": {},
+          "remaining_attempts": 6,
+          "requested_submissions": 1,
+          "submission_metadata": [
+            {}
+          ]
+        }
+      ]
+    },
+    "strategy_snapshot": {
+      "reflected_attempts": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14
+      ],
+      "reflection_count": 3,
+      "reflection_limit": 3
+    }
+  },
+  "mode": "adaptation",
+  "model": "Qwen3-8B",
+  "provider": "vllm",
+  "revision_attempts": 15,
+  "run_index": 2,
+  "schema_version": "2.0",
+  "source_environment": "Initial",
+  "started_at": 1785726724.5612366,
+  "stop_reason": "success",
+  "strategy": "reflexion",
+  "success": true,
+  "success_attempt": 15,
+  "target_environment": "Stage-1",
+  "task_id": "F_03",
+  "task_path": "Category4_Granular_FluidInteraction/F_03",
+  "token_usage": {
+    "completion_tokens": 114128,
+    "prompt_tokens": 126565,
+    "total_tokens": 240693
+  },
+  "total_time_seconds": 2463.68551460281,
+  "verified_attempts": 16
+}

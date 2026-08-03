@@ -1,0 +1,1603 @@
+{
+  "analysis": {
+    "best_attempt_diagnostics": {
+      "constraint_violation_count": 0,
+      "failure_reason": "1/10 cargo particles crossed below y=1.96 m after the grace window",
+      "joints_broken_count": 0,
+      "progress": 0.0,
+      "step_count": 10000,
+      "structure_broken": false
+    },
+    "best_code_tokens": 732,
+    "cumulative_best_scores": [
+      {
+        "attempt": 0,
+        "best_score": 0.0
+      },
+      {
+        "attempt": 1,
+        "best_score": 0.0
+      },
+      {
+        "attempt": 2,
+        "best_score": 0.0
+      },
+      {
+        "attempt": 3,
+        "best_score": 0.0
+      },
+      {
+        "attempt": 4,
+        "best_score": 0.0
+      },
+      {
+        "attempt": 5,
+        "best_score": 0.0
+      },
+      {
+        "attempt": 6,
+        "best_score": 0.0
+      },
+      {
+        "attempt": 7,
+        "best_score": 0.0
+      },
+      {
+        "attempt": 8,
+        "best_score": 0.0
+      },
+      {
+        "attempt": 9,
+        "best_score": 0.0
+      },
+      {
+        "attempt": 10,
+        "best_score": 0.0
+      },
+      {
+        "attempt": 11,
+        "best_score": 0.0
+      },
+      {
+        "attempt": 12,
+        "best_score": 0.0
+      },
+      {
+        "attempt": 13,
+        "best_score": 0.0
+      },
+      {
+        "attempt": 14,
+        "best_score": 0.0
+      },
+      {
+        "attempt": 15,
+        "best_score": 0.0
+      },
+      {
+        "attempt": 16,
+        "best_score": 0.0
+      },
+      {
+        "attempt": 17,
+        "best_score": 0.0
+      },
+      {
+        "attempt": 18,
+        "best_score": 0.0
+      },
+      {
+        "attempt": 19,
+        "best_score": 0.0
+      },
+      {
+        "attempt": 20,
+        "best_score": 0.0
+      }
+    ],
+    "error_type": "exploration",
+    "revision_attempts": 20,
+    "success_attempt": null,
+    "tokens": {
+      "all_calls_total": 333024,
+      "auxiliary_completion": 0,
+      "auxiliary_prompt": 0,
+      "auxiliary_total": 0,
+      "completion": 137811,
+      "prompt": 195213,
+      "total": 333024
+    },
+    "trajectory_diagnostics": {
+      "code_length_trend": -0.386166,
+      "code_radicality": 0.346323,
+      "code_similarity_early": 0.62903,
+      "code_similarity_global": 0.653677,
+      "code_similarity_late": 0.695672,
+      "code_similarity_middle": 0.622332,
+      "code_similarity_recent": 0.660467,
+      "code_similarity_trend": 0.066641,
+      "first_positive_index": -1,
+      "improved_late": false,
+      "persistent_constraint_violation": false,
+      "score_trend": 0.0,
+      "total_constraint_violations": 0,
+      "unique_failure_reasons": 4
+    },
+    "verified_attempts": 21
+  },
+  "attempt_budget": 20,
+  "attempts": [
+    {
+      "artifacts": [],
+      "attempt": 0,
+      "code": "\"\"\"Reference designs for F-05.\n\n\nEvery reference is passive.  Construction uses only the documented sandbox\n\nprimitives, and ``agent_action`` never mutates the hull, cargo, terrain, or\n\nphysics configuration.\n\n\"\"\"\n\n\nBOAT_LEFT_X = 13.5\n\nBOAT_RIGHT_X = 16.5\n\nRAIL_HEIGHT = 0.9\n\nRAIL_WIDTH = 0.2\n\n\n\ndef _hull_deck_top(sandbox):\n    position = sandbox.get_boat_position()\n    if position is None:\n        hull_y = 2.5\n    else:\n        hull_y = float(position[1])\n    return hull_y + 0.2, hull_y\n\n\n\ndef _check_mass(sandbox):\n    total_mass = sandbox.get_structure_mass()\n    if total_mass > sandbox.MAX_STRUCTURE_MASS:\n        raise ValueError(\n            f\"Structure mass {total_mass:.2f} kg exceeds limit \"\n            f\"{sandbox.MAX_STRUCTURE_MASS:.2f} kg\"\n        )\n\n\n\ndef _build_low_ballast_cage(sandbox, ballast_density):\n    \"\"\"Closed hold with low, far-out ballast for roll inertia.\"\"\"\n\n    bodies = []\n    specifications = []\n    for x in (12.5, 17.5):\n        for y in (2.06, 2.18, 2.30):\n            specifications.append((x, y, 1.0, 0.1, ballast_density))\n    for x in (13.8, 14.6, 15.4, 16.2):\n        specifications.append((x, 2.85, 0.9, 0.12, 5.0))\n    specifications.extend(\n        (\n            (13.55, 3.28, 0.2, 0.98, 6.0),\n            (16.45, 3.28, 0.2, 0.98, 6.0),\n        )\n    )\n    for x in (13.8, 14.6, 15.4, 16.2):\n        specifications.append((x, 3.71, 0.9, 0.12, 3.0))\n\n    for x, y, width, height, density in specifications:\n        beam = sandbox.add_beam(x, y, width, height, density=density)\n        sandbox.set_material_properties(beam, restitution=0.01)\n        sandbox.add_joint(beam, None, (x, y), type=\"rigid\")\n        bodies.append(beam)\n\n    _check_mass(sandbox)\n    return bodies[0]\n\n\n\ndef _stage_3_anchor(sandbox):\n    deck_top, hull_y = _hull_deck_top(sandbox)\n    build_y_min = 2.58\n    anchor_y = max(build_y_min + 0.008, deck_top - 0.035)\n    return min(anchor_y, deck_top - 0.012), deck_top, hull_y\n\n\n\ndef build_agent(sandbox):\n    \"\"\"Baseline: low ballast plus deck-edge rails and local cargo stops.\"\"\"\n\n    deck_top, hull_y = _hull_deck_top(sandbox)\n    build_y_min = 2.0\n    max_mass = float(sandbox.MAX_STRUCTURE_MASS)\n    reference_mass = 59.61\n    density_scale = (\n        1.0\n        if max_mass >= reference_mass - 0.05\n        else min(1.0, max(0.35, (max_mass - 0.25) / reference_mass))\n    )\n\n    def density(value):\n        return float(value) * density_scale\n\n    anchor_y = build_y_min + 0.01\n    ballast_y = max(hull_y - 0.26, build_y_min + 0.086)\n    ballast_anchor_y = max(deck_top - 0.26, anchor_y)\n    rail_anchor_y = max(deck_top - 0.05, anchor_y)\n    bodies = []\n\n    for x in (14.25, 15.75):\n        beam = sandbox.add_beam(\n            x, ballast_y, 0.5, 0.17, density=density(254.0)\n        )\n        sandbox.set_material_properties(beam, restitution=0.05)\n        sandbox.add_joint(beam, None, (x, ballast_anchor_y), type=\"rigid\")\n        bodies.append(beam)\n\n    for x in (BOAT_LEFT_X, BOAT_RIGHT_X):\n        rail = sandbox.add_beam(\n            x,\n            deck_top + RAIL_HEIGHT / 2.0,\n            RAIL_WIDTH,\n            RAIL_HEIGHT,\n            density=density(30.0),\n        )\n        sandbox.set_material_properties(rail, restitution=0.07)\n        sandbox.add_joint(rail, None, (x, rail_anchor_y), type=\"rigid\")\n        bodies.append(rail)\n\n    for x in (14.5, 15.5):\n        lip = sandbox.add_beam(\n            x, deck_top + 0.06, 0.18, 0.06, density=density(35.0)\n        )\n        sandbox.set_material_properties(lip, restitution=0.07)\n        sandbox.add_joint(lip, None, (x, deck_top), type=\"rigid\")\n        bodies.append(lip)\n\n    for x in (14.5, 15.5):\n        stop = sandbox.add_beam(\n            x, deck_top + 0.18, 0.26, 0.2, density=density(42.0)\n        )\n        sandbox.set_material_properties(stop, restitution=0.07)\n        sandbox.add_joint(stop, None, (x, deck_top), type=\"rigid\")\n        bodies.append(stop)\n\n    _check_mass(sandbox)\n    return bodies[0]\n\n\n\ndef agent_action(sandbox, agent_body, step_count):\n    pass\n\n",
+      "code_sha256": "abe3b484adee1200ca189ee350fda4a84481795e7d5bf26e773efd4070e2f24f",
+      "constraints": {
+        "count": 0,
+        "violated": false,
+        "violations": []
+      },
+      "generation": null,
+      "outcome": {
+        "category": "simulation_failure",
+        "failure_reason": "1/10 cargo particles crossed below y=1.96 m after the grace window"
+      },
+      "phase": "reference",
+      "physics": {
+        "structure_broken": false
+      },
+      "score": 0.0,
+      "step_count": 10000,
+      "success": false,
+      "timestamp": 1785731814.7996094,
+      "verification_seconds": 0.9285846967250109
+    },
+    {
+      "artifacts": [],
+      "attempt": 1,
+      "code": "BOAT_LEFT_X = 13.5\nBOAT_RIGHT_X = 16.5\nRAIL_HEIGHT = 1.2  # Increased height to improve containment\nRAIL_WIDTH = 0.2\n\ndef _hull_deck_top(sandbox):\n    position = sandbox.get_boat_position()\n    if position is None:\n        hull_y = 2.5\n    else:\n        hull_y = float(position[1])\n    return hull_y + 0.2, hull_y\n\ndef _check_mass(sandbox):\n    total_mass = sandbox.get_structure_mass()\n    if total_mass > sandbox.MAX_STRUCTURE_MASS:\n        raise ValueError(\n            f\"Structure mass {total_mass:.2f} kg exceeds limit \"\n            f\"{sandbox.MAX_STRUCTURE_MASS:.2f} kg\"\n        )\n\ndef _build_low_ballast_cage(sandbox, ballast_density):\n    \"\"\"Closed hold with low, far-out ballast for roll inertia.\"\"\"\n    bodies = []\n    specifications = []\n    for x in (12.5, 17.5):\n        for y in (2.06, 2.18, 2.30):\n            specifications.append((x, y, 1.0, 0.1, ballast_density))\n    for x in (13.8, 14.6, 15.4, 16.2):\n        specifications.append((x, 2.85, 0.9, 0.12, 5.0))\n    specifications.extend(\n        (\n            (13.55, 3.28, 0.2, 0.98, 6.0),\n            (16.45, 3.28, 0.2, 0.98, 6.0),\n        )\n    )\n    for x in (13.8, 14.6, 15.4, 16.2):\n        specifications.append((x, 3.71, 0.9, 0.12, 3.0))\n\n    for x, y, width, height, density in specifications:\n        beam = sandbox.add_beam(x, y, width, height, density=density)\n        sandbox.set_material_properties(beam, restitution=0.01)\n        sandbox.add_joint(beam, None, (x, y), type=\"rigid\")\n        bodies.append(beam)\n\n    _check_mass(sandbox)\n    return bodies[0]\n\ndef build_agent(sandbox):\n    deck_top, hull_y = _hull_deck_top(sandbox)\n    build_y_min = 2.0\n    max_mass = float(sandbox.MAX_STRUCTURE_MASS)\n    reference_mass = 59.61\n    density_scale = (\n        1.0\n        if max_mass >= reference_mass - 0.05\n        else min(1.0, max(0.35, (max_mass - 0.25) / reference_mass))\n    )\n\n    def density(value):\n        return float(value) * density_scale\n\n    # Build low ballast cage for improved roll resistance\n    _build_low_ballast_cage(sandbox, ballast_density=density(254.0))\n    \n    anchor_y = build_y_min + 0.01\n    rail_anchor_y = max(deck_top - 0.05, anchor_y)\n    bodies = []\n\n    # Add rails with increased height for better cargo containment\n    for x in (BOAT_LEFT_X, BOAT_RIGHT_X):\n        rail = sandbox.add_beam(\n            x,\n            deck_top + RAIL_HEIGHT / 2.0,\n            RAIL_WIDTH,\n            RAIL_HEIGHT,\n            density=density(30.0),\n        )\n        sandbox.set_material_properties(rail, restitution=0.07)\n        sandbox.add_joint(rail, None, (x, rail_anchor_y), type=\"rigid\")\n        bodies.append(rail)\n\n    # Add lips and stops for additional containment\n    for x in (14.5, 15.5):\n        lip = sandbox.add_beam(\n            x, deck_top + 0.06, 0.18, 0.06, density=density(35.0)\n        )\n        sandbox.set_material_properties(lip, restitution=0.07)\n        sandbox.add_joint(lip, None, (x, deck_top), type=\"rigid\")\n        bodies.append(lip)\n\n    for x in (14.5, 15.5):\n        stop = sandbox.add_beam(\n            x, deck_top + 0.18, 0.26, 0.2, density=density(42.0)\n        )\n        sandbox.set_material_properties(stop, restitution=0.07)\n        sandbox.add_joint(stop, None, (x, deck_top), type=\"rigid\")\n        bodies.append(stop)\n\n    # Add a central divider to prevent cargo from moving side to side\n    divider = sandbox.add_beam(\n        15.0, deck_top + 0.25, 0.1, 0.5, density=density(30.0)\n    )\n    sandbox.set_material_properties(divider, restitution=0.07)\n    sandbox.add_joint(divider, None, (15.0, deck_top + 0.25), type=\"rigid\")\n    bodies.append(divider)\n\n    _check_mass(sandbox)\n    return bodies[0]\n\ndef agent_action(sandbox, agent_body, step_count):\n    pass",
+      "code_sha256": "14ef59226f63bca488a1e97423d7ba803eb6941f5121def8ef6c2a2d2c36d1f5",
+      "constraints": {
+        "count": 0,
+        "violated": false,
+        "violations": []
+      },
+      "generation": {
+        "latency_seconds": 299.1512196082622,
+        "model": "Qwen3-32B",
+        "token_usage": {
+          "completion_tokens": 7319,
+          "prompt_tokens": 8611,
+          "total_tokens": 15930
+        }
+      },
+      "outcome": {
+        "category": "construction_error",
+        "error": "Error building agent: Structure mass 158.21 kg exceeds limit 60.00 kg",
+        "error_message": "Structure mass 158.21 kg exceeds limit 60.00 kg",
+        "error_stage": "agent_construction",
+        "error_type": "agent_building_error"
+      },
+      "phase": "revision",
+      "physics": {},
+      "score": 0.0,
+      "step_count": null,
+      "success": false,
+      "timestamp": 1785732113.9577966,
+      "verification_seconds": 0.006565742194652557
+    },
+    {
+      "artifacts": [],
+      "attempt": 2,
+      "code": "BOAT_LEFT_X = 13.5\nBOAT_RIGHT_X = 16.5\nRAIL_WIDTH = 0.1\nRAIL_HEIGHT = 1.0\n\ndef _hull_deck_top(sandbox):\n    position = sandbox.get_boat_position()\n    if position is None:\n        hull_y = 2.5\n    else:\n        hull_y = float(position[1])\n    return hull_y + 0.2, hull_y\n\ndef _check_mass(sandbox):\n    total_mass = sandbox.get_structure_mass()\n    if total_mass > sandbox.MAX_STRUCTURE_MASS:\n        raise ValueError(\n            f\"Structure mass {total_mass:.2f} kg exceeds limit \"\n            f\"{sandbox.MAX_STRUCTURE_MASS:.2f} kg\"\n        )\n\ndef _build_low_ballast_cage(sandbox, ballast_density):\n    \"\"\"Closed hold with low, far-out ballast for roll inertia.\"\"\"\n    bodies = []\n    specifications = []\n    for x in (12.5, 17.5):\n        for y in (2.06, 2.18, 2.30):\n            specifications.append((x, y, 1.0, 0.1, ballast_density))\n    for x in (13.8, 14.6, 15.4, 16.2):\n        specifications.append((x, 2.85, 0.9, 0.12, 5.0))\n    specifications.extend(\n        (\n            (13.55, 3.28, 0.2, 0.98, 6.0),\n            (16.45, 3.28, 0.2, 0.98, 6.0),\n        )\n    )\n    for x in (13.8, 14.6, 15.4, 16.2):\n        specifications.append((x, 3.71, 0.9, 0.12, 3.0))\n\n    for x, y, width, height, density in specifications:\n        beam = sandbox.add_beam(x, y, width, height, density=density)\n        sandbox.set_material_properties(beam, restitution=0.01)\n        sandbox.add_joint(beam, None, (x, y), type=\"rigid\")\n        bodies.append(beam)\n\n    _check_mass(sandbox)\n    return bodies[0]\n\ndef build_agent(sandbox):\n    deck_top, hull_y = _hull_deck_top(sandbox)\n    build_y_min = 2.0\n    max_mass = float(sandbox.MAX_STRUCTURE_MASS)\n    reference_mass = 59.61\n    density_scale = (\n        1.0\n        if max_mass >= reference_mass - 0.05\n        else min(1.0, max(0.35, (max_mass - 0.25) / reference_mass))\n    )\n\n    def density(value):\n        return float(value) * density_scale\n\n    _build_low_ballast_cage(sandbox, ballast_density=density(254.0))\n    \n    anchor_y = build_y_min + 0.01\n    rail_anchor_y = max(deck_top - 0.05, anchor_y)\n    bodies = []\n\n    # Add high, narrow side rails for better cargo containment\n    for x in (BOAT_LEFT_X, BOAT_RIGHT_X):\n        rail = sandbox.add_beam(\n            x,\n            deck_top + RAIL_HEIGHT / 2.0,\n            RAIL_WIDTH,\n            RAIL_HEIGHT,\n            density=density(30.0),\n        )\n        sandbox.set_material_properties(rail, restitution=0.07)\n        sandbox.add_joint(rail, None, (x, rail_anchor_y), type=\"rigid\")\n        bodies.append(rail)\n\n    # Add improved lips for top containment\n    for x in (14.5, 15.5):\n        lip = sandbox.add_beam(\n            x, deck_top + 0.05, 0.18, 0.1, density=density(35.0)\n        )\n        sandbox.set_material_properties(lip, restitution=0.07)\n        sandbox.add_joint(lip, None, (x, deck_top), type=\"rigid\")\n        bodies.append(lip)\n\n    # Add stops for cargo containment\n    for x in (14.5, 15.5):\n        stop = sandbox.add_beam(\n            x, deck_top + 0.18, 0.26, 0.2, density=density(42.0)\n        )\n        sandbox.set_material_properties(stop, restitution=0.07)\n        sandbox.add_joint(stop, None, (x, deck_top), type=\"rigid\")\n        bodies.append(stop)\n\n    # Add a lightweight central divider to prevent side-to-side motion\n    divider = sandbox.add_beam(\n        15.0, deck_top + 0.15, 0.1, 0.3, density=density(30.0)\n    )\n    sandbox.set_material_properties(divider, restitution=0.07)\n    sandbox.add_joint(divider, None, (15.0, deck_top + 0.15), type=\"rigid\")\n    bodies.append(divider)\n\n    _check_mass(sandbox)\n    return bodies[0]\n\ndef agent_action(sandbox, agent_body, step_count):\n    pass",
+      "code_sha256": "0497a949ce71c0e28fae4a95da10cae9326c5f39849f09ec85e33a6271719559",
+      "constraints": {
+        "count": 0,
+        "violated": false,
+        "violations": []
+      },
+      "generation": {
+        "latency_seconds": 305.6502203885466,
+        "model": "Qwen3-32B",
+        "token_usage": {
+          "completion_tokens": 7679,
+          "prompt_tokens": 9898,
+          "total_tokens": 17577
+        }
+      },
+      "outcome": {
+        "category": "construction_error",
+        "error": "Error building agent: Structure mass 158.21 kg exceeds limit 60.00 kg",
+        "error_message": "Structure mass 158.21 kg exceeds limit 60.00 kg",
+        "error_stage": "agent_construction",
+        "error_type": "agent_building_error"
+      },
+      "phase": "revision",
+      "physics": {},
+      "score": 0.0,
+      "step_count": null,
+      "success": false,
+      "timestamp": 1785732419.615203,
+      "verification_seconds": 0.006818573921918869
+    },
+    {
+      "artifacts": [],
+      "attempt": 3,
+      "code": "BOAT_LEFT_X = 13.5\nBOAT_RIGHT_X = 16.5\nRAIL_WIDTH = 0.18\nRAIL_HEIGHT = 1.1  # Increased rail height for better vertical containment\n\ndef _hull_deck_top(sandbox):\n    position = sandbox.get_boat_position()\n    if position is None:\n        hull_y = 2.5\n    else:\n        hull_y = float(position[1])\n    return hull_y + 0.2, hull_y\n\ndef _check_mass(sandbox):\n    total_mass = sandbox.get_structure_mass()\n    if total_mass > sandbox.MAX_STRUCTURE_MASS:\n        raise ValueError(\n            f\"Structure mass {total_mass:.2f} kg exceeds limit \"\n            f\"{sandbox.MAX_STRUCTURE_MASS:.2f} kg\"\n        )\n\ndef build_agent(sandbox):\n    deck_top, hull_y = _hull_deck_top(sandbox)\n    build_y_min = 2.0\n    max_mass = float(sandbox.MAX_STRUCTURE_MASS)\n    reference_mass = 59.61\n    density_scale = (\n        1.0\n        if max_mass >= reference_mass - 0.05\n        else min(1.0, max(0.35, (max_mass - 0.25) / reference_mass))\n    )\n\n    def density(value):\n        return float(value) * density_scale\n\n    anchor_y = build_y_min + 0.01\n    ballast_y = max(hull_y - 0.3, build_y_min + 0.086)  # Lowered ballast\n    ballast_anchor_y = max(deck_top - 0.26, anchor_y)\n    rail_anchor_y = max(deck_top - 0.05, anchor_y)\n    bodies = []\n\n    # Low, dense ballast to lower center of mass\n    for x in (14.25, 15.75):\n        beam = sandbox.add_beam(\n            x, ballast_y, 0.5, 0.17, density=density(254.0)\n        )\n        sandbox.set_material_properties(beam, restitution=0.05)\n        sandbox.add_joint(beam, None, (x, ballast_anchor_y), type=\"rigid\")\n        bodies.append(beam)\n\n    # High side rails with low restitution for better containment\n    for x in (BOAT_LEFT_X, BOAT_RIGHT_X):\n        rail = sandbox.add_beam(\n            x,\n            deck_top + RAIL_HEIGHT / 2.0,\n            RAIL_WIDTH,\n            RAIL_HEIGHT,\n            density=density(28.0)  # Reduced density to stay under mass limit\n        )\n        sandbox.set_material_properties(rail, restitution=0.05)\n        sandbox.add_joint(rail, None, (x, rail_anchor_y), type=\"rigid\")\n        bodies.append(rail)\n\n    # Tight lips with low restitution to prevent cargo sliding\n    for x in (14.5, 15.5):\n        lip = sandbox.add_beam(\n            x, deck_top + 0.06, 0.18, 0.06, density=density(32.0)\n        )\n        sandbox.set_material_properties(lip, restitution=0.05)\n        sandbox.add_joint(lip, None, (x, deck_top), type=\"rigid\")\n        bodies.append(lip)\n\n    # Stops to prevent cargo from rolling\n    for x in (14.5, 15.5):\n        stop = sandbox.add_beam(\n            x, deck_top + 0.18, 0.26, 0.2, density=density(38.0)\n        )\n        sandbox.set_material_properties(stop, restitution=0.05)\n        sandbox.add_joint(stop, None, (x, deck_top), type=\"rigid\")\n        bodies.append(stop)\n\n    # Lightweight central divider to reduce side-to-side motion\n    divider = sandbox.add_beam(\n        15.0, deck_top + 0.15, 0.1, 0.25, density=density(15.0)  # Reduced size and density\n    )\n    sandbox.set_material_properties(divider, restitution=0.05)\n    sandbox.add_joint(divider, None, (15.0, deck_top + 0.15), type=\"rigid\")\n    bodies.append(divider)\n\n    _check_mass(sandbox)\n    return bodies[0]\n\ndef agent_action(sandbox, agent_body, step_count):\n    pass",
+      "code_sha256": "73c11cc0778e593c34b4559d3b313f6613fe06d62c5fb552d332187f0fad4baf",
+      "constraints": {
+        "count": 0,
+        "violated": false,
+        "violations": []
+      },
+      "generation": {
+        "latency_seconds": 275.8813192732632,
+        "model": "Qwen3-32B",
+        "token_usage": {
+          "completion_tokens": 5983,
+          "prompt_tokens": 9885,
+          "total_tokens": 15868
+        }
+      },
+      "outcome": {
+        "category": "simulation_failure",
+        "failure_reason": "3/10 cargo particles crossed below y=1.96 m after the grace window; Peak hull roll 30.05 deg exceeded 18.00 deg"
+      },
+      "phase": "revision",
+      "physics": {
+        "structure_broken": false
+      },
+      "score": 0.0,
+      "step_count": 10000,
+      "success": false,
+      "timestamp": 1785732696.4108045,
+      "verification_seconds": 0.9139434117823839
+    },
+    {
+      "artifacts": [],
+      "attempt": 4,
+      "code": "BOAT_LEFT_X = 13.5\nBOAT_RIGHT_X = 16.5\n\n\ndef _hull_deck_top(sandbox):\n    position = sandbox.get_boat_position()\n    if position is None:\n        hull_y = 2.5\n    else:\n        hull_y = float(position[1])\n    return hull_y + 0.2, hull_y\n\n\ndef _check_mass(sandbox):\n    total_mass = sandbox.get_structure_mass()\n    if total_mass > sandbox.MAX_STRUCTURE_MASS:\n        raise ValueError(\n            f\"Structure mass {total_mass:.2f} kg exceeds limit \"\n            f\"{sandbox.MAX_STRUCTURE_MASS:.2f} kg\"\n        )\n\n\ndef build_agent(sandbox):\n    deck_top, hull_y = _hull_deck_top(sandbox)\n    bodies = []\n\n    # Heavy, low ballast to reduce roll inertia\n    for x in (BOAT_LEFT_X, BOAT_RIGHT_X):\n        beam = sandbox.add_beam(x, 2.1, 0.5, 0.2, density=220.0)\n        sandbox.set_material_properties(beam, restitution=0.05)\n        sandbox.add_joint(beam, None, (x, 2.1), type=\"rigid\")\n        bodies.append(beam)\n\n    # Tall side rails for vertical containment\n    RAIL_HEIGHT = 1.0\n    RAIL_WIDTH = 0.2\n    for x in (BOAT_LEFT_X, BOAT_RIGHT_X):\n        rail = sandbox.add_beam(\n            x, deck_top + RAIL_HEIGHT / 2.0, RAIL_WIDTH, RAIL_HEIGHT, density=20.0\n        )\n        sandbox.set_material_properties(rail, restitution=0.05)\n        sandbox.add_joint(rail, None, (x, deck_top + RAIL_HEIGHT / 2.0), type=\"rigid\")\n        bodies.append(rail)\n\n    # Central cross beam to prevent lateral cargo motion\n    cross_beam_y = deck_top + RAIL_HEIGHT / 2.0\n    cross_beam = sandbox.add_beam(15.0, cross_beam_y, 3.0, 0.1, density=10.0)\n    sandbox.set_material_properties(cross_beam, restitution=0.05)\n    sandbox.add_joint(cross_beam, None, (15.0, cross_beam_y), type=\"rigid\")\n    bodies.append(cross_beam)\n\n    # Lips to prevent cargo from sliding off the deck\n    for x in (14.5, 15.5):\n        lip = sandbox.add_beam(x, deck_top + 0.06, 0.18, 0.06, density=30.0)\n        sandbox.set_material_properties(lip, restitution=0.05)\n        sandbox.add_joint(lip, None, (x, deck_top), type=\"rigid\")\n        bodies.append(lip)\n\n    # Stops to prevent cargo from rolling\n    for x in (14.5, 15.5):\n        stop = sandbox.add_beam(x, deck_top + 0.18, 0.26, 0.2, density=30.0)\n        sandbox.set_material_properties(stop, restitution=0.05)\n        sandbox.add_joint(stop, None, (x, deck_top), type=\"rigid\")\n        bodies.append(stop)\n\n    _check_mass(sandbox)\n    return bodies[0]\n\n\ndef agent_action(sandbox, agent_body, step_count):\n    pass",
+      "code_sha256": "e861bfddb76766d8cce97d3bcd8d38c227ea099d1b5efd754366bdd5bddeeb3d",
+      "constraints": {
+        "count": 0,
+        "violated": false,
+        "violations": []
+      },
+      "generation": {
+        "latency_seconds": 334.7989814821631,
+        "model": "Qwen3-32B",
+        "token_usage": {
+          "completion_tokens": 8625,
+          "prompt_tokens": 10087,
+          "total_tokens": 18712
+        }
+      },
+      "outcome": {
+        "category": "simulation_failure",
+        "failure_reason": "2/10 cargo particles crossed below y=1.96 m after the grace window; Peak hull roll 20.35 deg exceeded 18.00 deg"
+      },
+      "phase": "revision",
+      "physics": {
+        "structure_broken": false
+      },
+      "score": 0.0,
+      "step_count": 10000,
+      "success": false,
+      "timestamp": 1785733032.2269132,
+      "verification_seconds": 0.9288673494011164
+    },
+    {
+      "artifacts": [],
+      "attempt": 5,
+      "code": "BOAT_LEFT_X = 13.5\nBOAT_RIGHT_X = 16.5\nRAIL_HEIGHT = 1.2  # Increased rail height for better containment\nRAIL_WIDTH = 0.2\n\ndef _hull_deck_top(sandbox):\n    position = sandbox.get_boat_position()\n    if position is None:\n        hull_y = 2.5\n    else:\n        hull_y = float(position[1])\n    return hull_y + 0.2, hull_y\n\ndef _check_mass(sandbox):\n    total_mass = sandbox.get_structure_mass()\n    if total_mass > sandbox.MAX_STRUCTURE_MASS:\n        raise ValueError(\n            f\"Structure mass {total_mass:.2f} kg exceeds limit \"\n            f\"{sandbox.MAX_STRUCTURE_MASS:.2f} kg\"\n        )\n\ndef build_agent(sandbox):\n    deck_top, hull_y = _hull_deck_top(sandbox)\n    build_y_min = 2.0\n    max_mass = float(sandbox.MAX_STRUCTURE_MASS)\n    reference_mass = 59.61\n    density_scale = (\n        1.0\n        if max_mass >= reference_mass - 0.05\n        else min(1.0, max(0.35, (max_mass - 0.25) / reference_mass))\n    )\n\n    def density(value):\n        return float(value) * density_scale\n\n    bodies = []\n\n    # Heavy, low ballast to reduce roll inertia (slightly reduced density to make room for new structures)\n    for x in (14.25, 15.75):\n        beam = sandbox.add_beam(\n            x, 2.1, 0.5, 0.17, density=density(220.0)  # Reduced from 254.0\n        )\n        sandbox.set_material_properties(beam, restitution=0.01)\n        sandbox.add_joint(beam, None, (x, 2.1), type=\"rigid\")\n        bodies.append(beam)\n\n    # Tall side rails for vertical containment\n    for x in (BOAT_LEFT_X, BOAT_RIGHT_X):\n        rail = sandbox.add_beam(\n            x, deck_top + RAIL_HEIGHT / 2.0, RAIL_WIDTH, RAIL_HEIGHT, density=density(20.0)\n        )\n        sandbox.set_material_properties(rail, restitution=0.01)\n        sandbox.add_joint(rail, None, (x, deck_top + RAIL_HEIGHT / 2.0), type=\"rigid\")\n        bodies.append(rail)\n\n    # Frontal containment barrier connecting side rails at their top\n    front_beam = sandbox.add_beam(\n        15.0, deck_top + RAIL_HEIGHT, 3.0, 0.1, density=density(10.0)\n    )\n    sandbox.set_material_properties(front_beam, restitution=0.01)\n    sandbox.add_joint(front_beam, None, (15.0, deck_top + RAIL_HEIGHT), type=\"rigid\")\n    bodies.append(front_beam)\n\n    # Central lateral barrier to prevent lateral cargo movement\n    central_cross_beam = sandbox.add_beam(\n        15.0, deck_top + 0.1, 3.0, 0.05, density=density(5.0)\n    )\n    sandbox.set_material_properties(central_cross_beam, restitution=0.01)\n    sandbox.add_joint(central_cross_beam, None, (15.0, deck_top + 0.1), type=\"rigid\")\n    bodies.append(central_cross_beam)\n\n    # Lips to prevent cargo from sliding off the deck\n    for x in (14.5, 15.5):\n        lip = sandbox.add_beam(x, deck_top + 0.06, 0.18, 0.06, density=density(30.0))\n        sandbox.set_material_properties(lip, restitution=0.01)\n        sandbox.add_joint(lip, None, (x, deck_top), type=\"rigid\")\n        bodies.append(lip)\n\n    # Stops to prevent cargo from rolling\n    for x in (14.5, 15.5):\n        stop = sandbox.add_beam(x, deck_top + 0.18, 0.26, 0.2, density=density(30.0))\n        sandbox.set_material_properties(stop, restitution=0.01)\n        sandbox.add_joint(stop, None, (x, deck_top), type=\"rigid\")\n        bodies.append(stop)\n\n    _check_mass(sandbox)\n    return bodies[0]\n\ndef agent_action(sandbox, agent_body, step_count):\n    pass",
+      "code_sha256": "caa9dec4a15ee48bd11ae2f3367698006a82f8c625ab040fba8b46f8c483215b",
+      "constraints": {
+        "count": 0,
+        "violated": false,
+        "violations": []
+      },
+      "generation": {
+        "latency_seconds": 275.7014500685036,
+        "model": "Qwen3-32B",
+        "token_usage": {
+          "completion_tokens": 6715,
+          "prompt_tokens": 9857,
+          "total_tokens": 16572
+        }
+      },
+      "outcome": {
+        "category": "simulation_failure",
+        "failure_reason": "1/10 cargo particles crossed below y=1.96 m after the grace window"
+      },
+      "phase": "revision",
+      "physics": {
+        "structure_broken": false
+      },
+      "score": 0.0,
+      "step_count": 10000,
+      "success": false,
+      "timestamp": 1785733336.4674208,
+      "verification_seconds": 0.9819713290780783
+    },
+    {
+      "artifacts": [],
+      "attempt": 6,
+      "code": "def build_agent(sandbox):\n    \"\"\"Enclosed cargo container with reinforced side rails and roof to ensure retention.\"\"\"\n    deck_top, hull_y = _hull_deck_top(sandbox)\n    build_y_min = 2.0\n    max_mass = float(sandbox.MAX_STRUCTURE_MASS)\n    reference_mass = 59.61\n    density_scale = (\n        1.0\n        if max_mass >= reference_mass - 0.05\n        else min(1.0, max(0.35, (max_mass - 0.25) / reference_mass))\n    )\n\n    def density(value):\n        return float(value) * density_scale\n\n    bodies = []\n\n    # Heavier, lower ballast to reduce roll and stabilize the hull\n    for x in (14.25, 15.75):\n        beam = sandbox.add_beam(\n            x, 2.1, 0.5, 0.17, density=density(250.0)  # Increased from 220.0\n        )\n        sandbox.set_material_properties(beam, restitution=0.01)\n        sandbox.add_joint(beam, None, (x, 2.1), type=\"rigid\")\n        bodies.append(beam)\n\n    # Reinforced side rails with higher density and increased height\n    RAIL_HEIGHT = 1.4  # Slightly higher to give more margin\n    for x in (13.5, 16.5):  # BOAT_LEFT_X and BOAT_RIGHT_X\n        rail = sandbox.add_beam(\n            x, deck_top + RAIL_HEIGHT / 2.0,\n            0.2, RAIL_HEIGHT,\n            density=density(40.0)  # Higher density to absorb impact\n        )\n        sandbox.set_material_properties(rail, restitution=0.01)\n        sandbox.add_joint(rail, None, (x, deck_top + RAIL_HEIGHT / 2.0), type=\"rigid\")\n        bodies.append(rail)\n\n    # Front and back beams to fully enclose the cargo area\n    for z in (14.0, 16.0):  # Back and front of the cargo area\n        beam = sandbox.add_beam(\n            z, deck_top + RAIL_HEIGHT / 2.0,\n            3.0, 0.1,\n            density=density(20.0)\n        )\n        sandbox.set_material_properties(beam, restitution=0.01)\n        sandbox.add_joint(beam, None, (z, deck_top + RAIL_HEIGHT / 2.0), type=\"rigid\")\n        bodies.append(beam)\n\n    # Roof beam to prevent cargo from escaping upward\n    roof = sandbox.add_beam(\n        15.0, deck_top + RAIL_HEIGHT,\n        3.0, 0.1,\n        density=density(20.0)\n    )\n    sandbox.set_material_properties(roof, restitution=0.01)\n    sandbox.add_joint(roof, None, (15.0, deck_top + RAIL_HEIGHT), type=\"rigid\")\n    bodies.append(roof)\n\n    # Central divider to prevent lateral movement\n    central_cross_beam = sandbox.add_beam(\n        15.0, deck_top + 0.1,\n        3.0, 0.05,\n        density=density(10.0)\n    )\n    sandbox.set_material_properties(central_cross_beam, restitution=0.01)\n    sandbox.add_joint(central_cross_beam, None, (15.0, deck_top + 0.1), type=\"rigid\")\n    bodies.append(central_cross_beam)\n\n    # Lips to prevent cargo from sliding off the deck edges\n    for x in (14.5, 15.5):\n        lip = sandbox.add_beam(\n            x, deck_top + 0.06,\n            0.18, 0.06,\n            density=density(30.0)\n        )\n        sandbox.set_material_properties(lip, restitution=0.01)\n        sandbox.add_joint(lip, None, (x, deck_top), type=\"rigid\")\n        bodies.append(lip)\n\n    # Stops to prevent rolling off the sides\n    for x in (14.5, 15.5):\n        stop = sandbox.add_beam(\n            x, deck_top + 0.18,\n            0.26, 0.2,\n            density=density(30.0)\n        )\n        sandbox.set_material_properties(stop, restitution=0.01)\n        sandbox.add_joint(stop, None, (x, deck_top), type=\"rigid\")\n        bodies.append(stop)\n\n    _check_mass(sandbox)\n    return bodies[0]\n\ndef agent_action(sandbox, agent_body, step_count):\n    pass",
+      "code_sha256": "450328a8a08c8178583efc363e41ff9ae6f031769ae9209504ad78872023b7b1",
+      "constraints": {
+        "count": 0,
+        "violated": false,
+        "violations": []
+      },
+      "generation": {
+        "latency_seconds": 156.722924888134,
+        "model": "Qwen3-32B",
+        "token_usage": {
+          "completion_tokens": 3828,
+          "prompt_tokens": 10056,
+          "total_tokens": 13884
+        }
+      },
+      "outcome": {
+        "category": "construction_error",
+        "error": "Error building agent: name '_hull_deck_top' is not defined",
+        "error_message": "name '_hull_deck_top' is not defined",
+        "error_stage": "agent_construction",
+        "error_type": "agent_building_error"
+      },
+      "phase": "revision",
+      "physics": {},
+      "score": 0.0,
+      "step_count": null,
+      "success": false,
+      "timestamp": 1785733493.1990888,
+      "verification_seconds": 0.008395561948418617
+    },
+    {
+      "artifacts": [],
+      "attempt": 7,
+      "code": "def build_agent(sandbox):\n    def _hull_deck_top():\n        position = sandbox.get_boat_position()\n        hull_y = float(position[1]) if position else 2.5\n        return hull_y + 0.2, hull_y  # deck_top, hull_y\n\n    deck_top, hull_y = _hull_deck_top()\n    max_mass = float(sandbox.MAX_STRUCTURE_MASS)\n    reference_mass = 59.61\n    density_scale = 1.0  # Sufficient mass budget\n\n    def density(value):\n        return float(value) * density_scale\n\n    bodies = []\n\n    # Low, wide ballast to lower center of mass and improve roll stability\n    for x in (14.25, 15.75):\n        beam = sandbox.add_beam(x, 2.1, 0.5, 0.17, density=density(250.0))\n        sandbox.set_material_properties(beam, restitution=0.01)\n        sandbox.add_joint(beam, None, (x, 2.1), type=\"rigid\")\n        bodies.append(beam)\n\n    # Taller side rails for improved vertical containment\n    for x in (13.5, 16.5):\n        rail = sandbox.add_beam(x, deck_top + 1.4 / 2.0, 0.2, 1.4, density=density(40.0))\n        sandbox.set_material_properties(rail, restitution=0.01)\n        sandbox.add_joint(rail, None, (x, deck_top + 1.4 / 2.0), type=\"rigid\")\n        bodies.append(rail)\n\n    # Front and back beams to fully enclose cargo area\n    for x in (13.5, 16.5):  # at the ends of the cargo area\n        beam = sandbox.add_beam(x, deck_top + 0.4, 3.0, 0.1, density=density(20.0))\n        sandbox.set_material_properties(beam, restitution=0.01)\n        sandbox.add_joint(beam, None, (x, deck_top + 0.4), type=\"rigid\")\n        bodies.append(beam)\n\n    # Central cross beam to prevent lateral movement\n    central_beam = sandbox.add_beam(15.0, deck_top + 0.1, 3.0, 0.05, density=density(10.0))\n    sandbox.set_material_properties(central_beam, restitution=0.01)\n    sandbox.add_joint(central_beam, None, (15.0, deck_top + 0.1), type=\"rigid\")\n    bodies.append(central_beam)\n\n    # Roof beam to prevent upward escape and support downward containment\n    roof = sandbox.add_beam(15.0, deck_top + 1.4, 3.0, 0.1, density=density(20.0))\n    sandbox.set_material_properties(roof, restitution=0.01)\n    sandbox.add_joint(roof, None, (15.0, deck_top + 1.4), type=\"rigid\")\n    bodies.append(roof)\n\n    # Lips and stops to prevent edge escape\n    for x in (14.5, 15.5):\n        lip = sandbox.add_beam(x, deck_top + 0.06, 0.18, 0.06, density=density(30.0))\n        sandbox.set_material_properties(lip, restitution=0.01)\n        sandbox.add_joint(lip, None, (x, deck_top), type=\"rigid\")\n        bodies.append(lip)\n\n        stop = sandbox.add_beam(x, deck_top + 0.18, 0.26, 0.2, density=density(30.0))\n        sandbox.set_material_properties(stop, restitution=0.01)\n        sandbox.add_joint(stop, None, (x, deck_top), type=\"rigid\")\n        bodies.append(stop)\n\n    # Mass check\n    total_mass = sandbox.get_structure_mass()\n    if total_mass > max_mass:\n        raise ValueError(f\"Structure mass {total_mass:.2f} kg exceeds limit {max_mass:.2f} kg\")\n\n    return bodies[0]\n\ndef agent_action(sandbox, agent_body, step_count):\n    pass",
+      "code_sha256": "0eedd3232a772f1878fe46db7b012e63512c5ae135099ed9e3df8f457bf22b84",
+      "constraints": {
+        "count": 0,
+        "violated": false,
+        "violations": []
+      },
+      "generation": {
+        "latency_seconds": 249.6224383059889,
+        "model": "Qwen3-32B",
+        "token_usage": {
+          "completion_tokens": 5959,
+          "prompt_tokens": 9736,
+          "total_tokens": 15695
+        }
+      },
+      "outcome": {
+        "category": "construction_error",
+        "error": "Error building agent: Structure mass 69.70 kg exceeds limit 60.00 kg",
+        "error_message": "Structure mass 69.70 kg exceeds limit 60.00 kg",
+        "error_stage": "agent_construction",
+        "error_type": "agent_building_error"
+      },
+      "phase": "revision",
+      "physics": {},
+      "score": 0.0,
+      "step_count": null,
+      "success": false,
+      "timestamp": 1785733742.8277526,
+      "verification_seconds": 0.005911584943532944
+    },
+    {
+      "artifacts": [],
+      "attempt": 8,
+      "code": "def build_agent(sandbox):\n    def _hull_deck_top():\n        position = sandbox.get_boat_position()\n        hull_y = float(position[1]) if position else 2.5\n        return hull_y + 0.2, hull_y  # deck_top, hull_y\n\n    deck_top, hull_y = _hull_deck_top()\n    max_mass = float(sandbox.MAX_STRUCTURE_MASS)\n    reference_mass = 59.61\n    density_scale = 1.0  # Full scale as mass is within budget\n\n    def density(value):\n        return float(value) * density_scale\n\n    bodies = []\n\n    # Low, wide ballast beams to lower center of mass and increase roll inertia\n    for x in (14.25, 15.75):\n        beam = sandbox.add_beam(x, 2.1, 0.5, 0.17, density=density(220.0))\n        sandbox.set_material_properties(beam, restitution=0.01)\n        sandbox.add_joint(beam, None, (x, 2.1), type=\"rigid\")\n        bodies.append(beam)\n\n    # Taller side rails for vertical and lateral containment\n    for x in (13.5, 16.5):\n        rail = sandbox.add_beam(x, deck_top + 0.7, 0.15, 1.4, density=density(30.0))\n        sandbox.set_material_properties(rail, restitution=0.01)\n        sandbox.add_joint(rail, None, (x, deck_top + 0.7), type=\"rigid\")\n        bodies.append(rail)\n\n    # Central beam to prevent lateral movement\n    central_beam = sandbox.add_beam(15.0, deck_top + 0.1, 3.0, 0.05, density=density(10.0))\n    sandbox.set_material_properties(central_beam, restitution=0.01)\n    sandbox.add_joint(central_beam, None, (15.0, deck_top + 0.1), type=\"rigid\")\n    bodies.append(central_beam)\n\n    # Lips to prevent edge escape\n    for x in (14.5, 15.5):\n        lip = sandbox.add_beam(x, deck_top + 0.06, 0.18, 0.06, density=density(25.0))\n        sandbox.set_material_properties(lip, restitution=0.01)\n        sandbox.add_joint(lip, None, (x, deck_top), type=\"rigid\")\n        bodies.append(lip)\n\n    # Stops to prevent edge escape\n    for x in (14.5, 15.5):\n        stop = sandbox.add_beam(x, deck_top + 0.18, 0.26, 0.2, density=density(25.0))\n        sandbox.set_material_properties(stop, restitution=0.01)\n        sandbox.add_joint(stop, None, (x, deck_top), type=\"rigid\")\n        bodies.append(stop)\n\n    # Mass check\n    total_mass = sandbox.get_structure_mass()\n    if total_mass > max_mass:\n        raise ValueError(f\"Structure mass {total_mass:.2f} kg exceeds limit {max_mass:.2f} kg\")\n\n    return bodies[0]\n\ndef agent_action(sandbox, agent_body, step_count):\n    pass",
+      "code_sha256": "050b9c1e1f21d309d825852fc885c31ad4e6585f5c9ca9b7cd120455f517d257",
+      "constraints": {
+        "count": 0,
+        "violated": false,
+        "violations": []
+      },
+      "generation": {
+        "latency_seconds": 277.0871632285416,
+        "model": "Qwen3-32B",
+        "token_usage": {
+          "completion_tokens": 6661,
+          "prompt_tokens": 9645,
+          "total_tokens": 16306
+        }
+      },
+      "outcome": {
+        "category": "simulation_failure",
+        "failure_reason": "1/10 cargo particles crossed below y=1.96 m after the grace window"
+      },
+      "phase": "revision",
+      "physics": {
+        "structure_broken": false
+      },
+      "score": 0.0,
+      "step_count": 10000,
+      "success": false,
+      "timestamp": 1785734020.8728962,
+      "verification_seconds": 0.9576976001262665
+    },
+    {
+      "artifacts": [],
+      "attempt": 9,
+      "code": "def build_agent(sandbox):\n    def _hull_deck_top():\n        position = sandbox.get_boat_position()\n        hull_y = float(position[1]) if position else 2.5\n        return hull_y + 0.2, hull_y  # deck_top, hull_y\n\n    deck_top, hull_y = _hull_deck_top()\n    max_mass = float(sandbox.MAX_STRUCTURE_MASS)\n    reference_mass = 59.61\n    density_scale = 1.0  # Full scale as mass is within budget\n\n    def density(value):\n        return float(value) * density_scale\n\n    bodies = []\n\n    # Low, dense ballast beams at the lowest possible y (2.0 m)\n    for x in (14.25, 15.75):\n        beam = sandbox.add_beam(x, 2.0, 0.5, 0.17, density=density(280.0))\n        sandbox.set_material_properties(beam, restitution=0.01)\n        sandbox.add_joint(beam, None, (x, 2.0), type=\"rigid\")\n        bodies.append(beam)\n\n    # Taller side rails to improve vertical and lateral containment\n    for x in (13.5, 16.5):  # BOAT_LEFT_X, BOAT_RIGHT_X\n        rail = sandbox.add_beam(x, deck_top + 0.6, 0.15, 1.2, density=density(30.0))\n        sandbox.set_material_properties(rail, restitution=0.01)\n        sandbox.add_joint(rail, None, (x, deck_top + 0.6), type=\"rigid\")\n        bodies.append(rail)\n\n    # Front and back barriers to contain cargo in longitudinal direction\n    front_barrier = sandbox.add_beam(14.0, deck_top + 0.1, 1.0, 0.2, density=density(25.0))\n    sandbox.set_material_properties(front_barrier, restitution=0.01)\n    sandbox.add_joint(front_barrier, None, (14.0, deck_top + 0.1), type=\"rigid\")\n    bodies.append(front_barrier)\n\n    back_barrier = sandbox.add_beam(16.0, deck_top + 0.1, 1.0, 0.2, density=density(25.0))\n    sandbox.set_material_properties(back_barrier, restitution=0.01)\n    sandbox.add_joint(back_barrier, None, (16.0, deck_top + 0.1), type=\"rigid\")\n    bodies.append(back_barrier)\n\n    # Cross beams on the deck to prevent lateral cargo movement\n    for x in (14.0, 15.0, 16.0):\n        cross_beam = sandbox.add_beam(x, deck_top + 0.05, 1.0, 0.05, density=density(10.0))\n        sandbox.set_material_properties(cross_beam, restitution=0.01)\n        sandbox.add_joint(cross_beam, None, (x, deck_top + 0.05), type=\"rigid\")\n        bodies.append(cross_beam)\n\n    # Lips to prevent edge escape\n    for x in (14.5, 15.5):\n        lip = sandbox.add_beam(x, deck_top + 0.06, 0.18, 0.06, density=density(25.0))\n        sandbox.set_material_properties(lip, restitution=0.01)\n        sandbox.add_joint(lip, None, (x, deck_top), type=\"rigid\")\n        bodies.append(lip)\n\n    # Stops to prevent edge escape\n    for x in (14.5, 15.5):\n        stop = sandbox.add_beam(x, deck_top + 0.18, 0.26, 0.2, density=density(25.0))\n        sandbox.set_material_properties(stop, restitution=0.01)\n        sandbox.add_joint(stop, None, (x, deck_top), type=\"rigid\")\n        bodies.append(stop)\n\n    # Mass check\n    total_mass = sandbox.get_structure_mass()\n    if total_mass > max_mass:\n        raise ValueError(f\"Structure mass {total_mass:.2f} kg exceeds limit {max_mass:.2f} kg\")\n\n    return bodies[0]\n\ndef agent_action(sandbox, agent_body, step_count):\n    pass",
+      "code_sha256": "5c2bc4748451a8ae0e3ef6135822e985b2f981b5ec83184ddd586cff625d9a00",
+      "constraints": {
+        "count": 0,
+        "violated": false,
+        "violations": []
+      },
+      "generation": {
+        "latency_seconds": 293.3223978523165,
+        "model": "Qwen3-32B",
+        "token_usage": {
+          "completion_tokens": 6844,
+          "prompt_tokens": 9791,
+          "total_tokens": 16635
+        }
+      },
+      "outcome": {
+        "category": "construction_error",
+        "error": "Error building agent: Beam footprint corner (14.00, 1.92) outside build zone x=[12.00, 18.00], y=[2.00, 4.50]",
+        "error_message": "Beam footprint corner (14.00, 1.92) outside build zone x=[12.00, 18.00], y=[2.00, 4.50]",
+        "error_stage": "agent_construction",
+        "error_type": "agent_building_error"
+      },
+      "phase": "revision",
+      "physics": {},
+      "score": 0.0,
+      "step_count": null,
+      "success": false,
+      "timestamp": 1785734314.2026124,
+      "verification_seconds": 0.006982125341892242
+    },
+    {
+      "artifacts": [],
+      "attempt": 10,
+      "code": "def build_agent(sandbox):\n    def _hull_deck_top():\n        position = sandbox.get_boat_position()\n        hull_y = float(position[1]) if position else 2.5\n        return hull_y + 0.2, hull_y  # deck_top, hull_y\n\n    deck_top, hull_y = _hull_deck_top()\n    max_mass = float(sandbox.MAX_STRUCTURE_MASS)\n    reference_mass = 59.61\n    density_scale = 1.0  # Full scale as mass is within budget\n\n    def density(value):\n        return float(value) * density_scale\n\n    bodies = []\n\n    # Low, dense ballast beams at the lowest possible y (2.0 m) within build zone\n    for x in (14.25, 15.75):\n        beam = sandbox.add_beam(x, 2.0, 0.5, 0.17, density=density(280.0))\n        sandbox.set_material_properties(beam, restitution=0.01)\n        sandbox.add_joint(beam, None, (x, 2.0), type=\"rigid\")\n        bodies.append(beam)\n\n    # Taller side rails to improve vertical and lateral containment\n    # Positioned at BOAT_LEFT_X and BOAT_RIGHT_X with y at deck_top to ensure build zone compliance\n    for x in (13.5, 16.5):  # BOAT_LEFT_X, BOAT_RIGHT_X\n        rail_y = deck_top + 0.6  # Ensure rail is above deck and within build zone\n        rail = sandbox.add_beam(x, rail_y, 0.15, 1.2, density=density(30.0))\n        sandbox.set_material_properties(rail, restitution=0.01)\n        sandbox.add_joint(rail, None, (x, rail_y), type=\"rigid\")\n        bodies.append(rail)\n\n    # Front and back barriers to contain cargo in longitudinal direction\n    # Positioned at x=14.0 and 16.0, y just above deck to ensure build zone compliance\n    front_barrier_y = deck_top + 0.1\n    front_barrier = sandbox.add_beam(14.0, front_barrier_y, 1.0, 0.2, density=density(25.0))\n    sandbox.set_material_properties(front_barrier, restitution=0.01)\n    sandbox.add_joint(front_barrier, None, (14.0, front_barrier_y), type=\"rigid\")\n    bodies.append(front_barrier)\n\n    back_barrier_y = deck_top + 0.1\n    back_barrier = sandbox.add_beam(16.0, back_barrier_y, 1.0, 0.2, density=density(25.0))\n    sandbox.set_material_properties(back_barrier, restitution=0.01)\n    sandbox.add_joint(back_barrier, None, (16.0, back_barrier_y), type=\"rigid\")\n    bodies.append(back_barrier)\n\n    # Cross beams on the deck to prevent lateral cargo movement\n    for x in (14.0, 15.0, 16.0):\n        cross_y = deck_top + 0.05  # Ensure cross beams are within build zone\n        cross_beam = sandbox.add_beam(x, cross_y, 1.0, 0.05, density=density(10.0))\n        sandbox.set_material_properties(cross_beam, restitution=0.01)\n        sandbox.add_joint(cross_beam, None, (x, cross_y), type=\"rigid\")\n        bodies.append(cross_beam)\n\n    # Lips to prevent edge escape, positioned at deck level\n    for x in (14.5, 15.5):\n        lip_y = deck_top + 0.06  # Ensure lips are within build zone\n        lip = sandbox.add_beam(x, lip_y, 0.18, 0.06, density=density(25.0))\n        sandbox.set_material_properties(lip, restitution=0.01)\n        sandbox.add_joint(lip, None, (x, deck_top), type=\"rigid\")\n        bodies.append(lip)\n\n    # Stops to prevent edge escape, positioned at deck level\n    for x in (14.5, 15.5):\n        stop_y = deck_top + 0.18  # Ensure stops are within build zone\n        stop = sandbox.add_beam(x, stop_y, 0.26, 0.2, density=density(25.0))\n        sandbox.set_material_properties(stop, restitution=0.01)\n        sandbox.add_joint(stop, None, (x, deck_top), type=\"rigid\")\n        bodies.append(stop)\n\n    # Final mass check\n    total_mass = sandbox.get_structure_mass()\n    if total_mass > max_mass:\n        raise ValueError(f\"Structure mass {total_mass:.2f} kg exceeds limit {max_mass:.2f} kg\")\n\n    return bodies[0]\n\ndef agent_action(sandbox, agent_body, step_count):\n    pass",
+      "code_sha256": "9af96488906fcbf58451862b051e8032db0105f17395104d99e39b2ece71e85c",
+      "constraints": {
+        "count": 0,
+        "violated": false,
+        "violations": []
+      },
+      "generation": {
+        "latency_seconds": 120.0977965593338,
+        "model": "Qwen3-32B",
+        "token_usage": {
+          "completion_tokens": 3012,
+          "prompt_tokens": 9695,
+          "total_tokens": 12707
+        }
+      },
+      "outcome": {
+        "category": "construction_error",
+        "error": "Error building agent: Beam footprint corner (14.00, 1.92) outside build zone x=[12.00, 18.00], y=[2.00, 4.50]",
+        "error_message": "Beam footprint corner (14.00, 1.92) outside build zone x=[12.00, 18.00], y=[2.00, 4.50]",
+        "error_stage": "agent_construction",
+        "error_type": "agent_building_error"
+      },
+      "phase": "revision",
+      "physics": {},
+      "score": 0.0,
+      "step_count": null,
+      "success": false,
+      "timestamp": 1785734473.3777244,
+      "verification_seconds": 0.005599375814199448
+    },
+    {
+      "artifacts": [],
+      "attempt": 11,
+      "code": "def build_agent(sandbox):\n    def _hull_deck_top():\n        position = sandbox.get_boat_position()\n        hull_y = float(position[1]) if position else 2.5\n        return hull_y + 0.2, hull_y  # deck_top, hull_y\n\n    deck_top, hull_y = _hull_deck_top()\n    max_mass = float(sandbox.MAX_STRUCTURE_MASS)\n    reference_mass = 59.61\n    density_scale = 1.0  # Full scale as mass is within budget\n\n    def density(value):\n        return float(value) * density_scale\n\n    bodies = []\n\n    # Low, dense ballast beams as in original best-scoring code\n    for x in (12.5, 17.5):\n        for y in (2.06, 2.18, 2.30):\n            beam = sandbox.add_beam(x, y, 1.0, 0.1, density=density(254.0))\n            sandbox.set_material_properties(beam, restitution=0.01)\n            sandbox.add_joint(beam, None, (x, y), type=\"rigid\")\n            bodies.append(beam)\n\n    # Taller side rails to improve vertical and lateral containment\n    RAIL_HEIGHT = 1.2  # Increased from 0.9 to 1.2\n    RAIL_WIDTH = 0.2\n    for x in (13.5, 16.5):  # BOAT_LEFT_X, BOAT_RIGHT_X\n        rail_y = deck_top + RAIL_HEIGHT / 2.0\n        rail = sandbox.add_beam(x, rail_y, RAIL_WIDTH, RAIL_HEIGHT, density=density(30.0))\n        sandbox.set_material_properties(rail, restitution=0.01)\n        sandbox.add_joint(rail, None, (x, rail_y), type=\"rigid\")\n        bodies.append(rail)\n\n    # Front and back barriers to contain cargo in longitudinal direction\n    front_barrier_y = deck_top + 0.1\n    front_barrier = sandbox.add_beam(14.0, front_barrier_y, 1.0, 0.2, density=density(25.0))\n    sandbox.set_material_properties(front_barrier, restitution=0.01)\n    sandbox.add_joint(front_barrier, None, (14.0, front_barrier_y), type=\"rigid\")\n    bodies.append(front_barrier)\n\n    back_barrier_y = deck_top + 0.1\n    back_barrier = sandbox.add_beam(16.0, back_barrier_y, 1.0, 0.2, density=density(25.0))\n    sandbox.set_material_properties(back_barrier, restitution=0.01)\n    sandbox.add_joint(back_barrier, None, (16.0, back_barrier_y), type=\"rigid\")\n    bodies.append(back_barrier)\n\n    # Cross beams on the deck to prevent lateral cargo movement\n    for x in (14.0, 15.0, 16.0):\n        cross_y = deck_top + 0.05  # Ensure cross beams are within build zone\n        cross_beam = sandbox.add_beam(x, cross_y, 1.0, 0.05, density=density(10.0))\n        sandbox.set_material_properties(cross_beam, restitution=0.01)\n        sandbox.add_joint(cross_beam, None, (x, cross_y), type=\"rigid\")\n        bodies.append(cross_beam)\n\n    # Additional cross beams at higher positions for extra retention\n    for x in (14.0, 15.0, 16.0):\n        higher_cross_y = deck_top + 0.3\n        higher_cross_beam = sandbox.add_beam(x, higher_cross_y, 1.0, 0.05, density=density(10.0))\n        sandbox.set_material_properties(higher_cross_beam, restitution=0.01)\n        sandbox.add_joint(higher_cross_beam, None, (x, higher_cross_y), type=\"rigid\")\n        bodies.append(higher_cross_beam)\n\n    # Roof beam to prevent vertical escape\n    roof_x = 15.0\n    roof_y = deck_top + 0.8\n    roof_width = 2.0\n    roof_height = 0.1\n    roof_beam = sandbox.add_beam(roof_x, roof_y, roof_width, roof_height, density=density(15.0))\n    sandbox.set_material_properties(roof_beam, restitution=0.01)\n    sandbox.add_joint(roof_beam, None, (roof_x, roof_y), type=\"rigid\")\n    bodies.append(roof_beam)\n\n    # Lips to prevent edge escape, positioned at deck level\n    for x in (14.5, 15.5):\n        lip_y = deck_top + 0.06\n        lip = sandbox.add_beam(x, lip_y, 0.18, 0.06, density=density(25.0))\n        sandbox.set_material_properties(lip, restitution=0.01)\n        sandbox.add_joint(lip, None, (x, deck_top), type=\"rigid\")\n        bodies.append(lip)\n\n    # Stops to prevent edge escape, positioned at deck level\n    for x in (14.5, 15.5):\n        stop_y = deck_top + 0.18\n        stop = sandbox.add_beam(x, stop_y, 0.26, 0.2, density=density(25.0))\n        sandbox.set_material_properties(stop, restitution=0.01)\n        sandbox.add_joint(stop, None, (x, deck_top), type=\"rigid\")\n        bodies.append(stop)\n\n    # Final mass check\n    total_mass = sandbox.get_structure_mass()\n    if total_mass > max_mass:\n        raise ValueError(f\"Structure mass {total_mass:.2f} kg exceeds limit {max_mass:.2f} kg\")\n\n    return bodies[0]\n\ndef agent_action(sandbox, agent_body, step_count):\n    pass",
+      "code_sha256": "d6680ef01e5a8e837ffcfce71c80be6f18716112baab571fef9f388fe32f436a",
+      "constraints": {
+        "count": 0,
+        "violated": false,
+        "violations": []
+      },
+      "generation": {
+        "latency_seconds": 418.8524806573987,
+        "model": "Qwen3-32B",
+        "token_usage": {
+          "completion_tokens": 9982,
+          "prompt_tokens": 9825,
+          "total_tokens": 19807
+        }
+      },
+      "outcome": {
+        "category": "construction_error",
+        "error": "Error building agent: Structure mass 185.40 kg exceeds limit 60.00 kg",
+        "error_message": "Structure mass 185.40 kg exceeds limit 60.00 kg",
+        "error_stage": "agent_construction",
+        "error_type": "agent_building_error"
+      },
+      "phase": "revision",
+      "physics": {},
+      "score": 0.0,
+      "step_count": null,
+      "success": false,
+      "timestamp": 1785734892.2379873,
+      "verification_seconds": 0.007376816123723984
+    },
+    {
+      "artifacts": [],
+      "attempt": 12,
+      "code": "def build_agent(sandbox):\n    def _hull_deck_top():\n        position = sandbox.get_boat_position()\n        hull_y = float(position[1]) if position else 2.5\n        return hull_y + 0.2, hull_y  # deck_top, hull_y\n\n    deck_top, hull_y = _hull_deck_top()\n    max_mass = sandbox.MAX_STRUCTURE_MASS\n    reference_mass = 59.61\n    density_scale = 1.0  # Assume mass is within budget\n\n    def density(value):\n        return value * density_scale\n\n    bodies = []\n\n    # Low, dense ballast beams for stability\n    for x in (14.25, 15.75):\n        beam = sandbox.add_beam(x, 2.30, 0.5, 0.17, density=density(254.0))\n        sandbox.set_material_properties(beam, restitution=0.05)\n        sandbox.add_joint(beam, None, (x, 2.30), type=\"rigid\")\n        bodies.append(beam)\n\n    # Taller side rails for vertical containment\n    RAIL_HEIGHT = 1.0\n    RAIL_WIDTH = 0.2\n    for x in (13.5, 16.5):  # BOAT_LEFT_X, BOAT_RIGHT_X\n        rail_y = deck_top + RAIL_HEIGHT / 2.0\n        rail = sandbox.add_beam(x, rail_y, RAIL_WIDTH, RAIL_HEIGHT, density=density(25.0))\n        sandbox.set_material_properties(rail, restitution=0.05)\n        sandbox.add_joint(rail, None, (x, rail_y), type=\"rigid\")\n        bodies.append(rail)\n\n    # Central cross beam to prevent lateral escape\n    cross_x = 15.0\n    cross_y = deck_top + 0.05\n    cross_width = 1.0\n    cross_height = 0.05\n    cross_beam = sandbox.add_beam(cross_x, cross_y, cross_width, cross_height, density=density(4.0))\n    sandbox.set_material_properties(cross_beam, restitution=0.01)\n    sandbox.add_joint(cross_beam, None, (cross_x, cross_y), type=\"rigid\")\n    bodies.append(cross_beam)\n\n    # Lips to prevent edge escape\n    for x in (14.5, 15.5):\n        lip = sandbox.add_beam(x, deck_top + 0.06, 0.18, 0.06, density=density(35.0))\n        sandbox.set_material_properties(lip, restitution=0.07)\n        sandbox.add_joint(lip, None, (x, deck_top), type=\"rigid\")\n        bodies.append(lip)\n\n    # Stops to prevent edge escape\n    for x in (14.5, 15.5):\n        stop = sandbox.add_beam(x, deck_top + 0.18, 0.26, 0.2, density=density(42.0))\n        sandbox.set_material_properties(stop, restitution=0.07)\n        sandbox.add_joint(stop, None, (x, deck_top), type=\"rigid\")\n        bodies.append(stop)\n\n    # Final mass check\n    total_mass = sandbox.get_structure_mass()\n    if total_mass > max_mass:\n        raise ValueError(f\"Structure mass {total_mass:.2f} kg exceeds limit {max_mass:.2f} kg\")\n\n    return bodies[0]\n\ndef agent_action(sandbox, agent_body, step_count):\n    pass",
+      "code_sha256": "acd1628c716840c491ec5cd9914fc426bd4bfaac232b5692e881f48e6c36c898",
+      "constraints": {
+        "count": 0,
+        "violated": false,
+        "violations": []
+      },
+      "generation": {
+        "latency_seconds": 265.3670609872788,
+        "model": "Qwen3-32B",
+        "token_usage": {
+          "completion_tokens": 6157,
+          "prompt_tokens": 10012,
+          "total_tokens": 16169
+        }
+      },
+      "outcome": {
+        "category": "simulation_failure",
+        "failure_reason": "2/10 cargo particles crossed below y=1.96 m after the grace window"
+      },
+      "phase": "revision",
+      "physics": {
+        "structure_broken": false
+      },
+      "score": 0.0,
+      "step_count": 10000,
+      "success": false,
+      "timestamp": 1785735158.552298,
+      "verification_seconds": 0.9469235893338919
+    },
+    {
+      "artifacts": [],
+      "attempt": 13,
+      "code": "def build_agent(sandbox):\n    def _hull_deck_top():\n        position = sandbox.get_boat_position()\n        hull_y = float(position[1]) if position else 2.5\n        return hull_y + 0.2, hull_y  # deck_top, hull_y\n\n    deck_top, hull_y = _hull_deck_top()\n    max_mass = sandbox.MAX_STRUCTURE_MASS\n    reference_mass = 59.61\n    density_scale = 1.0  # Assume mass is within budget\n\n    def density(value):\n        return value * density_scale\n\n    bodies = []\n\n    # Low, dense ballast beams for stability (lowered y-position)\n    for x in (14.25, 15.75):\n        beam = sandbox.add_beam(x, 2.1, 0.5, 0.17, density=density(254.0))\n        sandbox.set_material_properties(beam, restitution=0.01)\n        sandbox.add_joint(beam, None, (x, 2.1), type=\"rigid\")\n        bodies.append(beam)\n\n    # Taller side rails for vertical containment\n    RAIL_HEIGHT = 1.2\n    RAIL_WIDTH = 0.2\n    for x in (13.5, 16.5):  # BOAT_LEFT_X, BOAT_RIGHT_X\n        rail_y = deck_top + RAIL_HEIGHT / 2.0\n        rail = sandbox.add_beam(x, rail_y, RAIL_WIDTH, RAIL_HEIGHT, density=density(20.0))\n        sandbox.set_material_properties(rail, restitution=0.01)\n        sandbox.add_joint(rail, None, (x, rail_y), type=\"rigid\")\n        bodies.append(rail)\n\n    # Central cross beam to prevent lateral escape\n    cross_x = 15.0\n    cross_y = deck_top + 0.05\n    cross_width = 1.0\n    cross_height = 0.05\n    cross_beam = sandbox.add_beam(cross_x, cross_y, cross_width, cross_height, density=density(4.0))\n    sandbox.set_material_properties(cross_beam, restitution=0.01)\n    sandbox.add_joint(cross_beam, None, (cross_x, cross_y), type=\"rigid\")\n    bodies.append(cross_beam)\n\n    # Lips to prevent edge escape (lower density)\n    for x in (14.5, 15.5):\n        lip = sandbox.add_beam(x, deck_top + 0.06, 0.18, 0.06, density=density(30.0))\n        sandbox.set_material_properties(lip, restitution=0.01)\n        sandbox.add_joint(lip, None, (x, deck_top), type=\"rigid\")\n        bodies.append(lip)\n\n    # Stops to prevent edge escape (lower density)\n    for x in (14.5, 15.5):\n        stop = sandbox.add_beam(x, deck_top + 0.18, 0.26, 0.2, density=density(35.0))\n        sandbox.set_material_properties(stop, restitution=0.01)\n        sandbox.add_joint(stop, None, (x, deck_top), type=\"rigid\")\n        bodies.append(stop)\n\n    # Final mass check\n    total_mass = sandbox.get_structure_mass()\n    if total_mass > max_mass:\n        raise ValueError(f\"Structure mass {total_mass:.2f} kg exceeds limit {max_mass:.2f} kg\")\n\n    return bodies[0]\n\ndef agent_action(sandbox, agent_body, step_count):\n    pass",
+      "code_sha256": "31111ff57a98c9c2d92cea64f653844012bf7dcf217b8449faa5dc2685dc354e",
+      "constraints": {
+        "count": 0,
+        "violated": false,
+        "violations": []
+      },
+      "generation": {
+        "latency_seconds": 230.33035331964493,
+        "model": "Qwen3-32B",
+        "token_usage": {
+          "completion_tokens": 5278,
+          "prompt_tokens": 9833,
+          "total_tokens": 15111
+        }
+      },
+      "outcome": {
+        "category": "simulation_failure",
+        "failure_reason": "1/10 cargo particles crossed below y=1.96 m after the grace window"
+      },
+      "phase": "revision",
+      "physics": {
+        "structure_broken": false
+      },
+      "score": 0.0,
+      "step_count": 10000,
+      "success": false,
+      "timestamp": 1785735389.8423722,
+      "verification_seconds": 0.9593949168920517
+    },
+    {
+      "artifacts": [],
+      "attempt": 14,
+      "code": "def build_agent(sandbox):\n    def _hull_deck_top():\n        position = sandbox.get_boat_position()\n        hull_y = float(position[1]) if position else 2.5\n        return hull_y + 0.2, hull_y  # deck_top, hull_y\n\n    deck_top, hull_y = _hull_deck_top()\n    max_mass = sandbox.MAX_STRUCTURE_MASS\n    reference_mass = 59.61\n    density_scale = 1.0  # Assume mass is within budget\n\n    def density(value):\n        return value * density_scale\n\n    bodies = []\n\n    # 📦 Low, dense ballast beams for stability (now at y=2.0 m)\n    for x in (14.25, 15.75):\n        beam = sandbox.add_beam(x, 2.0, 0.5, 0.17, density=density(254.0))\n        sandbox.set_material_properties(beam, restitution=0.01)\n        sandbox.add_joint(beam, None, (x, 2.0), type=\"rigid\")\n        bodies.append(beam)\n\n    # 🛤️ Taller side rails for vertical/lateral containment (RAIL_HEIGHT = 1.5 m)\n    RAIL_HEIGHT = 1.5\n    RAIL_WIDTH = 0.2\n    for x in (13.5, 16.5):  # BOAT_LEFT_X, BOAT_RIGHT_X\n        rail_y = deck_top + RAIL_HEIGHT / 2.0\n        rail = sandbox.add_beam(x, rail_y, RAIL_WIDTH, RAIL_HEIGHT, density=density(20.0))\n        sandbox.set_material_properties(rail, restitution=0.01)\n        sandbox.add_joint(rail, None, (x, rail_y), type=\"rigid\")\n        bodies.append(rail)\n\n    # 🧱 Central cross beams to prevent lateral escape\n    for x in (14.5, 15.5):\n        cross_y = deck_top + 0.1\n        cross = sandbox.add_beam(x, cross_y, 0.5, 0.1, density=density(40.0))\n        sandbox.set_material_properties(cross, restitution=0.01)\n        sandbox.add_joint(cross, None, (x, cross_y), type=\"rigid\")\n        bodies.append(cross)\n\n    # 🛡️ Base barriers to prevent sliding during hull tilt\n    for x in (13.5, 16.5):\n        base_y = 2.0\n        base = sandbox.add_beam(x, base_y, 1.0, 0.1, density=density(10.0))\n        sandbox.set_material_properties(base, restitution=0.01)\n        sandbox.add_joint(base, None, (x, base_y), type=\"rigid\")\n        bodies.append(base)\n\n    # 🧩 Additional lip and stop for edge retention\n    for x in (14.5, 15.5):\n        lip = sandbox.add_beam(x, deck_top + 0.06, 0.18, 0.06, density=density(30.0))\n        sandbox.set_material_properties(lip, restitution=0.01)\n        sandbox.add_joint(lip, None, (x, deck_top), type=\"rigid\")\n        bodies.append(lip)\n\n        stop = sandbox.add_beam(x, deck_top + 0.18, 0.26, 0.2, density=density(35.0))\n        sandbox.set_material_properties(stop, restitution=0.01)\n        sandbox.add_joint(stop, None, (x, deck_top), type=\"rigid\")\n        bodies.append(stop)\n\n    # 🧾 Mass check\n    total_mass = sandbox.get_structure_mass()\n    if total_mass > max_mass:\n        raise ValueError(f\"Structure mass {total_mass:.2f} kg exceeds limit {max_mass:.2f} kg\")\n\n    return bodies[0]\n\ndef agent_action(sandbox, agent_body, step_count):\n    pass",
+      "code_sha256": "4ae4d88e7910d2ef0b48b83c14ace7c880245db6671c6ce487ced3385ae86134",
+      "constraints": {
+        "count": 0,
+        "violated": false,
+        "violations": []
+      },
+      "generation": {
+        "latency_seconds": 196.07740919850767,
+        "model": "Qwen3-32B",
+        "token_usage": {
+          "completion_tokens": 4697,
+          "prompt_tokens": 9848,
+          "total_tokens": 14545
+        }
+      },
+      "outcome": {
+        "category": "construction_error",
+        "error": "Error building agent: Beam footprint corner (14.00, 1.92) outside build zone x=[12.00, 18.00], y=[2.00, 4.50]",
+        "error_message": "Beam footprint corner (14.00, 1.92) outside build zone x=[12.00, 18.00], y=[2.00, 4.50]",
+        "error_stage": "agent_construction",
+        "error_type": "agent_building_error"
+      },
+      "phase": "revision",
+      "physics": {},
+      "score": 0.0,
+      "step_count": null,
+      "success": false,
+      "timestamp": 1785735585.925549,
+      "verification_seconds": 0.005404705181717873
+    },
+    {
+      "artifacts": [],
+      "attempt": 15,
+      "code": "def build_agent(sandbox):\n    def _hull_deck_top():\n        position = sandbox.get_boat_position()\n        hull_y = float(position[1]) if position else 2.5\n        return hull_y + 0.2, hull_y  # deck_top, hull_y\n\n    deck_top, hull_y = _hull_deck_top()\n    build_y_min = 2.0\n    max_mass = sandbox.MAX_STRUCTURE_MASS\n    reference_mass = 59.61\n    density_scale = 1.0  # Assume mass is within budget\n\n    def density(value):\n        return value * density_scale\n\n    bodies = []\n\n    # 📦 Low, dense ballast beams for stability\n    ballast_y = max(hull_y - 0.26, build_y_min + 0.086)\n    for x in (14.25, 15.75):\n        beam = sandbox.add_beam(x, ballast_y, 0.5, 0.17, density=density(254.0))\n        sandbox.set_material_properties(beam, restitution=0.01)\n        sandbox.add_joint(beam, None, (x, ballast_y), type=\"rigid\")\n        bodies.append(beam)\n\n    # 🛤️ Side rails for vertical and lateral containment\n    RAIL_HEIGHT = 0.9\n    RAIL_WIDTH = 0.2\n    for x in (13.5, 16.5):  # BOAT_LEFT_X, BOAT_RIGHT_X\n        rail_y = deck_top + RAIL_HEIGHT / 2.0\n        rail = sandbox.add_beam(x, rail_y, RAIL_WIDTH, RAIL_HEIGHT, density=density(30.0))\n        sandbox.set_material_properties(rail, restitution=0.01)\n        sandbox.add_joint(rail, None, (x, rail_y), type=\"rigid\")\n        bodies.append(rail)\n\n    # 🧱 Cross beams to prevent lateral escape\n    for x in (14.5, 15.5):\n        cross_y = deck_top + 0.1\n        cross = sandbox.add_beam(x, cross_y, 0.5, 0.1, density=density(40.0))\n        sandbox.set_material_properties(cross, restitution=0.01)\n        sandbox.add_joint(cross, None, (x, cross_y), type=\"rigid\")\n        bodies.append(cross)\n\n    # 🛡️ Front and back barriers to prevent forward/backward cargo movement\n    for x in (13.65, 16.35):  # At the front and back of the cargo zone\n        barrier_y = deck_top + 0.05\n        barrier = sandbox.add_beam(x, barrier_y, 1.0, 0.1, density=density(30.0))\n        sandbox.set_material_properties(barrier, restitution=0.01)\n        sandbox.add_joint(barrier, None, (x, barrier_y), type=\"rigid\")\n        bodies.append(barrier)\n\n    # 🧩 Additional lip and stop for edge retention\n    for x in (14.5, 15.5):\n        lip = sandbox.add_beam(x, deck_top + 0.06, 0.18, 0.06, density=density(30.0))\n        sandbox.set_material_properties(lip, restitution=0.01)\n        sandbox.add_joint(lip, None, (x, deck_top), type=\"rigid\")\n        bodies.append(lip)\n\n        stop = sandbox.add_beam(x, deck_top + 0.18, 0.26, 0.2, density=density(35.0))\n        sandbox.set_material_properties(stop, restitution=0.01)\n        sandbox.add_joint(stop, None, (x, deck_top), type=\"rigid\")\n        bodies.append(stop)\n\n    # 🧾 Mass check\n    total_mass = sandbox.get_structure_mass()\n    if total_mass > max_mass:\n        raise ValueError(f\"Structure mass {total_mass:.2f} kg exceeds limit {max_mass:.2f} kg\")\n\n    return bodies[0]\n\ndef agent_action(sandbox, agent_body, step_count):\n    pass",
+      "code_sha256": "c8b172dc59a13e495d76d510a1e2984a1c0129732c8e9ae5a814e680cd8a8194",
+      "constraints": {
+        "count": 0,
+        "violated": false,
+        "violations": []
+      },
+      "generation": {
+        "latency_seconds": 371.4317220058292,
+        "model": "Qwen3-32B",
+        "token_usage": {
+          "completion_tokens": 8359,
+          "prompt_tokens": 9620,
+          "total_tokens": 17979
+        }
+      },
+      "outcome": {
+        "category": "construction_error",
+        "error": "Error building agent: Structure mass 68.70 kg exceeds limit 60.00 kg",
+        "error_message": "Structure mass 68.70 kg exceeds limit 60.00 kg",
+        "error_stage": "agent_construction",
+        "error_type": "agent_building_error"
+      },
+      "phase": "revision",
+      "physics": {},
+      "score": 0.0,
+      "step_count": null,
+      "success": false,
+      "timestamp": 1785735957.3635695,
+      "verification_seconds": 0.00593159906566143
+    },
+    {
+      "artifacts": [],
+      "attempt": 16,
+      "code": "def build_agent(sandbox):\n    def _hull_deck_top():\n        position = sandbox.get_boat_position()\n        hull_y = float(position[1]) if position else 2.5\n        return hull_y + 0.2, hull_y  # deck_top, hull_y\n\n    deck_top, hull_y = _hull_deck_top()\n    build_y_min = 2.0\n    max_mass = sandbox.MAX_STRUCTURE_MASS\n    reference_mass = 59.61\n    density_scale = 1.0  # Assume mass is within budget\n\n    def density(value):\n        return value * density_scale\n\n    bodies = []\n\n    # 📦 Low, dense ballast for stability\n    ballast_y = build_y_min  # 2.0 m\n    for x in (14.25, 15.75):\n        beam = sandbox.add_beam(x, ballast_y, 0.5, 0.17, density=density(254.0))\n        sandbox.set_material_properties(beam, restitution=0.01)\n        sandbox.add_joint(beam, None, (x, ballast_y), type=\"rigid\")\n        bodies.append(beam)\n\n    # 🛤️ Side rails (reduced density for mass budget)\n    RAIL_HEIGHT = 0.9\n    RAIL_WIDTH = 0.2\n    for x in (13.5, 16.5):\n        rail_y = deck_top + RAIL_HEIGHT / 2.0\n        rail = sandbox.add_beam(x, rail_y, RAIL_WIDTH, RAIL_HEIGHT, density=density(15.0))\n        sandbox.set_material_properties(rail, restitution=0.01)\n        sandbox.add_joint(rail, None, (x, rail_y), type=\"rigid\")\n        bodies.append(rail)\n\n    # 🧱 Central beam to divide cargo area\n    central_beam_x = 15.0\n    central_beam_y = deck_top - 0.1  # Just below the deck\n    central_beam = sandbox.add_beam(\n        central_beam_x, central_beam_y, 1.0, 0.1, density=density(20.0)\n    )\n    sandbox.set_material_properties(central_beam, restitution=0.01)\n    sandbox.add_joint(central_beam, None, (central_beam_x, central_beam_y), type=\"rigid\")\n    bodies.append(central_beam)\n\n    # 🛡️ Cross beams for lateral cargo containment\n    for x in (14.5, 15.5):\n        cross_y = deck_top + 0.05\n        cross = sandbox.add_beam(x, cross_y, 0.5, 0.1, density=density(20.0))\n        sandbox.set_material_properties(cross, restitution=0.01)\n        sandbox.add_joint(cross, None, (x, cross_y), type=\"rigid\")\n        bodies.append(cross)\n\n    # 🧱 Front and back barriers (reduced density)\n    for x in (13.65, 16.35):  # At the front and back of the cargo zone\n        barrier_y = deck_top + 0.05\n        barrier = sandbox.add_beam(x, barrier_y, 1.0, 0.1, density=density(15.0))\n        sandbox.set_material_properties(barrier, restitution=0.01)\n        sandbox.add_joint(barrier, None, (x, barrier_y), type=\"rigid\")\n        bodies.append(barrier)\n\n    # 🧩 Lips and stops for edge retention (reduced density)\n    for x in (14.5, 15.5):\n        lip = sandbox.add_beam(x, deck_top + 0.06, 0.18, 0.06, density=density(15.0))\n        sandbox.set_material_properties(lip, restitution=0.01)\n        sandbox.add_joint(lip, None, (x, deck_top), type=\"rigid\")\n        bodies.append(lip)\n\n        stop = sandbox.add_beam(x, deck_top + 0.18, 0.26, 0.2, density=density(20.0))\n        sandbox.set_material_properties(stop, restitution=0.01)\n        sandbox.add_joint(stop, None, (x, deck_top), type=\"rigid\")\n        bodies.append(stop)\n\n    # 🧾 Mass check\n    total_mass = sandbox.get_structure_mass()\n    if total_mass > max_mass:\n        raise ValueError(f\"Structure mass {total_mass:.2f} kg exceeds limit {max_mass:.2f} kg\")\n\n    return bodies[0]\n\ndef agent_action(sandbox, agent_body, step_count):\n    pass",
+      "code_sha256": "c6726aae837f5f30a20c49f5f41eacc6881923530b630da55e79c8997b036845",
+      "constraints": {
+        "count": 0,
+        "violated": false,
+        "violations": []
+      },
+      "generation": {
+        "latency_seconds": 490.6309184804559,
+        "model": "Qwen3-32B",
+        "token_usage": {
+          "completion_tokens": 11045,
+          "prompt_tokens": 9629,
+          "total_tokens": 20674
+        }
+      },
+      "outcome": {
+        "category": "construction_error",
+        "error": "Error building agent: Beam footprint corner (14.00, 1.92) outside build zone x=[12.00, 18.00], y=[2.00, 4.50]",
+        "error_message": "Beam footprint corner (14.00, 1.92) outside build zone x=[12.00, 18.00], y=[2.00, 4.50]",
+        "error_stage": "agent_construction",
+        "error_type": "agent_building_error"
+      },
+      "phase": "revision",
+      "physics": {},
+      "score": 0.0,
+      "step_count": null,
+      "success": false,
+      "timestamp": 1785736448.0004308,
+      "verification_seconds": 0.0055692922323942184
+    },
+    {
+      "artifacts": [],
+      "attempt": 17,
+      "code": "def build_agent(sandbox):\n    def _hull_deck_top():\n        position = sandbox.get_boat_position()\n        hull_y = float(position[1]) if position else 2.5\n        return hull_y + 0.2, hull_y  # deck_top, hull_y\n\n    deck_top, hull_y = _hull_deck_top()\n    build_y_min = 2.0\n    max_mass = sandbox.MAX_STRUCTURE_MASS\n    reference_mass = 59.61\n    density_scale = 1.0  # Assume mass is within budget\n\n    def density(value):\n        return value * density_scale\n\n    bodies = []\n\n    # 📦 Low, dense ballast adjusted to meet build zone constraints\n    ballast_height = 0.17\n    ballast_y = build_y_min + (ballast_height / 2)  # 2.0 + 0.085 = 2.085\n    for x in (14.25, 15.75):\n        beam = sandbox.add_beam(x, ballast_y, 0.5, ballast_height, density=density(254.0))\n        sandbox.set_material_properties(beam, restitution=0.01)\n        sandbox.add_joint(beam, None, (x, ballast_y), type=\"rigid\")\n        bodies.append(beam)\n\n    # 🛤️ Higher side rails to prevent vertical escape\n    RAIL_HEIGHT = 1.2\n    RAIL_WIDTH = 0.2\n    for x in (13.5, 16.5):\n        rail_y = deck_top + RAIL_HEIGHT / 2.0\n        rail = sandbox.add_beam(x, rail_y, RAIL_WIDTH, RAIL_HEIGHT, density=density(30.0))\n        sandbox.set_material_properties(rail, restitution=0.01)\n        sandbox.add_joint(rail, None, (x, rail_y), type=\"rigid\")\n        bodies.append(rail)\n\n    # 🧱 Central beam to divide cargo area\n    central_beam_x = 15.0\n    central_beam_y = deck_top + 0.1  # Slightly above deck\n    central_beam = sandbox.add_beam(\n        central_beam_x, central_beam_y, 1.0, 0.1, density=density(20.0)\n    )\n    sandbox.set_material_properties(central_beam, restitution=0.01)\n    sandbox.add_joint(central_beam, None, (central_beam_x, central_beam_y), type=\"rigid\")\n    bodies.append(central_beam)\n\n    # 🛡️ Cross beams for lateral containment\n    for x in (14.5, 15.5):\n        cross_y = deck_top + 0.3  # Higher cross beams\n        cross = sandbox.add_beam(x, cross_y, 0.5, 0.1, density=density(20.0))\n        sandbox.set_material_properties(cross, restitution=0.01)\n        sandbox.add_joint(cross, None, (x, cross_y), type=\"rigid\")\n        bodies.append(cross)\n\n    # 🧱 Front/back barriers at higher positions\n    for x in (13.65, 16.35):\n        barrier_y = deck_top + 0.3  # Higher barriers\n        barrier = sandbox.add_beam(x, barrier_y, 1.0, 0.1, density=density(20.0))\n        sandbox.set_material_properties(barrier, restitution=0.01)\n        sandbox.add_joint(barrier, None, (x, barrier_y), type=\"rigid\")\n        bodies.append(barrier)\n\n    # 🧩 Lips and stops for edge retention\n    for x in (14.5, 15.5):\n        lip = sandbox.add_beam(x, deck_top + 0.06, 0.18, 0.06, density=density(20.0))\n        sandbox.set_material_properties(lip, restitution=0.01)\n        sandbox.add_joint(lip, None, (x, deck_top + 0.06), type=\"rigid\")\n        bodies.append(lip)\n\n        stop = sandbox.add_beam(x, deck_top + 0.2, 0.26, 0.2, density=density(25.0))\n        sandbox.set_material_properties(stop, restitution=0.01)\n        sandbox.add_joint(stop, None, (x, deck_top + 0.2), type=\"rigid\")\n        bodies.append(stop)\n\n    # 🧾 Mass check\n    total_mass = sandbox.get_structure_mass()\n    if total_mass > max_mass:\n        raise ValueError(f\"Structure mass {total_mass:.2f} kg exceeds limit {max_mass:.2f} kg\")\n\n    return bodies[0]\n\ndef agent_action(sandbox, agent_body, step_count):\n    pass",
+      "code_sha256": "f0b49721cdd931da981e47555010a6d73c2151a5ad883fe127bdfa8b59ec6194",
+      "constraints": {
+        "count": 0,
+        "violated": false,
+        "violations": []
+      },
+      "generation": {
+        "latency_seconds": 265.61739778891206,
+        "model": "Qwen3-32B",
+        "token_usage": {
+          "completion_tokens": 6437,
+          "prompt_tokens": 9763,
+          "total_tokens": 16200
+        }
+      },
+      "outcome": {
+        "category": "construction_error",
+        "error": "Error building agent: Structure mass 66.50 kg exceeds limit 60.00 kg",
+        "error_message": "Structure mass 66.50 kg exceeds limit 60.00 kg",
+        "error_stage": "agent_construction",
+        "error_type": "agent_building_error"
+      },
+      "phase": "revision",
+      "physics": {},
+      "score": 0.0,
+      "step_count": null,
+      "success": false,
+      "timestamp": 1785736713.6246269,
+      "verification_seconds": 0.006386905908584595
+    },
+    {
+      "artifacts": [],
+      "attempt": 18,
+      "code": "def build_agent(sandbox):\n    def _hull_deck_top():\n        position = sandbox.get_boat_position()\n        hull_y = float(position[1]) if position else 2.5\n        return hull_y + 0.2, hull_y  # deck_top, hull_y\n\n    deck_top, hull_y = _hull_deck_top()\n    build_y_min = 2.0\n    max_mass = sandbox.MAX_STRUCTURE_MASS\n    reference_mass = 59.61\n    density_scale = 1.0  # Assume mass is within budget\n\n    def density(value):\n        return value * density_scale\n\n    bodies = []\n\n    # 📦 Low, dense ballast placed as low as possible in build zone\n    ballast_height = 0.17\n    ballast_y = build_y_min + (ballast_height / 2)  # 2.085 m\n    for x in (14.25, 15.75):\n        beam = sandbox.add_beam(x, ballast_y, 0.5, ballast_height, density=density(254.0))\n        sandbox.set_material_properties(beam, restitution=0.01)\n        sandbox.add_joint(beam, None, (x, ballast_y), type=\"rigid\")\n        bodies.append(beam)\n\n    # 🛤️ Side rails with reduced density for containment\n    RAIL_HEIGHT = 0.9\n    RAIL_WIDTH = 0.2\n    for x in (13.5, 16.5):\n        rail_y = deck_top + RAIL_HEIGHT / 2.0\n        rail = sandbox.add_beam(x, rail_y, RAIL_WIDTH, RAIL_HEIGHT, density=density(15.0))\n        sandbox.set_material_properties(rail, restitution=0.01)\n        sandbox.add_joint(rail, None, (x, rail_y), type=\"rigid\")\n        bodies.append(rail)\n\n    # 🧱 Cross beams above deck to limit cargo movement\n    for x in (14.5, 15.5):\n        cross_y = deck_top + 0.1  # Just above deck\n        cross = sandbox.add_beam(x, cross_y, 0.5, 0.1, density=density(20.0))\n        sandbox.set_material_properties(cross, restitution=0.01)\n        sandbox.add_joint(cross, None, (x, cross_y), type=\"rigid\")\n        bodies.append(cross)\n\n    # 🛡️ Lips and stops with reduced density\n    for x in (14.5, 15.5):\n        lip = sandbox.add_beam(x, deck_top + 0.06, 0.18, 0.06, density=density(17.5))\n        sandbox.set_material_properties(lip, restitution=0.01)\n        sandbox.add_joint(lip, None, (x, deck_top + 0.06), type=\"rigid\")\n        bodies.append(lip)\n\n        stop = sandbox.add_beam(x, deck_top + 0.2, 0.26, 0.2, density=density(21.0))\n        sandbox.set_material_properties(stop, restitution=0.01)\n        sandbox.add_joint(stop, None, (x, deck_top + 0.2), type=\"rigid\")\n        bodies.append(stop)\n\n    # 🧾 Mass check\n    total_mass = sandbox.get_structure_mass()\n    if total_mass > max_mass:\n        raise ValueError(f\"Structure mass {total_mass:.2f} kg exceeds limit {max_mass:.2f} kg\")\n\n    return bodies[0]\n\n\ndef agent_action(sandbox, agent_body, step_count):\n    pass",
+      "code_sha256": "066f2845c4757451884881f18381aabf9bd1208618e9046dd5c2c8c1580515b2",
+      "constraints": {
+        "count": 0,
+        "violated": false,
+        "violations": []
+      },
+      "generation": {
+        "latency_seconds": 424.3887908831239,
+        "model": "Qwen3-32B",
+        "token_usage": {
+          "completion_tokens": 10323,
+          "prompt_tokens": 9766,
+          "total_tokens": 20089
+        }
+      },
+      "outcome": {
+        "category": "simulation_failure",
+        "failure_reason": "1/10 cargo particles crossed below y=1.96 m after the grace window"
+      },
+      "phase": "revision",
+      "physics": {
+        "structure_broken": false
+      },
+      "score": 0.0,
+      "step_count": 10000,
+      "success": false,
+      "timestamp": 1785737139.0050156,
+      "verification_seconds": 0.9912139270454645
+    },
+    {
+      "artifacts": [],
+      "attempt": 19,
+      "code": "def build_agent(sandbox):\n    \"\"\"Robust containment and stabilization with improved ballast and containment structure.\"\"\"\n\n    def _hull_deck_top():\n        position = sandbox.get_boat_position()\n        hull_y = float(position[1]) if position else 2.5\n        return hull_y + 0.2, hull_y  # deck_top, hull_y\n\n    deck_top, hull_y = _hull_deck_top()\n    build_y_min = 2.0\n    max_mass = sandbox.MAX_STRUCTURE_MASS\n    reference_mass = 59.61\n    density_scale = 1.0  # Assume mass is within budget\n\n    def density(value):\n        return value * density_scale\n\n    bodies = []\n\n    # 📦 Low, dense ballast placed at the extremes of the build zone\n    for x in (12.5, 17.5):  # Maximize roll inertia\n        for y in (2.06, 2.18, 2.30):  # Multiple vertical layers\n            beam = sandbox.add_beam(x, y, 1.0, 0.1, density=density(254.0))\n            sandbox.set_material_properties(beam, restitution=0.01)\n            sandbox.add_joint(beam, None, (x, y), type=\"rigid\")\n            bodies.append(beam)\n\n    # 🛤️ Side rails with full height to contain cargo laterally\n    for x in (13.5, 16.5):  # Corresponds to BOAT_LEFT_X and BOAT_RIGHT_X\n        rail = sandbox.add_beam(x, 3.25, 0.2, 2.25, density=density(30.0))  # Height from 2.0 to 4.5\n        sandbox.set_material_properties(rail, restitution=0.01)\n        sandbox.add_joint(rail, None, (x, 3.25), type=\"rigid\")\n        bodies.append(rail)\n\n    # 🧱 Cross beams at multiple heights to limit vertical and lateral movement\n    for x in (13.8, 14.6, 15.4, 16.2):\n        beam = sandbox.add_beam(x, 2.85, 0.9, 0.12, density=density(5.0))\n        sandbox.set_material_properties(beam, restitution=0.01)\n        sandbox.add_joint(beam, None, (x, 2.85), type=\"rigid\")\n        bodies.append(beam)\n\n    # ⬆️ Additional cross beams at higher levels\n    for x in (13.55, 16.45):\n        beam = sandbox.add_beam(x, 3.28, 0.2, 0.98, density=density(6.0))\n        sandbox.set_material_properties(beam, restitution=0.01)\n        sandbox.add_joint(beam, None, (x, 3.28), type=\"rigid\")\n        bodies.append(beam)\n\n    for x in (13.8, 14.6, 15.4, 16.2):\n        beam = sandbox.add_beam(x, 3.71, 0.9, 0.12, density=density(3.0))\n        sandbox.set_material_properties(beam, restitution=0.01)\n        sandbox.add_joint(beam, None, (x, 3.71), type=\"rigid\")\n        bodies.append(beam)\n\n    # 🧲 Lips along the inner side of the rails to prevent cargo from rolling off\n    for x in (14.0, 15.0, 16.0):\n        lip = sandbox.add_beam(x, deck_top + 0.06, 0.18, 0.06, density=density(35.0))\n        sandbox.set_material_properties(lip, restitution=0.01)\n        sandbox.add_joint(lip, None, (x, deck_top + 0.06), type=\"rigid\")\n        bodies.append(lip)\n\n    # 🛡️ Stops to limit vertical and lateral movement\n    for x in (14.5, 15.5):\n        stop = sandbox.add_beam(x, deck_top + 0.18, 0.26, 0.2, density=density(42.0))\n        sandbox.set_material_properties(stop, restitution=0.01)\n        sandbox.add_joint(stop, None, (x, deck_top + 0.18), type=\"rigid\")\n        bodies.append(stop)\n\n    # 🧾 Mass check\n    total_mass = sandbox.get_structure_mass()\n    if total_mass > max_mass:\n        raise ValueError(f\"Structure mass {total_mass:.2f} kg exceeds limit {max_mass:.2f} kg\")\n\n    return bodies[0]\n\n\ndef agent_action(sandbox, agent_body, step_count):\n    pass",
+      "code_sha256": "45096fab4b06bc8fda2d83e4c5d804f3432a73a1e026782b8841987b4c04a1c3",
+      "constraints": {
+        "count": 0,
+        "violated": false,
+        "violations": []
+      },
+      "generation": {
+        "latency_seconds": 178.66524335369468,
+        "model": "Qwen3-32B",
+        "token_usage": {
+          "completion_tokens": 4185,
+          "prompt_tokens": 9865,
+          "total_tokens": 14050
+        }
+      },
+      "outcome": {
+        "category": "construction_error",
+        "error": "Error building agent: Structure mass 176.47 kg exceeds limit 60.00 kg",
+        "error_message": "Structure mass 176.47 kg exceeds limit 60.00 kg",
+        "error_stage": "agent_construction",
+        "error_type": "agent_building_error"
+      },
+      "phase": "revision",
+      "physics": {},
+      "score": 0.0,
+      "step_count": null,
+      "success": false,
+      "timestamp": 1785737317.6769533,
+      "verification_seconds": 0.006285926327109337
+    },
+    {
+      "artifacts": [],
+      "attempt": 20,
+      "code": "def build_agent(sandbox):\n    \"\"\"Robust containment and stabilization with optimized ballast and containment structure.\"\"\"\n\n    def _hull_deck_top():\n        position = sandbox.get_boat_position()\n        hull_y = float(position[1]) if position else 2.5\n        return hull_y + 0.2, hull_y  # deck_top, hull_y\n\n    deck_top, hull_y = _hull_deck_top()\n    build_y_min = 2.0\n    max_mass = sandbox.MAX_STRUCTURE_MASS\n    bodies = []\n\n    # 📦 Low, moderate-density ballast to lower center of mass and increase roll inertia\n    for x in (12.5, 17.5):  # Extreme sides for maximum roll inertia\n        beam = sandbox.add_beam(x, 2.06, 1.0, 0.1, density=150.0)\n        sandbox.set_material_properties(beam, restitution=0.01)\n        sandbox.add_joint(beam, None, (x, 2.06), type=\"rigid\")\n        bodies.append(beam)\n\n    # 🛤️ High side rails to prevent cargo from going over\n    for x in (13.5, 16.5):  # Left and right edges\n        rail = sandbox.add_beam(x, 3.25, 0.2, 2.25, density=30.0)\n        sandbox.set_material_properties(rail, restitution=0.01)\n        sandbox.add_joint(rail, None, (x, 3.25), type=\"rigid\")\n        bodies.append(rail)\n\n    # 🧱 Cross beams at deck level to create lateral compartments and limit cargo movement\n    for x in (14.5, 15.5):  # Midpoints\n        beam = sandbox.add_beam(x, 2.85, 0.9, 0.12, density=3.8)\n        sandbox.set_material_properties(beam, restitution=0.01)\n        sandbox.add_joint(beam, None, (x, 2.85), type=\"rigid\")\n        bodies.append(beam)\n\n    # 🧲 Lips along the inner side of the rails to prevent cargo from rolling off\n    for x in (14.5, 15.5):  # Midpoints\n        lip = sandbox.add_beam(x, deck_top + 0.06, 0.18, 0.06, density=35.0)\n        sandbox.set_material_properties(lip, restitution=0.01)\n        sandbox.add_joint(lip, None, (x, deck_top + 0.06), type=\"rigid\")\n        bodies.append(lip)\n\n    # 🛡️ Stops to limit vertical and lateral movement\n    for x in (14.5, 15.5):  # Midpoints\n        stop = sandbox.add_beam(x, deck_top + 0.18, 0.26, 0.2, density=13.5)\n        sandbox.set_material_properties(stop, restitution=0.01)\n        sandbox.add_joint(stop, None, (x, deck_top + 0.18), type=\"rigid\")\n        bodies.append(stop)\n\n    # 🧾 Mass check\n    total_mass = sandbox.get_structure_mass()\n    if total_mass > max_mass:\n        raise ValueError(f\"Structure mass {total_mass:.2f} kg exceeds limit {max_mass:.2f} kg\")\n\n    return bodies[0]\n\n\ndef agent_action(sandbox, agent_body, step_count):\n    pass",
+      "code_sha256": "507a546842b559b7f033247bb2d39d1a092d4a111001e0bf3c53f3d96c065982",
+      "constraints": {
+        "count": 0,
+        "violated": false,
+        "violations": []
+      },
+      "generation": {
+        "latency_seconds": 439.51529851555824,
+        "model": "Qwen3-32B",
+        "token_usage": {
+          "completion_tokens": 8723,
+          "prompt_tokens": 9791,
+          "total_tokens": 18514
+        }
+      },
+      "outcome": {
+        "category": "simulation_failure",
+        "failure_reason": "2/10 cargo particles crossed below y=1.96 m after the grace window; Peak hull roll 24.06 deg exceeded 18.00 deg"
+      },
+      "phase": "revision",
+      "physics": {
+        "structure_broken": false
+      },
+      "score": 0.0,
+      "step_count": 10000,
+      "success": false,
+      "timestamp": 1785737758.2062433,
+      "verification_seconds": 1.0136326160281897
+    }
+  ],
+  "best_attempt": 0,
+  "best_score": 0.0,
+  "config": {
+    "attempts": 20,
+    "generation_retries": 2,
+    "headless": true,
+    "max_tokens": 65536,
+    "method_options": {},
+    "run_index": 1,
+    "save_gif": false,
+    "seed": 0,
+    "temperature": 0.7,
+    "timeout_seconds": 7200.0,
+    "top_p": 0.95
+  },
+  "environment_pair": "Initial_to_Stage-1",
+  "error_type": "exploration",
+  "finished_at": 1785737758.2063792,
+  "metadata": {
+    "auxiliary_usage": {
+      "calls": 0,
+      "failed_calls": 0,
+      "latency_seconds": 0,
+      "successful_calls": 0,
+      "token_usage": {}
+    },
+    "strategy_runtime": {
+      "auxiliary_calls": [],
+      "auxiliary_usage": {
+        "calls": 0,
+        "failed_calls": 0,
+        "latency_seconds": 0,
+        "successful_calls": 0,
+        "token_usage": {}
+      },
+      "candidate_calls": [
+        {
+          "attempt": 1,
+          "label": null,
+          "latency_seconds": 299.1512196082622,
+          "max_tokens": 65536,
+          "model": "Qwen3-32B",
+          "request_metadata": {
+            "attempt": 1,
+            "method": "vanilla",
+            "retry": 0
+          },
+          "retry": 0,
+          "seed": 1001,
+          "strategy_owned": false,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 7319,
+            "prompt_tokens": 8611,
+            "total_tokens": 15930
+          },
+          "top_p": 0.95
+        },
+        {
+          "attempt": 2,
+          "label": null,
+          "latency_seconds": 305.6502203885466,
+          "max_tokens": 65536,
+          "model": "Qwen3-32B",
+          "request_metadata": {
+            "attempt": 2,
+            "method": "vanilla",
+            "retry": 0
+          },
+          "retry": 0,
+          "seed": 1002,
+          "strategy_owned": false,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 7679,
+            "prompt_tokens": 9898,
+            "total_tokens": 17577
+          },
+          "top_p": 0.95
+        },
+        {
+          "attempt": 3,
+          "label": null,
+          "latency_seconds": 275.8813192732632,
+          "max_tokens": 65536,
+          "model": "Qwen3-32B",
+          "request_metadata": {
+            "attempt": 3,
+            "method": "vanilla",
+            "retry": 0
+          },
+          "retry": 0,
+          "seed": 1003,
+          "strategy_owned": false,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 5983,
+            "prompt_tokens": 9885,
+            "total_tokens": 15868
+          },
+          "top_p": 0.95
+        },
+        {
+          "attempt": 4,
+          "label": null,
+          "latency_seconds": 334.7989814821631,
+          "max_tokens": 65536,
+          "model": "Qwen3-32B",
+          "request_metadata": {
+            "attempt": 4,
+            "method": "vanilla",
+            "retry": 0
+          },
+          "retry": 0,
+          "seed": 1004,
+          "strategy_owned": false,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 8625,
+            "prompt_tokens": 10087,
+            "total_tokens": 18712
+          },
+          "top_p": 0.95
+        },
+        {
+          "attempt": 5,
+          "label": null,
+          "latency_seconds": 275.7014500685036,
+          "max_tokens": 65536,
+          "model": "Qwen3-32B",
+          "request_metadata": {
+            "attempt": 5,
+            "method": "vanilla",
+            "retry": 0
+          },
+          "retry": 0,
+          "seed": 1005,
+          "strategy_owned": false,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 6715,
+            "prompt_tokens": 9857,
+            "total_tokens": 16572
+          },
+          "top_p": 0.95
+        },
+        {
+          "attempt": 6,
+          "label": null,
+          "latency_seconds": 156.722924888134,
+          "max_tokens": 65536,
+          "model": "Qwen3-32B",
+          "request_metadata": {
+            "attempt": 6,
+            "method": "vanilla",
+            "retry": 0
+          },
+          "retry": 0,
+          "seed": 1006,
+          "strategy_owned": false,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 3828,
+            "prompt_tokens": 10056,
+            "total_tokens": 13884
+          },
+          "top_p": 0.95
+        },
+        {
+          "attempt": 7,
+          "label": null,
+          "latency_seconds": 249.6224383059889,
+          "max_tokens": 65536,
+          "model": "Qwen3-32B",
+          "request_metadata": {
+            "attempt": 7,
+            "method": "vanilla",
+            "retry": 0
+          },
+          "retry": 0,
+          "seed": 1007,
+          "strategy_owned": false,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 5959,
+            "prompt_tokens": 9736,
+            "total_tokens": 15695
+          },
+          "top_p": 0.95
+        },
+        {
+          "attempt": 8,
+          "label": null,
+          "latency_seconds": 277.0871632285416,
+          "max_tokens": 65536,
+          "model": "Qwen3-32B",
+          "request_metadata": {
+            "attempt": 8,
+            "method": "vanilla",
+            "retry": 0
+          },
+          "retry": 0,
+          "seed": 1008,
+          "strategy_owned": false,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 6661,
+            "prompt_tokens": 9645,
+            "total_tokens": 16306
+          },
+          "top_p": 0.95
+        },
+        {
+          "attempt": 9,
+          "label": null,
+          "latency_seconds": 293.3223978523165,
+          "max_tokens": 65536,
+          "model": "Qwen3-32B",
+          "request_metadata": {
+            "attempt": 9,
+            "method": "vanilla",
+            "retry": 0
+          },
+          "retry": 0,
+          "seed": 1009,
+          "strategy_owned": false,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 6844,
+            "prompt_tokens": 9791,
+            "total_tokens": 16635
+          },
+          "top_p": 0.95
+        },
+        {
+          "attempt": 10,
+          "label": null,
+          "latency_seconds": 120.0977965593338,
+          "max_tokens": 65536,
+          "model": "Qwen3-32B",
+          "request_metadata": {
+            "attempt": 10,
+            "method": "vanilla",
+            "retry": 0
+          },
+          "retry": 0,
+          "seed": 1010,
+          "strategy_owned": false,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 3012,
+            "prompt_tokens": 9695,
+            "total_tokens": 12707
+          },
+          "top_p": 0.95
+        },
+        {
+          "attempt": 11,
+          "label": null,
+          "latency_seconds": 418.8524806573987,
+          "max_tokens": 65536,
+          "model": "Qwen3-32B",
+          "request_metadata": {
+            "attempt": 11,
+            "method": "vanilla",
+            "retry": 0
+          },
+          "retry": 0,
+          "seed": 1011,
+          "strategy_owned": false,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 9982,
+            "prompt_tokens": 9825,
+            "total_tokens": 19807
+          },
+          "top_p": 0.95
+        },
+        {
+          "attempt": 12,
+          "label": null,
+          "latency_seconds": 265.3670609872788,
+          "max_tokens": 65536,
+          "model": "Qwen3-32B",
+          "request_metadata": {
+            "attempt": 12,
+            "method": "vanilla",
+            "retry": 0
+          },
+          "retry": 0,
+          "seed": 1012,
+          "strategy_owned": false,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 6157,
+            "prompt_tokens": 10012,
+            "total_tokens": 16169
+          },
+          "top_p": 0.95
+        },
+        {
+          "attempt": 13,
+          "label": null,
+          "latency_seconds": 230.33035331964493,
+          "max_tokens": 65536,
+          "model": "Qwen3-32B",
+          "request_metadata": {
+            "attempt": 13,
+            "method": "vanilla",
+            "retry": 0
+          },
+          "retry": 0,
+          "seed": 1013,
+          "strategy_owned": false,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 5278,
+            "prompt_tokens": 9833,
+            "total_tokens": 15111
+          },
+          "top_p": 0.95
+        },
+        {
+          "attempt": 14,
+          "label": null,
+          "latency_seconds": 196.07740919850767,
+          "max_tokens": 65536,
+          "model": "Qwen3-32B",
+          "request_metadata": {
+            "attempt": 14,
+            "method": "vanilla",
+            "retry": 0
+          },
+          "retry": 0,
+          "seed": 1014,
+          "strategy_owned": false,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 4697,
+            "prompt_tokens": 9848,
+            "total_tokens": 14545
+          },
+          "top_p": 0.95
+        },
+        {
+          "attempt": 15,
+          "label": null,
+          "latency_seconds": 371.4317220058292,
+          "max_tokens": 65536,
+          "model": "Qwen3-32B",
+          "request_metadata": {
+            "attempt": 15,
+            "method": "vanilla",
+            "retry": 0
+          },
+          "retry": 0,
+          "seed": 1015,
+          "strategy_owned": false,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 8359,
+            "prompt_tokens": 9620,
+            "total_tokens": 17979
+          },
+          "top_p": 0.95
+        },
+        {
+          "attempt": 16,
+          "label": null,
+          "latency_seconds": 490.6309184804559,
+          "max_tokens": 65536,
+          "model": "Qwen3-32B",
+          "request_metadata": {
+            "attempt": 16,
+            "method": "vanilla",
+            "retry": 0
+          },
+          "retry": 0,
+          "seed": 1016,
+          "strategy_owned": false,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 11045,
+            "prompt_tokens": 9629,
+            "total_tokens": 20674
+          },
+          "top_p": 0.95
+        },
+        {
+          "attempt": 17,
+          "label": null,
+          "latency_seconds": 265.61739778891206,
+          "max_tokens": 65536,
+          "model": "Qwen3-32B",
+          "request_metadata": {
+            "attempt": 17,
+            "method": "vanilla",
+            "retry": 0
+          },
+          "retry": 0,
+          "seed": 1017,
+          "strategy_owned": false,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 6437,
+            "prompt_tokens": 9763,
+            "total_tokens": 16200
+          },
+          "top_p": 0.95
+        },
+        {
+          "attempt": 18,
+          "label": null,
+          "latency_seconds": 424.3887908831239,
+          "max_tokens": 65536,
+          "model": "Qwen3-32B",
+          "request_metadata": {
+            "attempt": 18,
+            "method": "vanilla",
+            "retry": 0
+          },
+          "retry": 0,
+          "seed": 1018,
+          "strategy_owned": false,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 10323,
+            "prompt_tokens": 9766,
+            "total_tokens": 20089
+          },
+          "top_p": 0.95
+        },
+        {
+          "attempt": 19,
+          "label": null,
+          "latency_seconds": 178.66524335369468,
+          "max_tokens": 65536,
+          "model": "Qwen3-32B",
+          "request_metadata": {
+            "attempt": 19,
+            "method": "vanilla",
+            "retry": 0
+          },
+          "retry": 0,
+          "seed": 1019,
+          "strategy_owned": false,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 4185,
+            "prompt_tokens": 9865,
+            "total_tokens": 14050
+          },
+          "top_p": 0.95
+        },
+        {
+          "attempt": 20,
+          "label": null,
+          "latency_seconds": 439.51529851555824,
+          "max_tokens": 65536,
+          "model": "Qwen3-32B",
+          "request_metadata": {
+            "attempt": 20,
+            "method": "vanilla",
+            "retry": 0
+          },
+          "retry": 0,
+          "seed": 1020,
+          "strategy_owned": false,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 8723,
+            "prompt_tokens": 9791,
+            "total_tokens": 18514
+          },
+          "top_p": 0.95
+        }
+      ],
+      "candidate_usage": {
+        "calls": 20,
+        "failed_calls": 0,
+        "latency_seconds": 5868.912586845458,
+        "successful_calls": 20,
+        "token_usage": {
+          "completion_tokens": 137811,
+          "prompt_tokens": 195213,
+          "total_tokens": 333024
+        }
+      },
+      "steps": [
+        {
+          "accepted_submissions": 1,
+          "labels": [
+            null
+          ],
+          "metadata": {},
+          "remaining_attempts": 20,
+          "requested_submissions": 1,
+          "submission_metadata": [
+            {}
+          ]
+        },
+        {
+          "accepted_submissions": 1,
+          "labels": [
+            null
+          ],
+          "metadata": {},
+          "remaining_attempts": 19,
+          "requested_submissions": 1,
+          "submission_metadata": [
+            {}
+          ]
+        },
+        {
+          "accepted_submissions": 1,
+          "labels": [
+            null
+          ],
+          "metadata": {},
+          "remaining_attempts": 18,
+          "requested_submissions": 1,
+          "submission_metadata": [
+            {}
+          ]
+        },
+        {
+          "accepted_submissions": 1,
+          "labels": [
+            null
+          ],
+          "metadata": {},
+          "remaining_attempts": 17,
+          "requested_submissions": 1,
+          "submission_metadata": [
+            {}
+          ]
+        },
+        {
+          "accepted_submissions": 1,
+          "labels": [
+            null
+          ],
+          "metadata": {},
+          "remaining_attempts": 16,
+          "requested_submissions": 1,
+          "submission_metadata": [
+            {}
+          ]
+        },
+        {
+          "accepted_submissions": 1,
+          "labels": [
+            null
+          ],
+          "metadata": {},
+          "remaining_attempts": 15,
+          "requested_submissions": 1,
+          "submission_metadata": [
+            {}
+          ]
+        },
+        {
+          "accepted_submissions": 1,
+          "labels": [
+            null
+          ],
+          "metadata": {},
+          "remaining_attempts": 14,
+          "requested_submissions": 1,
+          "submission_metadata": [
+            {}
+          ]
+        },
+        {
+          "accepted_submissions": 1,
+          "labels": [
+            null
+          ],
+          "metadata": {},
+          "remaining_attempts": 13,
+          "requested_submissions": 1,
+          "submission_metadata": [
+            {}
+          ]
+        },
+        {
+          "accepted_submissions": 1,
+          "labels": [
+            null
+          ],
+          "metadata": {},
+          "remaining_attempts": 12,
+          "requested_submissions": 1,
+          "submission_metadata": [
+            {}
+          ]
+        },
+        {
+          "accepted_submissions": 1,
+          "labels": [
+            null
+          ],
+          "metadata": {},
+          "remaining_attempts": 11,
+          "requested_submissions": 1,
+          "submission_metadata": [
+            {}
+          ]
+        },
+        {
+          "accepted_submissions": 1,
+          "labels": [
+            null
+          ],
+          "metadata": {},
+          "remaining_attempts": 10,
+          "requested_submissions": 1,
+          "submission_metadata": [
+            {}
+          ]
+        },
+        {
+          "accepted_submissions": 1,
+          "labels": [
+            null
+          ],
+          "metadata": {},
+          "remaining_attempts": 9,
+          "requested_submissions": 1,
+          "submission_metadata": [
+            {}
+          ]
+        },
+        {
+          "accepted_submissions": 1,
+          "labels": [
+            null
+          ],
+          "metadata": {},
+          "remaining_attempts": 8,
+          "requested_submissions": 1,
+          "submission_metadata": [
+            {}
+          ]
+        },
+        {
+          "accepted_submissions": 1,
+          "labels": [
+            null
+          ],
+          "metadata": {},
+          "remaining_attempts": 7,
+          "requested_submissions": 1,
+          "submission_metadata": [
+            {}
+          ]
+        },
+        {
+          "accepted_submissions": 1,
+          "labels": [
+            null
+          ],
+          "metadata": {},
+          "remaining_attempts": 6,
+          "requested_submissions": 1,
+          "submission_metadata": [
+            {}
+          ]
+        },
+        {
+          "accepted_submissions": 1,
+          "labels": [
+            null
+          ],
+          "metadata": {},
+          "remaining_attempts": 5,
+          "requested_submissions": 1,
+          "submission_metadata": [
+            {}
+          ]
+        },
+        {
+          "accepted_submissions": 1,
+          "labels": [
+            null
+          ],
+          "metadata": {},
+          "remaining_attempts": 4,
+          "requested_submissions": 1,
+          "submission_metadata": [
+            {}
+          ]
+        },
+        {
+          "accepted_submissions": 1,
+          "labels": [
+            null
+          ],
+          "metadata": {},
+          "remaining_attempts": 3,
+          "requested_submissions": 1,
+          "submission_metadata": [
+            {}
+          ]
+        },
+        {
+          "accepted_submissions": 1,
+          "labels": [
+            null
+          ],
+          "metadata": {},
+          "remaining_attempts": 2,
+          "requested_submissions": 1,
+          "submission_metadata": [
+            {}
+          ]
+        },
+        {
+          "accepted_submissions": 1,
+          "labels": [
+            null
+          ],
+          "metadata": {},
+          "remaining_attempts": 1,
+          "requested_submissions": 1,
+          "submission_metadata": [
+            {}
+          ]
+        }
+      ]
+    },
+    "strategy_snapshot": {}
+  },
+  "mode": "adaptation",
+  "model": "Qwen3-32B",
+  "provider": "vllm",
+  "revision_attempts": 20,
+  "run_index": 1,
+  "schema_version": "2.0",
+  "source_environment": "Initial",
+  "started_at": 1785731813.7978885,
+  "stop_reason": "budget_exhausted",
+  "strategy": "vanilla",
+  "success": false,
+  "success_attempt": null,
+  "target_environment": "Stage-1",
+  "task_id": "F_05",
+  "task_path": "Category4_Granular_FluidInteraction/F_05",
+  "token_usage": {
+    "completion_tokens": 137811,
+    "prompt_tokens": 195213,
+    "total_tokens": 333024
+  },
+  "total_time_seconds": 5944.408490458503,
+  "verified_attempts": 21
+}

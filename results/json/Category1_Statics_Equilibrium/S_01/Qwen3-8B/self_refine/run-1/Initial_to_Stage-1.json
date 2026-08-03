@@ -1,0 +1,354 @@
+{
+  "analysis": {
+    "best_attempt_diagnostics": {
+      "constraint_violation_count": 0,
+      "failure_reason": null,
+      "joints_broken_count": 0,
+      "progress": 0.0,
+      "step_count": 400,
+      "structure_broken": false
+    },
+    "best_code_tokens": 375,
+    "cumulative_best_scores": [
+      {
+        "attempt": 0,
+        "best_score": -28.57142857142857
+      },
+      {
+        "attempt": 1,
+        "best_score": 0.0
+      },
+      {
+        "attempt": 2,
+        "best_score": 100.0
+      }
+    ],
+    "error_type": "success",
+    "revision_attempts": 2,
+    "success_attempt": 2,
+    "tokens": {
+      "all_calls_total": 41016,
+      "auxiliary_completion": 8262,
+      "auxiliary_prompt": 3636,
+      "auxiliary_total": 11898,
+      "completion": 13901,
+      "prompt": 15217,
+      "total": 29118
+    },
+    "trajectory_diagnostics": {
+      "code_length_trend": -0.451364,
+      "code_radicality": 0.528323,
+      "code_similarity_early": 0.471677,
+      "code_similarity_global": 0.471677,
+      "code_similarity_late": 0.471677,
+      "code_similarity_middle": 0.471677,
+      "code_similarity_recent": 0.471677,
+      "code_similarity_trend": 0.0,
+      "first_positive_index": 2,
+      "improved_late": false,
+      "persistent_constraint_violation": false,
+      "score_trend": 128.571429,
+      "total_constraint_violations": 0,
+      "unique_failure_reasons": 1
+    },
+    "verified_attempts": 3
+  },
+  "attempt_budget": 20,
+  "attempts": [
+    {
+      "artifacts": [],
+      "attempt": 0,
+      "code": "import math\n\n\ndef build_truss(sandbox, start_x, end_x, top_y, bottom_y, num_panels, deck_density=50.0, truss_density=20.0, joint_type='rigid'):\n    gap_width = end_x - start_x\n    panel_width = gap_width / num_panels\n    deck_height = 0.4\n    deck_beams = []\n    for i in range(num_panels):\n        cx = start_x + (i + 0.5) * panel_width\n        b = sandbox.add_beam(x=cx, y=top_y, width=panel_width+0.01, height=deck_height, density=deck_density)\n        deck_beams.append(b)\n    bottom_beams = []\n    for i in range(num_panels):\n        cx = start_x + (i + 0.5) * panel_width\n        b = sandbox.add_beam(x=cx, y=bottom_y, width=panel_width+0.01, height=0.3, density=truss_density)\n        bottom_beams.append(b)\n    v_beams = []\n    for i in range(num_panels + 1):\n        x = start_x + i * panel_width\n        b = sandbox.add_beam(x=x, y=(top_y+bottom_y)/2, width=0.3, height=abs(top_y-bottom_y), density=truss_density)\n        v_beams.append(b)\n    diag_beams = []\n    for i in range(num_panels):\n        x1, y1 = start_x + i * panel_width, bottom_y\n        x2, y2 = start_x + (i+1) * panel_width, top_y\n        cx, cy = (x1+x2)/2, (y1+y2)/2\n        dist = math.sqrt((x2-x1)**2 + (y2-y1)**2)\n        angle = math.atan2(y2-y1, x2-x1)\n        b = sandbox.add_beam(x=cx, y=cy, width=dist+0.1, height=0.3, angle=angle, density=truss_density)\n        diag_beams.append(b)\n    for i in range(num_panels + 1):\n        nx = start_x + i * panel_width\n        node_pos = (nx, top_y)\n        master = v_beams[i]\n        if i > 0: sandbox.add_joint(master, deck_beams[i-1], node_pos, type='rigid')\n        if i < num_panels: sandbox.add_joint(master, deck_beams[i], node_pos, type='rigid')\n        if i > 0: sandbox.add_joint(master, diag_beams[i-1], node_pos, type=joint_type)\n    for i in range(num_panels + 1):\n        nx = start_x + i * panel_width\n        node_pos = (nx, bottom_y)\n        master = v_beams[i]\n        if i > 0: sandbox.add_joint(master, bottom_beams[i-1], node_pos, type=joint_type)\n        if i < num_panels: sandbox.add_joint(master, bottom_beams[i], node_pos, type=joint_type)\n        if i < num_panels: sandbox.add_joint(master, diag_beams[i], node_pos, type=joint_type)\n    return deck_beams, bottom_beams, v_beams\n\n\n\ndef add_low_friction_runway(\n    sandbox, end_x, deck_beams, bridge_start, bridge_end, extension, density,\n    road_y,\n\n):\n    runway = [\n        sandbox.add_beam(\n            x=10.0,\n            y=road_y,\n            width=10.4,\n            height=0.1,\n            density=density,\n            friction=0.0,\n        )\n    ]\n    spans = [(5.0, 15.0)]\n    left_edge = 15.0\n    while left_edge < end_x:\n        width = min(10.0, end_x - left_edge)\n        spans.append((left_edge, left_edge + width))\n        runway.append(\n            sandbox.add_beam(\n                x=left_edge + width / 2.0,\n                y=road_y,\n                width=width + 0.4,\n                height=0.1,\n                density=density,\n                friction=0.0,\n            )\n        )\n        left_edge += width\n    sandbox.add_joint(runway[0], None, (10.0, road_y), type=\"pivot\")\n    panel_width = (bridge_end - bridge_start) / len(deck_beams)\n\n    def support_at(x):\n        if x >= bridge_end:\n            return extension\n        index = int((x - bridge_start) / panel_width)\n        return deck_beams[max(0, min(index, len(deck_beams) - 1))]\n\n    for index, (beam, span) in enumerate(zip(runway, spans)):\n        left_x, right_x = span\n        if index > 0:\n            sandbox.add_joint(\n                runway[index - 1], beam, (left_x, road_y), type=\"pivot\"\n            )\n            sandbox.add_joint(\n                beam, support_at(left_x), (left_x + 0.1, road_y), type=\"pivot\"\n            )\n        inner_right = min(right_x - 0.1, bridge_end + 2.5)\n        sandbox.add_joint(\n            beam, support_at(inner_right), (inner_right, road_y), type=\"pivot\"\n        )\n    sandbox.add_joint(runway[-1], None, (end_x, road_y), type=\"pivot\")\n    return runway\n\n\ndef build_agent(sandbox):\n    L_X, R_X = 10.0, 25.0\n    deck, bottom, v_beams = build_truss(sandbox, L_X, R_X, 10.0, 8.0, 6, deck_density=35.0, truss_density=15.0, joint_type='rigid')\n    sandbox.add_joint(v_beams[0], None, (L_X, 10.0), type='rigid')\n    sandbox.add_joint(v_beams[-1], None, (R_X, 10.0), type='rigid')\n    ext = sandbox.add_beam(x=R_X+2.5, y=10.0, width=5.0, height=0.4, density=30.0)\n    sandbox.add_joint(v_beams[-1], ext, (R_X, 10.0), type='rigid')\n    return deck[0]\n\n\ndef agent_action(sandbox, agent_body, step_count):\n    pass\n",
+      "code_sha256": "b654a55cae5369ebf16a35c33988422369361c70078ca6975b95dda885487db9",
+      "constraints": {
+        "count": 0,
+        "violated": false,
+        "violations": []
+      },
+      "generation": null,
+      "outcome": {
+        "category": "simulation_failure",
+        "failure_reason": "Structural component entered fail zone (y <= 0.5 m)"
+      },
+      "phase": "reference",
+      "physics": {
+        "joints_broken_count": 30,
+        "structure_broken": true
+      },
+      "score": -28.57142857142857,
+      "step_count": 100,
+      "success": false,
+      "timestamp": 1785722772.2224674,
+      "verification_seconds": 0.06897002272307873
+    },
+    {
+      "artifacts": [],
+      "attempt": 1,
+      "code": "def build_agent(sandbox):\n    # Define bridge parameters\n    L_X, R_X = 10.0, 25.0  # Cliff positions\n    TOP_Y = 10.0  # Bridge deck at cliff level\n    BOTTOM_Y = 8.0  # Lower support level\n    NUM_PANELS = 4  # Simplified structure with fewer joints\n    DECK_DENSITY = 20.0  # Lighter deck\n    TRUSS_DENSITY = 15.0  # Lighter truss\n    JOINT_TYPE = 'pivot'  # Reduce anchor stress\n\n    # Create deck beams (horizontal supports)\n    deck_beams = []\n    panel_width = (R_X - L_X) / NUM_PANELS\n    for i in range(NUM_PANELS):\n        cx = L_X + (i + 0.5) * panel_width\n        b = sandbox.add_beam(x=cx, y=TOP_Y, width=panel_width + 0.01, height=0.4, \n                            density=DECK_DENSITY, friction=0.5)\n        deck_beams.append(b)\n\n    # Create vertical supports (connected to cliffs)\n    vertical_beams = []\n    for i in range(NUM_PANELS + 1):\n        x = L_X + i * panel_width\n        b = sandbox.add_beam(x=x, y=(TOP_Y + BOTTOM_Y)/2, \n                            width=0.3, height=abs(TOP_Y - BOTTOM_Y), \n                            density=TRUSS_DENSITY)\n        vertical_beams.append(b)\n\n    # Create diagonal supports\n    diag_beams = []\n    for i in range(NUM_PANELS):\n        x1, y1 = L_X + i * panel_width, BOTTOM_Y\n        x2, y2 = L_X + (i+1) * panel_width, TOP_Y\n        cx, cy = (x1 + x2)/2, (y1 + y2)/2\n        dist = math.sqrt((x2 - x1)**2 + (y2 - y1)**2)\n        angle = math.atan2(y2 - y1, x2 - x1)\n        b = sandbox.add_beam(x=cx, y=cy, width=dist + 0.1, height=0.3, \n                            angle=angle, density=TRUSS_DENSITY)\n        diag_beams.append(b)\n\n    # Connect deck to vertical beams with pivot joints\n    for i in range(NUM_PANELS):\n        nx = L_X + i * panel_width\n        master = vertical_beams[i]\n        # Connect to left deck beam\n        if i > 0:\n            sandbox.add_joint(master, deck_beams[i-1], (nx, TOP_Y), type=JOINT_TYPE)\n        # Connect to right deck beam\n        if i < NUM_PANELS:\n            sandbox.add_joint(master, deck_beams[i], (nx, TOP_Y), type=JOINT_TYPE)\n\n    # Connect vertical beams to diagonal beams\n    for i in range(NUM_PANELS):\n        master = vertical_beams[i]\n        sandbox.add_joint(master, diag_beams[i], (L_X + i * panel_width, (TOP_Y + BOTTOM_Y)/2), type=JOINT_TYPE)\n\n    # Connect vertical beams to bottom supports (optional)\n    for i in range(NUM_PANELS):\n        nx = L_X + i * panel_width\n        master = vertical_beams[i]\n        sandbox.add_joint(master, None, (nx, BOTTOM_Y), type=JOINT_TYPE)\n\n    # Anchor left end to cliff\n    sandbox.add_joint(vertical_beams[0], None, (L_X, TOP_Y), type='rigid')\n    # Anchor right end to cliff\n    sandbox.add_joint(vertical_beams[-1], None, (R_X, TOP_Y), type='rigid')\n\n    return deck_beams[0]  # Return a deck beam for reference\n\n\ndef agent_action(sandbox, agent_body, step_count):\n    # Apply controlled downward force to help vehicle descend to bridge\n    if step_count < 200:\n        # Apply slight downward force to assist vehicle in reaching the bridge\n        sandbox.apply_vehicle_force(fx=0, fy=-500.0)\n    else:\n        # After reaching bridge, apply minimal force to maintain stability\n        sandbox.apply_vehicle_force(fx=0, fy=-200.0)",
+      "code_sha256": "516652a556081ec068e86a584b97d2db65106b91df57107bce18fca92229550b",
+      "constraints": {
+        "count": 0,
+        "violated": false,
+        "violations": []
+      },
+      "generation": {
+        "latency_seconds": 70.41818927042186,
+        "model": "Qwen3-8B",
+        "token_usage": {
+          "completion_tokens": 5379,
+          "prompt_tokens": 8215,
+          "total_tokens": 13594
+        }
+      },
+      "outcome": {
+        "category": "construction_error",
+        "error": "Error building agent: name 'math' is not defined",
+        "error_message": "name 'math' is not defined",
+        "error_stage": "agent_construction",
+        "error_type": "agent_building_error"
+      },
+      "phase": "revision",
+      "physics": {},
+      "score": 0.0,
+      "step_count": null,
+      "success": false,
+      "timestamp": 1785722902.812544,
+      "verification_seconds": 0.006304379552602768
+    },
+    {
+      "artifacts": [],
+      "attempt": 2,
+      "code": "import math\n\ndef build_agent(sandbox):\n    # Define bridge parameters\n    L_X, R_X = 10.0, 30.0  # Extend bridge to reach x=30.0m\n    TOP_Y = 10.0  # Deck at cliff level\n    BOTTOM_Y = 8.0  # Lower support level\n    NUM_PANELS = 4  # Simplified structure with fewer joints\n    DECK_DENSITY = 10.0  # Lighter deck\n    TRUSS_DENSITY = 5.0  # Lighter truss\n    JOINT_TYPE = 'pivot'  # Reduce stress on joints\n\n    # Create deck beams (horizontal supports)\n    deck_beams = []\n    panel_width = (R_X - L_X) / NUM_PANELS\n    for i in range(NUM_PANELS):\n        cx = L_X + (i + 0.5) * panel_width\n        b = sandbox.add_beam(x=cx, y=TOP_Y, width=panel_width + 0.01, height=0.4, \n                            density=DECK_DENSITY, friction=0.5)\n        deck_beams.append(b)\n\n    # Create vertical supports (connected to cliffs)\n    vertical_beams = []\n    for i in range(NUM_PANELS + 1):\n        x = L_X + i * panel_width\n        b = sandbox.add_beam(x=x, y=(TOP_Y + BOTTOM_Y)/2, \n                            width=0.3, height=abs(TOP_Y - BOTTOM_Y), \n                            density=TRUSS_DENSITY)\n        vertical_beams.append(b)\n\n    # Connect deck to vertical beams with pivot joints\n    for i in range(NUM_PANELS):\n        nx = L_X + i * panel_width\n        master = vertical_beams[i]\n        # Connect to left deck beam\n        if i > 0:\n            sandbox.add_joint(master, deck_beams[i-1], (nx, TOP_Y), type=JOINT_TYPE)\n        # Connect to right deck beam\n        if i < NUM_PANELS:\n            sandbox.add_joint(master, deck_beams[i], (nx, TOP_Y), type=JOINT_TYPE)\n\n    # Connect vertical beams to diagonal beams\n    for i in range(NUM_PANELS):\n        master = vertical_beams[i]\n        sandbox.add_joint(master, None, (L_X + i * panel_width, (TOP_Y + BOTTOM_Y)/2), type=JOINT_TYPE)\n\n    # Anchor left end to cliff\n    sandbox.add_joint(vertical_beams[0], None, (L_X, TOP_Y), type=JOINT_TYPE)\n    # Anchor right end to cliff\n    sandbox.add_joint(vertical_beams[-1], None, (R_X, TOP_Y), type=JOINT_TYPE)\n\n    return deck_beams[0]  # Return a deck beam for reference\n\n\ndef agent_action(sandbox, agent_body, step_count):\n    # Apply controlled downward force to help vehicle descend to bridge\n    if step_count < 200:\n        # Apply slight downward force to assist vehicle in reaching the bridge\n        sandbox.apply_vehicle_force(fx=0, fy=-500.0)\n    else:\n        # After reaching bridge, apply minimal force to maintain stability\n        sandbox.apply_vehicle_force(fx=0, fy=-200.0)",
+      "code_sha256": "246291ce56f495722524cf32672d5082b572c5cdec3ea78677fd8e1c7bc4ee0d",
+      "constraints": {
+        "count": 0,
+        "violated": false,
+        "violations": []
+      },
+      "generation": {
+        "latency_seconds": 136.59642043337226,
+        "model": "Qwen3-8B",
+        "token_usage": {
+          "completion_tokens": 8522,
+          "prompt_tokens": 7002,
+          "total_tokens": 15524
+        }
+      },
+      "outcome": {
+        "category": "success"
+      },
+      "phase": "revision",
+      "physics": {
+        "joints_broken_count": 0,
+        "structure_broken": false
+      },
+      "score": 100.0,
+      "step_count": 400,
+      "success": true,
+      "timestamp": 1785723112.2602878,
+      "verification_seconds": 0.11729839071631432
+    }
+  ],
+  "best_attempt": 2,
+  "best_score": 100.0,
+  "config": {
+    "attempts": 20,
+    "generation_retries": 2,
+    "headless": true,
+    "max_tokens": 65536,
+    "method_options": {},
+    "run_index": 1,
+    "save_gif": false,
+    "seed": 0,
+    "temperature": 0.7,
+    "timeout_seconds": 7200.0,
+    "top_p": 0.95
+  },
+  "environment_pair": "Initial_to_Stage-1",
+  "error_type": "success",
+  "finished_at": 1785723112.2604375,
+  "metadata": {
+    "auxiliary_usage": {
+      "calls": 2,
+      "failed_calls": 0,
+      "latency_seconds": 132.89856307581067,
+      "successful_calls": 2,
+      "token_usage": {
+        "completion_tokens": 8262,
+        "prompt_tokens": 3636,
+        "total_tokens": 11898
+      }
+    },
+    "strategy_runtime": {
+      "auxiliary_calls": [
+        {
+          "latency_seconds": 60.16507069580257,
+          "max_tokens": 65536,
+          "model": "Qwen3-8B",
+          "purpose": "self-refine-feedback",
+          "request_metadata": {
+            "attempt": 1,
+            "method": "self_refine",
+            "purpose": "self-feedback-1"
+          },
+          "seed": 1,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 3715,
+            "prompt_tokens": 1930,
+            "total_tokens": 5645
+          },
+          "top_p": 0.95
+        },
+        {
+          "latency_seconds": 72.7334923800081,
+          "max_tokens": 65536,
+          "model": "Qwen3-8B",
+          "purpose": "self-refine-feedback",
+          "request_metadata": {
+            "attempt": 2,
+            "method": "self_refine",
+            "purpose": "self-feedback-1"
+          },
+          "seed": 2,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 4547,
+            "prompt_tokens": 1706,
+            "total_tokens": 6253
+          },
+          "top_p": 0.95
+        }
+      ],
+      "auxiliary_usage": {
+        "calls": 2,
+        "failed_calls": 0,
+        "latency_seconds": 132.89856307581067,
+        "successful_calls": 2,
+        "token_usage": {
+          "completion_tokens": 8262,
+          "prompt_tokens": 3636,
+          "total_tokens": 11898
+        }
+      },
+      "candidate_calls": [
+        {
+          "attempt": null,
+          "label": "self-refine-initial",
+          "latency_seconds": 70.41818927042186,
+          "max_tokens": 65536,
+          "model": "Qwen3-8B",
+          "request_metadata": {
+            "attempt": 1,
+            "method": "self_refine",
+            "purpose": "initial-candidate"
+          },
+          "retry": 0,
+          "seed": 1,
+          "strategy_owned": true,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 5379,
+            "prompt_tokens": 8215,
+            "total_tokens": 13594
+          },
+          "top_p": 0.95
+        },
+        {
+          "attempt": null,
+          "label": "self-refine-initial",
+          "latency_seconds": 136.59642043337226,
+          "max_tokens": 65536,
+          "model": "Qwen3-8B",
+          "request_metadata": {
+            "attempt": 2,
+            "method": "self_refine",
+            "purpose": "initial-candidate"
+          },
+          "retry": 0,
+          "seed": 2,
+          "strategy_owned": true,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 8522,
+            "prompt_tokens": 7002,
+            "total_tokens": 15524
+          },
+          "top_p": 0.95
+        }
+      ],
+      "candidate_usage": {
+        "calls": 2,
+        "failed_calls": 0,
+        "latency_seconds": 207.01460970379412,
+        "successful_calls": 2,
+        "token_usage": {
+          "completion_tokens": 13901,
+          "prompt_tokens": 15217,
+          "total_tokens": 29118
+        }
+      },
+      "steps": [
+        {
+          "accepted_submissions": 1,
+          "labels": [
+            "self-refine-final"
+          ],
+          "metadata": {
+            "inner_steps": 5
+          },
+          "remaining_attempts": 20,
+          "requested_submissions": 1,
+          "submission_metadata": [
+            {}
+          ]
+        },
+        {
+          "accepted_submissions": 1,
+          "labels": [
+            "self-refine-final"
+          ],
+          "metadata": {
+            "inner_steps": 5
+          },
+          "remaining_attempts": 19,
+          "requested_submissions": 1,
+          "submission_metadata": [
+            {}
+          ]
+        }
+      ]
+    },
+    "strategy_snapshot": {
+      "inner_steps": 5,
+      "last_feedback_available": true,
+      "self_feedback_calls": 2
+    }
+  },
+  "mode": "adaptation",
+  "model": "Qwen3-8B",
+  "provider": "vllm",
+  "revision_attempts": 2,
+  "run_index": 1,
+  "schema_version": "2.0",
+  "source_environment": "Initial",
+  "started_at": 1785722771.6293275,
+  "stop_reason": "success",
+  "strategy": "self_refine",
+  "success": true,
+  "success_attempt": 2,
+  "target_environment": "Stage-1",
+  "task_id": "S_01",
+  "task_path": "Category1_Statics_Equilibrium/S_01",
+  "token_usage": {
+    "completion_tokens": 13901,
+    "prompt_tokens": 15217,
+    "total_tokens": 29118
+  },
+  "total_time_seconds": 340.631109688431,
+  "verified_attempts": 3
+}

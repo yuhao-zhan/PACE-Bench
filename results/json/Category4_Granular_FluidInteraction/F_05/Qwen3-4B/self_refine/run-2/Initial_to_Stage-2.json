@@ -1,0 +1,2488 @@
+{
+  "analysis": {
+    "best_attempt_diagnostics": {
+      "constraint_violation_count": 0,
+      "failure_reason": "2/10 cargo particles crossed below y=1.98 m after the grace window",
+      "joints_broken_count": 0,
+      "progress": 0.0,
+      "step_count": 10000,
+      "structure_broken": false
+    },
+    "best_code_tokens": 732,
+    "cumulative_best_scores": [
+      {
+        "attempt": 0,
+        "best_score": 0.0
+      },
+      {
+        "attempt": 1,
+        "best_score": 0.0
+      },
+      {
+        "attempt": 2,
+        "best_score": 0.0
+      },
+      {
+        "attempt": 3,
+        "best_score": 0.0
+      },
+      {
+        "attempt": 4,
+        "best_score": 0.0
+      },
+      {
+        "attempt": 5,
+        "best_score": 0.0
+      },
+      {
+        "attempt": 6,
+        "best_score": 0.0
+      },
+      {
+        "attempt": 7,
+        "best_score": 0.0
+      },
+      {
+        "attempt": 8,
+        "best_score": 0.0
+      },
+      {
+        "attempt": 9,
+        "best_score": 0.0
+      },
+      {
+        "attempt": 10,
+        "best_score": 0.0
+      },
+      {
+        "attempt": 11,
+        "best_score": 0.0
+      },
+      {
+        "attempt": 12,
+        "best_score": 0.0
+      },
+      {
+        "attempt": 13,
+        "best_score": 0.0
+      },
+      {
+        "attempt": 14,
+        "best_score": 0.0
+      },
+      {
+        "attempt": 15,
+        "best_score": 0.0
+      },
+      {
+        "attempt": 16,
+        "best_score": 0.0
+      },
+      {
+        "attempt": 17,
+        "best_score": 0.0
+      },
+      {
+        "attempt": 18,
+        "best_score": 0.0
+      },
+      {
+        "attempt": 19,
+        "best_score": 0.0
+      },
+      {
+        "attempt": 20,
+        "best_score": 0.0
+      }
+    ],
+    "error_type": "design_fixation",
+    "revision_attempts": 20,
+    "success_attempt": null,
+    "tokens": {
+      "all_calls_total": 577509,
+      "auxiliary_completion": 128967,
+      "auxiliary_prompt": 79086,
+      "auxiliary_total": 208053,
+      "completion": 140324,
+      "prompt": 229132,
+      "total": 369456
+    },
+    "trajectory_diagnostics": {
+      "code_length_trend": -0.348594,
+      "code_radicality": 0.223464,
+      "code_similarity_early": 0.653832,
+      "code_similarity_global": 0.776536,
+      "code_similarity_late": 0.839722,
+      "code_similarity_middle": 0.814992,
+      "code_similarity_recent": 0.896756,
+      "code_similarity_trend": 0.18589,
+      "first_positive_index": -1,
+      "improved_late": false,
+      "persistent_constraint_violation": false,
+      "score_trend": 0.0,
+      "total_constraint_violations": 0,
+      "unique_failure_reasons": 4
+    },
+    "verified_attempts": 21
+  },
+  "attempt_budget": 20,
+  "attempts": [
+    {
+      "artifacts": [],
+      "attempt": 0,
+      "code": "\"\"\"Reference designs for F-05.\n\n\nEvery reference is passive.  Construction uses only the documented sandbox\n\nprimitives, and ``agent_action`` never mutates the hull, cargo, terrain, or\n\nphysics configuration.\n\n\"\"\"\n\n\nBOAT_LEFT_X = 13.5\n\nBOAT_RIGHT_X = 16.5\n\nRAIL_HEIGHT = 0.9\n\nRAIL_WIDTH = 0.2\n\n\n\ndef _hull_deck_top(sandbox):\n    position = sandbox.get_boat_position()\n    if position is None:\n        hull_y = 2.5\n    else:\n        hull_y = float(position[1])\n    return hull_y + 0.2, hull_y\n\n\n\ndef _check_mass(sandbox):\n    total_mass = sandbox.get_structure_mass()\n    if total_mass > sandbox.MAX_STRUCTURE_MASS:\n        raise ValueError(\n            f\"Structure mass {total_mass:.2f} kg exceeds limit \"\n            f\"{sandbox.MAX_STRUCTURE_MASS:.2f} kg\"\n        )\n\n\n\ndef _build_low_ballast_cage(sandbox, ballast_density):\n    \"\"\"Closed hold with low, far-out ballast for roll inertia.\"\"\"\n\n    bodies = []\n    specifications = []\n    for x in (12.5, 17.5):\n        for y in (2.06, 2.18, 2.30):\n            specifications.append((x, y, 1.0, 0.1, ballast_density))\n    for x in (13.8, 14.6, 15.4, 16.2):\n        specifications.append((x, 2.85, 0.9, 0.12, 5.0))\n    specifications.extend(\n        (\n            (13.55, 3.28, 0.2, 0.98, 6.0),\n            (16.45, 3.28, 0.2, 0.98, 6.0),\n        )\n    )\n    for x in (13.8, 14.6, 15.4, 16.2):\n        specifications.append((x, 3.71, 0.9, 0.12, 3.0))\n\n    for x, y, width, height, density in specifications:\n        beam = sandbox.add_beam(x, y, width, height, density=density)\n        sandbox.set_material_properties(beam, restitution=0.01)\n        sandbox.add_joint(beam, None, (x, y), type=\"rigid\")\n        bodies.append(beam)\n\n    _check_mass(sandbox)\n    return bodies[0]\n\n\n\ndef _stage_3_anchor(sandbox):\n    deck_top, hull_y = _hull_deck_top(sandbox)\n    build_y_min = 2.58\n    anchor_y = max(build_y_min + 0.008, deck_top - 0.035)\n    return min(anchor_y, deck_top - 0.012), deck_top, hull_y\n\n\n\ndef build_agent(sandbox):\n    \"\"\"Baseline: low ballast plus deck-edge rails and local cargo stops.\"\"\"\n\n    deck_top, hull_y = _hull_deck_top(sandbox)\n    build_y_min = 2.0\n    max_mass = float(sandbox.MAX_STRUCTURE_MASS)\n    reference_mass = 59.61\n    density_scale = (\n        1.0\n        if max_mass >= reference_mass - 0.05\n        else min(1.0, max(0.35, (max_mass - 0.25) / reference_mass))\n    )\n\n    def density(value):\n        return float(value) * density_scale\n\n    anchor_y = build_y_min + 0.01\n    ballast_y = max(hull_y - 0.26, build_y_min + 0.086)\n    ballast_anchor_y = max(deck_top - 0.26, anchor_y)\n    rail_anchor_y = max(deck_top - 0.05, anchor_y)\n    bodies = []\n\n    for x in (14.25, 15.75):\n        beam = sandbox.add_beam(\n            x, ballast_y, 0.5, 0.17, density=density(254.0)\n        )\n        sandbox.set_material_properties(beam, restitution=0.05)\n        sandbox.add_joint(beam, None, (x, ballast_anchor_y), type=\"rigid\")\n        bodies.append(beam)\n\n    for x in (BOAT_LEFT_X, BOAT_RIGHT_X):\n        rail = sandbox.add_beam(\n            x,\n            deck_top + RAIL_HEIGHT / 2.0,\n            RAIL_WIDTH,\n            RAIL_HEIGHT,\n            density=density(30.0),\n        )\n        sandbox.set_material_properties(rail, restitution=0.07)\n        sandbox.add_joint(rail, None, (x, rail_anchor_y), type=\"rigid\")\n        bodies.append(rail)\n\n    for x in (14.5, 15.5):\n        lip = sandbox.add_beam(\n            x, deck_top + 0.06, 0.18, 0.06, density=density(35.0)\n        )\n        sandbox.set_material_properties(lip, restitution=0.07)\n        sandbox.add_joint(lip, None, (x, deck_top), type=\"rigid\")\n        bodies.append(lip)\n\n    for x in (14.5, 15.5):\n        stop = sandbox.add_beam(\n            x, deck_top + 0.18, 0.26, 0.2, density=density(42.0)\n        )\n        sandbox.set_material_properties(stop, restitution=0.07)\n        sandbox.add_joint(stop, None, (x, deck_top), type=\"rigid\")\n        bodies.append(stop)\n\n    _check_mass(sandbox)\n    return bodies[0]\n\n\n\ndef agent_action(sandbox, agent_body, step_count):\n    pass\n\n",
+      "code_sha256": "abe3b484adee1200ca189ee350fda4a84481795e7d5bf26e773efd4070e2f24f",
+      "constraints": {
+        "count": 0,
+        "violated": false,
+        "violations": []
+      },
+      "generation": null,
+      "outcome": {
+        "category": "simulation_failure",
+        "failure_reason": "2/10 cargo particles crossed below y=1.98 m after the grace window"
+      },
+      "phase": "reference",
+      "physics": {
+        "structure_broken": false
+      },
+      "score": 0.0,
+      "step_count": 10000,
+      "success": false,
+      "timestamp": 1785731928.5465033,
+      "verification_seconds": 0.8918699864298105
+    },
+    {
+      "artifacts": [],
+      "attempt": 1,
+      "code": "def build_agent(sandbox):\n    \"\"\"Optimized passive structure with enhanced stability and cargo retention.\"\"\"\n    # Define key structural parameters\n    BOAT_CENTER_X = 15.0\n    BOAT_CENTER_Y = 2.5\n    RAIL_WIDTH = 0.15\n    RAIL_HEIGHT = 0.15\n    BEAM_DENSITY = 150.0\n    BEAM_WIDTH = 0.4\n    BEAM_HEIGHT = 0.2\n    STOP_WIDTH = 0.2\n    STOP_HEIGHT = 0.2\n    BOAT_LEFT_X = 14.9\n    BOAT_RIGHT_X = 15.1\n    \n    # Main support structure with increased width for stability\n    main_beam = sandbox.add_beam(BOAT_CENTER_X, 3.0, BEAM_WIDTH, BEAM_HEIGHT, density=BEAM_DENSITY)\n    sandbox.set_material_properties(main_beam, restitution=0.01)\n    sandbox.add_joint(main_beam, None, (BOAT_CENTER_X, 3.0), type=\"rigid\")\n    \n    # Ballast beams (reduced size and density)\n    ballast_beams = []\n    for x in [13.0, 17.0]:\n        beam = sandbox.add_beam(x, 2.2, 0.15, 0.15, density=100.0)\n        sandbox.set_material_properties(beam, restitution=0.01)\n        # Connect to main beam\n        sandbox.add_joint(beam, main_beam, (x, 2.2), type=\"rigid\")\n        ballast_beams.append(beam)\n    \n    # Lateral support beams for roll resistance\n    for x in [14.5, 15.5]:\n        beam = sandbox.add_beam(x, 2.8, 0.15, 0.15, density=100.0)\n        sandbox.set_material_properties(beam, restitution=0.01)\n        sandbox.add_joint(beam, main_beam, (x, 2.8), type=\"rigid\")\n    \n    # Deck rail system for cargo containment\n    for x in [BOAT_LEFT_X, BOAT_RIGHT_X]:\n        rail = sandbox.add_beam(\n            x, \n            2.7, \n            RAIL_WIDTH, \n            RAIL_HEIGHT, \n            density=100.0\n        )\n        sandbox.set_material_properties(rail, restitution=0.01)\n        sandbox.add_joint(rail, main_beam, (x, 2.7), type=\"rigid\")\n    \n    # Cargo containment stops\n    for x in [14.5, 15.5]:\n        stop = sandbox.add_beam(\n            x, \n            2.7, \n            STOP_WIDTH, \n            STOP_HEIGHT, \n            density=100.0\n        )\n        sandbox.set_material_properties(stop, restitution=0.01)\n        sandbox.add_joint(stop, main_beam, (x, 2.7), type=\"rigid\")\n    \n    # Verify mass constraints\n    total_mass = sandbox.get_structure_mass()\n    if total_mass > sandbox.MAX_STRUCTURE_MASS:\n        raise ValueError(f\"Structure mass {total_mass:.2f} kg exceeds limit {sandbox.MAX_STRUCTURE_MASS:.2f} kg\")\n    \n    return main_beam\n\n\ndef agent_action(sandbox, agent_body, step_count):\n    \"\"\"Passive control with no direct force application.\"\"\"\n    pass",
+      "code_sha256": "fc3e841b4d57e0d29c98ee36a0873d19ed3ed5a42618e4956e7f1fb5eb2ca114",
+      "constraints": {
+        "count": 0,
+        "violated": false,
+        "violations": []
+      },
+      "generation": {
+        "latency_seconds": 69.8692967928946,
+        "model": "Qwen3-4B",
+        "token_usage": {
+          "completion_tokens": 7829,
+          "prompt_tokens": 4092,
+          "total_tokens": 11921
+        }
+      },
+      "outcome": {
+        "category": "simulation_failure",
+        "failure_reason": "8/10 cargo particles crossed below y=1.98 m after the grace window; Peak hull roll 48.33 deg exceeded 18.00 deg"
+      },
+      "phase": "revision",
+      "physics": {
+        "structure_broken": false
+      },
+      "score": 0.0,
+      "step_count": 10000,
+      "success": false,
+      "timestamp": 1785732244.0925062,
+      "verification_seconds": 1.0152938459068537
+    },
+    {
+      "artifacts": [],
+      "attempt": 2,
+      "code": "def build_agent(sandbox):\n    \"\"\"Optimized passive structure with enhanced stability and cargo retention.\"\"\"\n    # Main support beam for structural integrity\n    main_beam = sandbox.add_beam(15.0, 2.5, 0.4, 0.2, density=150.0)\n    sandbox.set_material_properties(main_beam, restitution=0.01)\n    sandbox.add_joint(main_beam, None, (15.0, 2.5), type=\"rigid\")\n    \n    # Ballast beams for low center of mass\n    ballast1 = sandbox.add_beam(13.0, 2.0, 0.15, 0.15, density=100.0)\n    sandbox.set_material_properties(ballast1, restitution=0.01)\n    sandbox.add_joint(ballast1, main_beam, (13.0, 2.0), type=\"rigid\")\n    \n    ballast2 = sandbox.add_beam(17.0, 2.0, 0.15, 0.15, density=100.0)\n    sandbox.set_material_properties(ballast2, restitution=0.01)\n    sandbox.add_joint(ballast2, main_beam, (17.0, 2.0), type=\"rigid\")\n    \n    # Lateral beams for roll resistance\n    lateral1 = sandbox.add_beam(14.5, 2.5, 0.15, 0.15, density=150.0)\n    sandbox.set_material_properties(lateral1, restitution=0.01)\n    sandbox.add_joint(lateral1, main_beam, (14.5, 2.5), type=\"rigid\")\n    \n    lateral2 = sandbox.add_beam(15.5, 2.5, 0.15, 0.15, density=150.0)\n    sandbox.set_material_properties(lateral2, restitution=0.01)\n    sandbox.add_joint(lateral2, main_beam, (15.5, 2.5), type=\"rigid\")\n    \n    # Deck rail system for cargo containment\n    rail1 = sandbox.add_beam(14.9, 2.7, 0.15, 0.15, density=150.0)\n    sandbox.set_material_properties(rail1, restitution=0.01)\n    sandbox.add_joint(rail1, main_beam, (14.9, 2.7), type=\"rigid\")\n    \n    rail2 = sandbox.add_beam(15.1, 2.7, 0.15, 0.15, density=150.0)\n    sandbox.set_material_properties(rail2, restitution=0.01)\n    sandbox.add_joint(rail2, main_beam, (15.1, 2.7), type=\"rigid\")\n    \n    # Cargo containment stops\n    stop1 = sandbox.add_beam(14.5, 2.7, 0.2, 0.2, density=150.0)\n    sandbox.set_material_properties(stop1, restitution=0.01)\n    sandbox.add_joint(stop1, main_beam, (14.5, 2.7), type=\"rigid\")\n    \n    stop2 = sandbox.add_beam(15.5, 2.7, 0.2, 0.2, density=150.0)\n    sandbox.set_material_properties(stop2, restitution=0.01)\n    sandbox.add_joint(stop2, main_beam, (15.5, 2.7), type=\"rigid\")\n    \n    # Verify mass constraints\n    total_mass = sandbox.get_structure_mass()\n    if total_mass > sandbox.MAX_STRUCTURE_MASS:\n        raise ValueError(f\"Structure mass {total_mass:.2f} kg exceeds limit {sandbox.MAX_STRUCTURE_MASS:.2f} kg\")\n    \n    return main_beam\n\n\ndef agent_action(sandbox, agent_body, step_count):\n    \"\"\"Passive control with no direct force application.\"\"\"\n    pass",
+      "code_sha256": "890cb8810bf3928e939e7aa9e6f9efb1f93850f7c75253251901c9aa83d8e848",
+      "constraints": {
+        "count": 0,
+        "violated": false,
+        "violations": []
+      },
+      "generation": {
+        "latency_seconds": 37.327987948432565,
+        "model": "Qwen3-4B",
+        "token_usage": {
+          "completion_tokens": 4172,
+          "prompt_tokens": 9863,
+          "total_tokens": 14035
+        }
+      },
+      "outcome": {
+        "category": "construction_error",
+        "error": "Error building agent: Beam footprint corner (12.93, 1.93) outside build zone x=[12.00, 18.00], y=[2.00, 4.50]",
+        "error_message": "Beam footprint corner (12.93, 1.93) outside build zone x=[12.00, 18.00], y=[2.00, 4.50]",
+        "error_stage": "agent_construction",
+        "error_type": "agent_building_error"
+      },
+      "phase": "revision",
+      "physics": {},
+      "score": 0.0,
+      "step_count": null,
+      "success": false,
+      "timestamp": 1785732304.4591253,
+      "verification_seconds": 0.004616346210241318
+    },
+    {
+      "artifacts": [],
+      "attempt": 3,
+      "code": "def build_agent(sandbox):\n    \"\"\"Optimized passive structure with enhanced stability and cargo retention.\"\"\"\n    # Main support beam for structural integrity\n    main_beam = sandbox.add_beam(15.0, 2.5, 0.4, 0.2, density=150.0)\n    sandbox.set_material_properties(main_beam, restitution=0.01)\n    sandbox.add_joint(main_beam, None, (15.0, 2.5), type=\"rigid\")\n    \n    # Ballast beams for low center of mass (adjusted to meet build zone constraints)\n    ballast1 = sandbox.add_beam(13.0, 2.0, 0.15, 0.15, density=150.0)\n    sandbox.set_material_properties(ballast1, restitution=0.01)\n    sandbox.add_joint(ballast1, main_beam, (13.0, 2.0), type=\"rigid\")\n    \n    ballast2 = sandbox.add_beam(17.0, 2.0, 0.15, 0.15, density=150.0)\n    sandbox.set_material_properties(ballast2, restitution=0.01)\n    sandbox.add_joint(ballast2, main_beam, (17.0, 2.0), type=\"rigid\")\n    \n    # Lateral beams for roll resistance\n    lateral1 = sandbox.add_beam(14.5, 2.5, 0.15, 0.15, density=100.0)\n    sandbox.set_material_properties(lateral1, restitution=0.01)\n    sandbox.add_joint(lateral1, main_beam, (14.5, 2.5), type=\"rigid\")\n    \n    lateral2 = sandbox.add_beam(15.5, 2.5, 0.15, 0.15, density=100.0)\n    sandbox.set_material_properties(lateral2, restitution=0.01)\n    sandbox.add_joint(lateral2, main_beam, (15.5, 2.5), type=\"rigid\")\n    \n    # Central lateral beam for enhanced roll resistance\n    lateral3 = sandbox.add_beam(15.0, 2.5, 0.15, 0.15, density=100.0)\n    sandbox.set_material_properties(lateral3, restitution=0.01)\n    sandbox.add_joint(lateral3, main_beam, (15.0, 2.5), type=\"rigid\")\n    \n    # Verify mass constraints\n    total_mass = sandbox.get_structure_mass()\n    if total_mass > sandbox.MAX_STRUCTURE_MASS:\n        raise ValueError(f\"Structure mass {total_mass:.2f} kg exceeds limit {sandbox.MAX_STRUCTURE_MASS:.2f} kg\")\n    \n    return main_beam\n\n\ndef agent_action(sandbox, agent_body, step_count):\n    \"\"\"Passive control with no direct force application.\"\"\"\n    pass",
+      "code_sha256": "941b16afdd46aa92c84a7979c135ba96102c2b242784fef680d4b038a4adf5a0",
+      "constraints": {
+        "count": 0,
+        "violated": false,
+        "violations": []
+      },
+      "generation": {
+        "latency_seconds": 54.03283850848675,
+        "model": "Qwen3-4B",
+        "token_usage": {
+          "completion_tokens": 5813,
+          "prompt_tokens": 4263,
+          "total_tokens": 10076
+        }
+      },
+      "outcome": {
+        "category": "construction_error",
+        "error": "Error building agent: Beam footprint corner (12.93, 1.93) outside build zone x=[12.00, 18.00], y=[2.00, 4.50]",
+        "error_message": "Beam footprint corner (12.93, 1.93) outside build zone x=[12.00, 18.00], y=[2.00, 4.50]",
+        "error_stage": "agent_construction",
+        "error_type": "agent_building_error"
+      },
+      "phase": "revision",
+      "physics": {},
+      "score": 0.0,
+      "step_count": null,
+      "success": false,
+      "timestamp": 1785732595.6609254,
+      "verification_seconds": 0.004212111234664917
+    },
+    {
+      "artifacts": [],
+      "attempt": 4,
+      "code": "def build_agent(sandbox):\n    \"\"\"Stabilized passive structure with enhanced roll resistance and cargo retention.\"\"\"\n    # Main support beam for structural integrity\n    main_beam = sandbox.add_beam(15.0, 2.5, 0.4, 0.2, density=150.0)\n    sandbox.set_material_properties(main_beam, restitution=0.01)\n    sandbox.add_joint(main_beam, None, (15.0, 2.5), type=\"rigid\")\n    \n    # Ballast beams for low center of mass (adjusted to meet build zone constraints)\n    ballast1 = sandbox.add_beam(13.0, 2.2, 0.15, 0.15, density=150.0)\n    sandbox.set_material_properties(ballast1, restitution=0.01)\n    sandbox.add_joint(ballast1, main_beam, (13.0, 2.2), type=\"rigid\")\n    \n    ballast2 = sandbox.add_beam(17.0, 2.2, 0.15, 0.15, density=150.0)\n    sandbox.set_material_properties(ballast2, restitution=0.01)\n    sandbox.add_joint(ballast2, main_beam, (17.0, 2.2), type=\"rigid\")\n    \n    # Lateral beams for roll resistance\n    lateral1 = sandbox.add_beam(14.5, 2.5, 0.15, 0.15, density=100.0)\n    sandbox.set_material_properties(lateral1, restitution=0.01)\n    sandbox.add_joint(lateral1, main_beam, (14.5, 2.5), type=\"rigid\")\n    \n    lateral2 = sandbox.add_beam(15.5, 2.5, 0.15, 0.15, density=100.0)\n    sandbox.set_material_properties(lateral2, restitution=0.01)\n    sandbox.add_joint(lateral2, main_beam, (15.5, 2.5), type=\"rigid\")\n    \n    # Central lateral beam for enhanced roll resistance\n    central_lateral = sandbox.add_beam(15.0, 2.5, 0.15, 0.15, density=100.0)\n    sandbox.set_material_properties(central_lateral, restitution=0.01)\n    sandbox.add_joint(central_lateral, main_beam, (15.0, 2.5), type=\"rigid\")\n    \n    # Verify mass constraints\n    total_mass = sandbox.get_structure_mass()\n    if total_mass > sandbox.MAX_STRUCTURE_MASS:\n        raise ValueError(f\"Structure mass {total_mass:.2f} kg exceeds limit {sandbox.MAX_STRUCTURE_MASS:.2f} kg\")\n    \n    return main_beam\n\n\ndef agent_action(sandbox, agent_body, step_count):\n    \"\"\"Passive control with no direct force application.\"\"\"\n    pass",
+      "code_sha256": "0e52c9a89afbd9c30e7aa7eaa88f1fe4b48e5f0ca49c4b8f90545919e5931629",
+      "constraints": {
+        "count": 0,
+        "violated": false,
+        "violations": []
+      },
+      "generation": {
+        "latency_seconds": 30.42860148102045,
+        "model": "Qwen3-4B",
+        "token_usage": {
+          "completion_tokens": 3526,
+          "prompt_tokens": 9382,
+          "total_tokens": 12908
+        }
+      },
+      "outcome": {
+        "category": "simulation_failure",
+        "failure_reason": "10/10 cargo particles crossed below y=1.98 m after the grace window"
+      },
+      "phase": "revision",
+      "physics": {
+        "structure_broken": false
+      },
+      "score": 0.0,
+      "step_count": 10000,
+      "success": false,
+      "timestamp": 1785732650.282102,
+      "verification_seconds": 0.8460472878068686
+    },
+    {
+      "artifacts": [],
+      "attempt": 5,
+      "code": "def build_agent(sandbox):\n    \"\"\"Stabilized passive structure with enhanced roll resistance and cargo retention.\"\"\"\n    # Main support beam for structural integrity\n    main_beam = sandbox.add_beam(15.0, 2.5, 0.4, 0.2, density=150.0)\n    sandbox.set_material_properties(main_beam, restitution=0.01)\n    sandbox.add_joint(main_beam, None, (15.0, 2.5), type=\"rigid\")\n    \n    # Ballast beams for low center of mass (adjusted to meet build zone constraints)\n    ballast1 = sandbox.add_beam(13.0, 2.0, 0.15, 0.15, density=200.0)\n    sandbox.set_material_properties(ballast1, restitution=0.01)\n    sandbox.add_joint(ballast1, main_beam, (13.0, 2.0), type=\"rigid\")\n    \n    ballast2 = sandbox.add_beam(17.0, 2.0, 0.15, 0.15, density=200.0)\n    sandbox.set_material_properties(ballast2, restitution=0.01)\n    sandbox.add_joint(ballast2, main_beam, (17.0, 2.0), type=\"rigid\")\n    \n    # Lateral beams for roll resistance\n    lateral1 = sandbox.add_beam(14.5, 2.5, 0.15, 0.15, density=150.0)\n    sandbox.set_material_properties(lateral1, restitution=0.01)\n    sandbox.add_joint(lateral1, main_beam, (14.5, 2.5), type=\"rigid\")\n    \n    lateral2 = sandbox.add_beam(15.5, 2.5, 0.15, 0.15, density=150.0)\n    sandbox.set_material_properties(lateral2, restitution=0.01)\n    sandbox.add_joint(lateral2, main_beam, (15.5, 2.5), type=\"rigid\")\n    \n    # Additional lateral beams for enhanced roll resistance\n    lateral3 = sandbox.add_beam(14.0, 2.0, 0.15, 0.15, density=200.0)\n    sandbox.set_material_properties(lateral3, restitution=0.01)\n    sandbox.add_joint(lateral3, main_beam, (14.0, 2.0), type=\"rigid\")\n    \n    lateral4 = sandbox.add_beam(16.0, 2.0, 0.15, 0.15, density=200.0)\n    sandbox.set_material_properties(lateral4, restitution=0.01)\n    sandbox.add_joint(lateral4, main_beam, (16.0, 2.0), type=\"rigid\")\n    \n    # Verify mass constraints\n    total_mass = sandbox.get_structure_mass()\n    if total_mass > sandbox.MAX_STRUCTURE_MASS:\n        raise ValueError(f\"Structure mass {total_mass:.2f} kg exceeds limit {sandbox.MAX_STRUCTURE_MASS:.2f} kg\")\n    \n    return main_beam\n\n\ndef agent_action(sandbox, agent_body, step_count):\n    \"\"\"Passive control with no direct force application.\"\"\"\n    pass",
+      "code_sha256": "3868c89209e65a5476ed28c35b6ee08ab7623a9c8ea1d586b847d8eb8608af8f",
+      "constraints": {
+        "count": 0,
+        "violated": false,
+        "violations": []
+      },
+      "generation": {
+        "latency_seconds": 25.658108284696937,
+        "model": "Qwen3-4B",
+        "token_usage": {
+          "completion_tokens": 2796,
+          "prompt_tokens": 9719,
+          "total_tokens": 12515
+        }
+      },
+      "outcome": {
+        "category": "construction_error",
+        "error": "Error building agent: Beam footprint corner (12.93, 1.93) outside build zone x=[12.00, 18.00], y=[2.00, 4.50]",
+        "error_message": "Beam footprint corner (12.93, 1.93) outside build zone x=[12.00, 18.00], y=[2.00, 4.50]",
+        "error_stage": "agent_construction",
+        "error_type": "agent_building_error"
+      },
+      "phase": "revision",
+      "physics": {},
+      "score": 0.0,
+      "step_count": null,
+      "success": false,
+      "timestamp": 1785732704.455752,
+      "verification_seconds": 0.00460251048207283
+    },
+    {
+      "artifacts": [],
+      "attempt": 6,
+      "code": "def build_agent(sandbox):\n    \"\"\"Stabilized passive structure with enhanced roll resistance and cargo retention.\"\"\"\n    # Main support beam for structural integrity\n    main_beam = sandbox.add_beam(15.0, 3.0, 0.4, 0.2, density=150.0)\n    sandbox.set_material_properties(main_beam, restitution=0.01)\n    sandbox.add_joint(main_beam, None, (15.0, 3.0), type=\"rigid\")\n    \n    # Ballast beams for low center of mass (adjusted to meet build zone constraints)\n    ballast1 = sandbox.add_beam(13.0, 2.5, 0.15, 0.15, density=200.0)\n    sandbox.set_material_properties(ballast1, restitution=0.01)\n    sandbox.add_joint(ballast1, main_beam, (13.0, 2.5), type=\"rigid\")\n    \n    ballast2 = sandbox.add_beam(17.0, 2.5, 0.15, 0.15, density=200.0)\n    sandbox.set_material_properties(ballast2, restitution=0.01)\n    sandbox.add_joint(ballast2, main_beam, (17.0, 2.5), type=\"rigid\")\n    \n    # Lateral beams for roll resistance\n    lateral1 = sandbox.add_beam(14.5, 3.0, 0.15, 0.15, density=150.0)\n    sandbox.set_material_properties(lateral1, restitution=0.01)\n    sandbox.add_joint(lateral1, main_beam, (14.5, 3.0), type=\"rigid\")\n    \n    lateral2 = sandbox.add_beam(15.5, 3.0, 0.15, 0.15, density=150.0)\n    sandbox.set_material_properties(lateral2, restitution=0.01)\n    sandbox.add_joint(lateral2, main_beam, (15.5, 3.0), type=\"rigid\")\n    \n    # Additional lateral beams for enhanced roll resistance\n    lateral3 = sandbox.add_beam(14.0, 3.0, 0.15, 0.15, density=200.0)\n    sandbox.set_material_properties(lateral3, restitution=0.01)\n    sandbox.add_joint(lateral3, main_beam, (14.0, 3.0), type=\"rigid\")\n    \n    lateral4 = sandbox.add_beam(16.0, 3.0, 0.15, 0.15, density=200.0)\n    sandbox.set_material_properties(lateral4, restitution=0.01)\n    sandbox.add_joint(lateral4, main_beam, (16.0, 3.0), type=\"rigid\")\n    \n    # Verify mass constraints\n    total_mass = sandbox.get_structure_mass()\n    if total_mass > sandbox.MAX_STRUCTURE_MASS:\n        raise ValueError(f\"Structure mass {total_mass:.2f} kg exceeds limit {sandbox.MAX_STRUCTURE_MASS:.2f} kg\")\n    \n    return main_beam\n\n\ndef agent_action(sandbox, agent_body, step_count):\n    \"\"\"Passive control with no direct force application.\"\"\"\n    pass",
+      "code_sha256": "8f8e5a31d9b0eff5107a0be4e30908e91e8f98498cc9c2a586a9ab60e5926a84",
+      "constraints": {
+        "count": 0,
+        "violated": false,
+        "violations": []
+      },
+      "generation": {
+        "latency_seconds": 34.01193809323013,
+        "model": "Qwen3-4B",
+        "token_usage": {
+          "completion_tokens": 3858,
+          "prompt_tokens": 9466,
+          "total_tokens": 13324
+        }
+      },
+      "outcome": {
+        "category": "simulation_failure",
+        "failure_reason": "10/10 cargo particles crossed below y=1.98 m after the grace window; Peak hull roll 21.89 deg exceeded 18.00 deg"
+      },
+      "phase": "revision",
+      "physics": {
+        "structure_broken": false
+      },
+      "score": 0.0,
+      "step_count": 10000,
+      "success": false,
+      "timestamp": 1785732779.3246958,
+      "verification_seconds": 0.8691893611103296
+    },
+    {
+      "artifacts": [],
+      "attempt": 7,
+      "code": "def build_agent(sandbox):\n    \"\"\"Optimized passive structure within mass budget for cargo retention and stability.\"\"\"\n    # Main support beam for structural integrity\n    main_beam = sandbox.add_beam(15.0, 3.0, 0.6, 0.3, density=150.0)\n    sandbox.set_material_properties(main_beam, restitution=0.01)\n    sandbox.add_joint(main_beam, None, (15.0, 3.0), type=\"rigid\")\n    \n    # Ballast beams for low center of mass\n    ballast1 = sandbox.add_beam(13.0, 2.5, 0.3, 0.3, density=150.0)\n    sandbox.set_material_properties(ballast1, restitution=0.01)\n    sandbox.add_joint(ballast1, main_beam, (13.0, 2.5), type=\"rigid\")\n    \n    ballast2 = sandbox.add_beam(17.0, 2.5, 0.3, 0.3, density=150.0)\n    sandbox.set_material_properties(ballast2, restitution=0.01)\n    sandbox.add_joint(ballast2, main_beam, (17.0, 2.5), type=\"rigid\")\n    \n    # Lateral beam for roll resistance\n    lateral_beam = sandbox.add_beam(14.5, 3.0, 0.2, 0.2, density=150.0)\n    sandbox.set_material_properties(lateral_beam, restitution=0.01)\n    sandbox.add_joint(lateral_beam, main_beam, (14.5, 3.0), type=\"rigid\")\n    \n    # Verify mass constraints\n    total_mass = sandbox.get_structure_mass()\n    if total_mass > sandbox.MAX_STRUCTURE_MASS:\n        raise ValueError(f\"Structure mass {total_mass:.2f} kg exceeds limit {sandbox.MAX_STRUCTURE_MASS:.2f} kg\")\n    \n    return main_beam\n\n\ndef agent_action(sandbox, agent_body, step_count):\n    \"\"\"Passive control with no direct force application.\"\"\"\n    pass",
+      "code_sha256": "f81f8cd56d0654db529877e7adc0270040c7ec07d0f665a88a2f695d7a783504",
+      "constraints": {
+        "count": 0,
+        "violated": false,
+        "violations": []
+      },
+      "generation": {
+        "latency_seconds": 46.81841099448502,
+        "model": "Qwen3-4B",
+        "token_usage": {
+          "completion_tokens": 5317,
+          "prompt_tokens": 3716,
+          "total_tokens": 9033
+        }
+      },
+      "outcome": {
+        "category": "construction_error",
+        "error": "Error building agent: Structure mass 60.00 kg exceeds limit 60.00 kg",
+        "error_message": "Structure mass 60.00 kg exceeds limit 60.00 kg",
+        "error_stage": "agent_construction",
+        "error_type": "agent_building_error"
+      },
+      "phase": "revision",
+      "physics": {},
+      "score": 0.0,
+      "step_count": null,
+      "success": false,
+      "timestamp": 1785732915.9080632,
+      "verification_seconds": 0.003628367558121681
+    },
+    {
+      "artifacts": [],
+      "attempt": 8,
+      "code": "def build_agent(sandbox):\n    \"\"\"Optimized passive structure for cargo retention and stability within mass budget.\"\"\"\n    # Main support beam for structural integrity\n    main_beam = sandbox.add_beam(15.0, 2.5, 0.6, 0.3, density=150.0)\n    sandbox.set_material_properties(main_beam, restitution=0.01)\n    sandbox.add_joint(main_beam, None, (15.0, 2.5), type=\"rigid\")\n    \n    # Ballast beams for low center of mass\n    ballast1 = sandbox.add_beam(13.0, 2.0, 0.3, 0.3, density=100.0)\n    sandbox.set_material_properties(ballast1, restitution=0.01)\n    sandbox.add_joint(ballast1, main_beam, (13.0, 2.0), type=\"rigid\")\n    \n    ballast2 = sandbox.add_beam(17.0, 2.0, 0.3, 0.3, density=100.0)\n    sandbox.set_material_properties(ballast2, restitution=0.01)\n    sandbox.add_joint(ballast2, main_beam, (17.0, 2.0), type=\"rigid\")\n    \n    # Lateral beam for roll resistance\n    lateral_beam = sandbox.add_beam(14.5, 2.5, 0.2, 0.2, density=150.0)\n    sandbox.set_material_properties(lateral_beam, restitution=0.01)\n    sandbox.add_joint(lateral_beam, main_beam, (14.5, 2.5), type=\"rigid\")\n    \n    # Verify mass constraints\n    total_mass = sandbox.get_structure_mass()\n    if total_mass > sandbox.MAX_STRUCTURE_MASS:\n        raise ValueError(f\"Structure mass {total_mass:.2f} kg exceeds limit {sandbox.MAX_STRUCTURE_MASS:.2f} kg\")\n    \n    return main_beam\n\n\ndef agent_action(sandbox, agent_body, step_count):\n    \"\"\"Passive control with no direct force application.\"\"\"\n    pass",
+      "code_sha256": "86b7670539d46c5f70936f2133ad55a919b7ec09d881a10fe804f8e7c7316ab7",
+      "constraints": {
+        "count": 0,
+        "violated": false,
+        "violations": []
+      },
+      "generation": {
+        "latency_seconds": 32.87812748737633,
+        "model": "Qwen3-4B",
+        "token_usage": {
+          "completion_tokens": 3539,
+          "prompt_tokens": 9169,
+          "total_tokens": 12708
+        }
+      },
+      "outcome": {
+        "category": "construction_error",
+        "error": "Error building agent: Beam footprint corner (12.85, 1.85) outside build zone x=[12.00, 18.00], y=[2.00, 4.50]",
+        "error_message": "Beam footprint corner (12.85, 1.85) outside build zone x=[12.00, 18.00], y=[2.00, 4.50]",
+        "error_stage": "agent_construction",
+        "error_type": "agent_building_error"
+      },
+      "phase": "revision",
+      "physics": {},
+      "score": 0.0,
+      "step_count": null,
+      "success": false,
+      "timestamp": 1785732975.0312223,
+      "verification_seconds": 0.0035447366535663605
+    },
+    {
+      "artifacts": [],
+      "attempt": 9,
+      "code": "def build_agent(sandbox):\n    \"\"\"Optimized passive structure for cargo retention and stability within mass budget.\"\"\"\n    # Main support beam for structural integrity\n    main_beam = sandbox.add_beam(15.0, 2.5, 0.6, 0.3, density=150.0)\n    sandbox.set_material_properties(main_beam, restitution=0.01)\n    sandbox.add_joint(main_beam, None, (15.0, 2.5), type=\"rigid\")\n    \n    # Ballast beams for low center of mass\n    ballast1 = sandbox.add_beam(13.0, 2.5, 0.3, 0.3, density=200.0)\n    sandbox.set_material_properties(ballast1, restitution=0.01)\n    sandbox.add_joint(ballast1, main_beam, (13.0, 2.5), type=\"rigid\")\n    \n    ballast2 = sandbox.add_beam(17.0, 2.5, 0.3, 0.3, density=200.0)\n    sandbox.set_material_properties(ballast2, restitution=0.01)\n    sandbox.add_joint(ballast2, main_beam, (17.0, 2.5), type=\"rigid\")\n    \n    # Lateral beam for roll resistance\n    lateral_beam = sandbox.add_beam(14.5, 2.5, 0.2, 0.2, density=150.0)\n    sandbox.set_material_properties(lateral_beam, restitution=0.01)\n    sandbox.add_joint(lateral_beam, main_beam, (14.5, 2.5), type=\"rigid\")\n    \n    # Additional support beams for stability\n    lower_support = sandbox.add_beam(15.0, 2.0, 0.6, 0.3, density=150.0)\n    sandbox.set_material_properties(lower_support, restitution=0.01)\n    sandbox.add_joint(lower_support, main_beam, (15.0, 2.0), type=\"rigid\")\n    \n    # Verify mass constraints\n    total_mass = sandbox.get_structure_mass()\n    if total_mass > sandbox.MAX_STRUCTURE_MASS:\n        raise ValueError(f\"Structure mass {total_mass:.2f} kg exceeds limit {sandbox.MAX_STRUCTURE_MASS:.2f} kg\")\n    \n    return main_beam\n\n\ndef agent_action(sandbox, agent_body, step_count):\n    \"\"\"Passive control with no direct force application.\"\"\"\n    pass",
+      "code_sha256": "c49e78510c6cc026b44870c0c7cd6bc2950ae9ac0ec0f4578094744ceeb40dd9",
+      "constraints": {
+        "count": 0,
+        "violated": false,
+        "violations": []
+      },
+      "generation": {
+        "latency_seconds": 24.90273742377758,
+        "model": "Qwen3-4B",
+        "token_usage": {
+          "completion_tokens": 2680,
+          "prompt_tokens": 9197,
+          "total_tokens": 11877
+        }
+      },
+      "outcome": {
+        "category": "construction_error",
+        "error": "Error building agent: Beam footprint corner (14.70, 1.85) outside build zone x=[12.00, 18.00], y=[2.00, 4.50]",
+        "error_message": "Beam footprint corner (14.70, 1.85) outside build zone x=[12.00, 18.00], y=[2.00, 4.50]",
+        "error_stage": "agent_construction",
+        "error_type": "agent_building_error"
+      },
+      "phase": "revision",
+      "physics": {},
+      "score": 0.0,
+      "step_count": null,
+      "success": false,
+      "timestamp": 1785733045.6144025,
+      "verification_seconds": 0.004287267103791237
+    },
+    {
+      "artifacts": [],
+      "attempt": 10,
+      "code": "def build_agent(sandbox):\n    \"\"\"Optimized passive structure for cargo retention and stability within mass budget.\"\"\"\n    # Main support beam for structural integrity\n    main_beam = sandbox.add_beam(15.0, 2.5, 0.6, 0.3, density=150.0)\n    sandbox.set_material_properties(main_beam, restitution=0.01)\n    sandbox.add_joint(main_beam, None, (15.0, 2.5), type=\"rigid\")\n    \n    # Ballast beams for low center of mass\n    ballast1 = sandbox.add_beam(13.0, 2.3, 0.3, 0.3, density=100.0)\n    sandbox.set_material_properties(ballast1, restitution=0.01)\n    sandbox.add_joint(ballast1, main_beam, (13.0, 2.3), type=\"rigid\")\n    \n    ballast2 = sandbox.add_beam(17.0, 2.3, 0.3, 0.3, density=100.0)\n    sandbox.set_material_properties(ballast2, restitution=0.01)\n    sandbox.add_joint(ballast2, main_beam, (17.0, 2.3), type=\"rigid\")\n    \n    # Lower support beam for enhanced stability\n    lower_support = sandbox.add_beam(15.0, 2.2, 0.6, 0.3, density=80.0)\n    sandbox.set_material_properties(lower_support, restitution=0.01)\n    sandbox.add_joint(lower_support, main_beam, (15.0, 2.2), type=\"rigid\")\n    \n    # Verify mass constraints\n    total_mass = sandbox.get_structure_mass()\n    if total_mass > sandbox.MAX_STRUCTURE_MASS:\n        raise ValueError(f\"Structure mass {total_mass:.2f} kg exceeds limit {sandbox.MAX_STRUCTURE_MASS:.2f} kg\")\n    \n    return main_beam\n\n\ndef agent_action(sandbox, agent_body, step_count):\n    \"\"\"Passive control with no direct force application.\"\"\"\n    pass",
+      "code_sha256": "549609bae78e8e8ab6d53b591e33ee271230d8c6abf464d4f135feb7f85af674",
+      "constraints": {
+        "count": 0,
+        "violated": false,
+        "violations": []
+      },
+      "generation": {
+        "latency_seconds": 35.371989104896784,
+        "model": "Qwen3-4B",
+        "token_usage": {
+          "completion_tokens": 3648,
+          "prompt_tokens": 9283,
+          "total_tokens": 12931
+        }
+      },
+      "outcome": {
+        "category": "simulation_failure",
+        "failure_reason": "10/10 cargo particles crossed below y=1.98 m after the grace window; Peak hull roll 21.20 deg exceeded 18.00 deg"
+      },
+      "phase": "revision",
+      "physics": {
+        "structure_broken": false
+      },
+      "score": 0.0,
+      "step_count": 10000,
+      "success": false,
+      "timestamp": 1785733113.3434703,
+      "verification_seconds": 0.8234725371003151
+    },
+    {
+      "artifacts": [],
+      "attempt": 11,
+      "code": "def build_agent(sandbox):\n    \"\"\"Optimized passive structure with distributed ballast and low center of mass.\"\"\"\n    # Main support beam for structural integrity\n    main_beam = sandbox.add_beam(15.0, 2.5, 0.6, 0.3, density=120.0)\n    sandbox.set_material_properties(main_beam, restitution=0.01)\n    sandbox.add_joint(main_beam, None, (15.0, 2.5), type=\"rigid\")\n    \n    # Ballast beams for low center of mass\n    ballast1 = sandbox.add_beam(13.0, 2.3, 0.3, 0.3, density=100.0)\n    sandbox.set_material_properties(ballast1, restitution=0.01)\n    sandbox.add_joint(ballast1, main_beam, (13.0, 2.3), type=\"rigid\")\n    \n    ballast2 = sandbox.add_beam(17.0, 2.3, 0.3, 0.3, density=100.0)\n    sandbox.set_material_properties(ballast2, restitution=0.01)\n    sandbox.add_joint(ballast2, main_beam, (17.0, 2.3), type=\"rigid\")\n    \n    # Lower support beam for enhanced stability\n    lower_support = sandbox.add_beam(15.0, 2.2, 0.6, 0.3, density=100.0)\n    sandbox.set_material_properties(lower_support, restitution=0.01)\n    sandbox.add_joint(lower_support, main_beam, (15.0, 2.2), type=\"rigid\")\n    \n    # Additional beams for mass distribution and stability\n    beam3 = sandbox.add_beam(14.5, 2.3, 0.3, 0.3, density=100.0)\n    sandbox.set_material_properties(beam3, restitution=0.01)\n    sandbox.add_joint(beam3, main_beam, (14.5, 2.3), type=\"rigid\")\n    \n    beam4 = sandbox.add_beam(15.5, 2.3, 0.3, 0.3, density=100.0)\n    sandbox.set_material_properties(beam4, restitution=0.01)\n    sandbox.add_joint(beam4, main_beam, (15.5, 2.3), type=\"rigid\")\n    \n    # Verify mass constraints\n    total_mass = sandbox.get_structure_mass()\n    if total_mass > sandbox.MAX_STRUCTURE_MASS:\n        raise ValueError(f\"Structure mass {total_mass:.2f} kg exceeds limit {sandbox.MAX_STRUCTURE_MASS:.2f} kg\")\n    \n    return main_beam\n\n\ndef agent_action(sandbox, agent_body, step_count):\n    \"\"\"Passive control with no direct force application.\"\"\"\n    pass",
+      "code_sha256": "286ed2fb9870f44af989797dbacc2999427aa37ea3b67f909196abae8dd4553f",
+      "constraints": {
+        "count": 0,
+        "violated": false,
+        "violations": []
+      },
+      "generation": {
+        "latency_seconds": 39.381801806390285,
+        "model": "Qwen3-4B",
+        "token_usage": {
+          "completion_tokens": 4388,
+          "prompt_tokens": 9577,
+          "total_tokens": 13965
+        }
+      },
+      "outcome": {
+        "category": "construction_error",
+        "error": "Error building agent: Structure mass 75.60 kg exceeds limit 60.00 kg",
+        "error_message": "Structure mass 75.60 kg exceeds limit 60.00 kg",
+        "error_stage": "agent_construction",
+        "error_type": "agent_building_error"
+      },
+      "phase": "revision",
+      "physics": {},
+      "score": 0.0,
+      "step_count": null,
+      "success": false,
+      "timestamp": 1785733196.0694742,
+      "verification_seconds": 0.00427691824734211
+    },
+    {
+      "artifacts": [],
+      "attempt": 12,
+      "code": "def build_agent(sandbox):\n    \"\"\"Optimized passive structure with distributed ballast and low center of mass.\"\"\"\n    # Main support beam for structural integrity\n    main_beam = sandbox.add_beam(15.0, 2.5, 0.6, 0.3, density=80.0)\n    sandbox.set_material_properties(main_beam, restitution=0.01)\n    sandbox.add_joint(main_beam, None, (15.0, 2.5), type=\"rigid\")\n    \n    # Ballast beams for low center of mass\n    ballast1 = sandbox.add_beam(13.5, 2.2, 0.3, 0.3, density=100.0)\n    sandbox.set_material_properties(ballast1, restitution=0.01)\n    sandbox.add_joint(ballast1, main_beam, (13.5, 2.2), type=\"rigid\")\n    \n    ballast2 = sandbox.add_beam(16.5, 2.2, 0.3, 0.3, density=100.0)\n    sandbox.set_material_properties(ballast2, restitution=0.01)\n    sandbox.add_joint(ballast2, main_beam, (16.5, 2.2), type=\"rigid\")\n    \n    # Lower support beam for enhanced stability\n    lower_support = sandbox.add_beam(15.0, 2.1, 0.6, 0.3, density=80.0)\n    sandbox.set_material_properties(lower_support, restitution=0.01)\n    sandbox.add_joint(lower_support, main_beam, (15.0, 2.1), type=\"rigid\")\n    \n    # Additional beams for mass distribution and stability\n    beam3 = sandbox.add_beam(14.5, 2.2, 0.2, 0.2, density=80.0)\n    sandbox.set_material_properties(beam3, restitution=0.01)\n    sandbox.add_joint(beam3, main_beam, (14.5, 2.2), type=\"rigid\")\n    \n    beam4 = sandbox.add_beam(15.5, 2.2, 0.2, 0.2, density=80.0)\n    sandbox.set_material_properties(beam4, restitution=0.01)\n    sandbox.add_joint(beam4, main_beam, (15.5, 2.2), type=\"rigid\")\n    \n    beam5 = sandbox.add_beam(14.5, 2.3, 0.2, 0.2, density=80.0)\n    sandbox.set_material_properties(beam5, restitution=0.01)\n    sandbox.add_joint(beam5, main_beam, (14.5, 2.3), type=\"rigid\")\n    \n    beam6 = sandbox.add_beam(15.5, 2.3, 0.2, 0.2, density=80.0)\n    sandbox.set_material_properties(beam6, restitution=0.01)\n    sandbox.add_joint(beam6, main_beam, (15.5, 2.3), type=\"rigid\")\n    \n    # Verify mass constraints\n    total_mass = sandbox.get_structure_mass()\n    if total_mass > sandbox.MAX_STRUCTURE_MASS:\n        raise ValueError(f\"Structure mass {total_mass:.2f} kg exceeds limit {sandbox.MAX_STRUCTURE_MASS:.2f} kg\")\n    \n    return main_beam\n\n\ndef agent_action(sandbox, agent_body, step_count):\n    \"\"\"Passive control with no direct force application.\"\"\"\n    pass",
+      "code_sha256": "0d6ef72f71a5d980518413101ec0b18038ff4b090740d7b40ae824b6fa160b45",
+      "constraints": {
+        "count": 0,
+        "violated": false,
+        "violations": []
+      },
+      "generation": {
+        "latency_seconds": 39.72248680330813,
+        "model": "Qwen3-4B",
+        "token_usage": {
+          "completion_tokens": 4460,
+          "prompt_tokens": 9339,
+          "total_tokens": 13799
+        }
+      },
+      "outcome": {
+        "category": "construction_error",
+        "error": "Error building agent: Beam footprint corner (14.70, 1.95) outside build zone x=[12.00, 18.00], y=[2.00, 4.50]",
+        "error_message": "Beam footprint corner (14.70, 1.95) outside build zone x=[12.00, 18.00], y=[2.00, 4.50]",
+        "error_stage": "agent_construction",
+        "error_type": "agent_building_error"
+      },
+      "phase": "revision",
+      "physics": {},
+      "score": 0.0,
+      "step_count": null,
+      "success": false,
+      "timestamp": 1785733273.0392835,
+      "verification_seconds": 0.005054822191596031
+    },
+    {
+      "artifacts": [],
+      "attempt": 13,
+      "code": "def build_agent(sandbox):\n    \"\"\"Optimized passive structure with distributed ballast and low center of mass.\"\"\"\n    # Main support beam for structural integrity\n    main_beam = sandbox.add_beam(15.0, 2.5, 0.6, 0.3, density=80.0)\n    sandbox.set_material_properties(main_beam, restitution=0.01)\n    sandbox.add_joint(main_beam, None, (15.0, 2.5), type=\"rigid\")\n    \n    # Ballast beams at lower y to lower center of mass\n    ballast1 = sandbox.add_beam(14.5, 2.2, 0.2, 0.2, density=100.0)\n    sandbox.set_material_properties(ballast1, restitution=0.01)\n    sandbox.add_joint(ballast1, main_beam, (14.5, 2.2), type=\"rigid\")\n    \n    ballast2 = sandbox.add_beam(15.5, 2.2, 0.2, 0.2, density=100.0)\n    sandbox.set_material_properties(ballast2, restitution=0.01)\n    sandbox.add_joint(ballast2, main_beam, (15.5, 2.2), type=\"rigid\")\n    \n    ballast3 = sandbox.add_beam(14.0, 2.1, 0.2, 0.2, density=100.0)\n    sandbox.set_material_properties(ballast3, restitution=0.01)\n    sandbox.add_joint(ballast3, main_beam, (14.0, 2.1), type=\"rigid\")\n    \n    ballast4 = sandbox.add_beam(16.0, 2.1, 0.2, 0.2, density=100.0)\n    sandbox.set_material_properties(ballast4, restitution=0.01)\n    sandbox.add_joint(ballast4, main_beam, (16.0, 2.1), type=\"rigid\")\n    \n    # Additional beams for mass distribution and stability\n    beam5 = sandbox.add_beam(14.5, 2.3, 0.2, 0.2, density=80.0)\n    sandbox.set_material_properties(beam5, restitution=0.01)\n    sandbox.add_joint(beam5, main_beam, (14.5, 2.3), type=\"rigid\")\n    \n    beam6 = sandbox.add_beam(15.5, 2.3, 0.2, 0.2, density=80.0)\n    sandbox.set_material_properties(beam6, restitution=0.01)\n    sandbox.add_joint(beam6, main_beam, (15.5, 2.3), type=\"rigid\")\n    \n    # Verify mass constraints\n    total_mass = sandbox.get_structure_mass()\n    if total_mass > sandbox.MAX_STRUCTURE_MASS:\n        raise ValueError(f\"Structure mass {total_mass:.2f} kg exceeds limit {sandbox.MAX_STRUCTURE_MASS:.2f} kg\")\n    \n    return main_beam\n\n\ndef agent_action(sandbox, agent_body, step_count):\n    \"\"\"Passive control with no direct force application.\"\"\"\n    pass",
+      "code_sha256": "5c6535a2c3f2abe2a7ecaa2f572eac17c9cc75eb7762752c43552b304659514f",
+      "constraints": {
+        "count": 0,
+        "violated": false,
+        "violations": []
+      },
+      "generation": {
+        "latency_seconds": 44.37914297543466,
+        "model": "Qwen3-4B",
+        "token_usage": {
+          "completion_tokens": 4981,
+          "prompt_tokens": 9521,
+          "total_tokens": 14502
+        }
+      },
+      "outcome": {
+        "category": "simulation_failure",
+        "failure_reason": "10/10 cargo particles crossed below y=1.98 m after the grace window; Peak hull roll 24.69 deg exceeded 18.00 deg"
+      },
+      "phase": "revision",
+      "physics": {
+        "structure_broken": false
+      },
+      "score": 0.0,
+      "step_count": 10000,
+      "success": false,
+      "timestamp": 1785733356.6742852,
+      "verification_seconds": 0.8353131506592035
+    },
+    {
+      "artifacts": [],
+      "attempt": 14,
+      "code": "def build_agent(sandbox):\n    \"\"\"Optimized passive structure with distributed ballast and low center of mass.\"\"\"\n    # Main support beam for structural integrity\n    main_beam = sandbox.add_beam(15.0, 2.5, 0.6, 0.3, density=150.0)\n    sandbox.set_material_properties(main_beam, restitution=0.01)\n    sandbox.add_joint(main_beam, None, (15.0, 2.5), type=\"rigid\")\n    \n    # Ballast beams at lower y to lower center of mass\n    ballast1 = sandbox.add_beam(14.5, 2.2, 0.2, 0.2, density=100.0)\n    sandbox.set_material_properties(ballast1, restitution=0.01)\n    sandbox.add_joint(ballast1, main_beam, (14.5, 2.2), type=\"rigid\")\n    \n    ballast2 = sandbox.add_beam(15.5, 2.2, 0.2, 0.2, density=100.0)\n    sandbox.set_material_properties(ballast2, restitution=0.01)\n    sandbox.add_joint(ballast2, main_beam, (15.5, 2.2), type=\"rigid\")\n    \n    ballast3 = sandbox.add_beam(14.0, 2.0, 0.2, 0.2, density=100.0)\n    sandbox.set_material_properties(ballast3, restitution=0.01)\n    sandbox.add_joint(ballast3, main_beam, (14.0, 2.0), type=\"rigid\")\n    \n    ballast4 = sandbox.add_beam(16.0, 2.0, 0.2, 0.2, density=100.0)\n    sandbox.set_material_properties(ballast4, restitution=0.01)\n    sandbox.add_joint(ballast4, main_beam, (16.0, 2.0), type=\"rigid\")\n    \n    ballast5 = sandbox.add_beam(14.5, 2.0, 0.2, 0.2, density=100.0)\n    sandbox.set_material_properties(ballast5, restitution=0.01)\n    sandbox.add_joint(ballast5, main_beam, (14.5, 2.0), type=\"rigid\")\n    \n    ballast6 = sandbox.add_beam(15.5, 2.0, 0.2, 0.2, density=100.0)\n    sandbox.set_material_properties(ballast6, restitution=0.01)\n    sandbox.add_joint(ballast6, main_beam, (15.5, 2.0), type=\"rigid\")\n    \n    # Verify mass constraints\n    total_mass = sandbox.get_structure_mass()\n    if total_mass > sandbox.MAX_STRUCTURE_MASS:\n        raise ValueError(f\"Structure mass {total_mass:.2f} kg exceeds limit {sandbox.MAX_STRUCTURE_MASS:.2f} kg\")\n    \n    return main_beam\n\n\ndef agent_action(sandbox, agent_body, step_count):\n    \"\"\"Passive control with no direct force application.\"\"\"\n    pass",
+      "code_sha256": "efd541908a4832446b741fc5dbbebba28a1519f128ef486bc9d118754f24fa72",
+      "constraints": {
+        "count": 0,
+        "violated": false,
+        "violations": []
+      },
+      "generation": {
+        "latency_seconds": 47.220992187038064,
+        "model": "Qwen3-4B",
+        "token_usage": {
+          "completion_tokens": 4891,
+          "prompt_tokens": 9825,
+          "total_tokens": 14716
+        }
+      },
+      "outcome": {
+        "category": "construction_error",
+        "error": "Error building agent: Beam footprint corner (13.90, 1.90) outside build zone x=[12.00, 18.00], y=[2.00, 4.50]",
+        "error_message": "Beam footprint corner (13.90, 1.90) outside build zone x=[12.00, 18.00], y=[2.00, 4.50]",
+        "error_stage": "agent_construction",
+        "error_type": "agent_building_error"
+      },
+      "phase": "revision",
+      "physics": {},
+      "score": 0.0,
+      "step_count": null,
+      "success": false,
+      "timestamp": 1785733441.5055814,
+      "verification_seconds": 0.004809625446796417
+    },
+    {
+      "artifacts": [],
+      "attempt": 15,
+      "code": "def build_agent(sandbox):\n    \"\"\"Optimized passive structure with distributed ballast and lower support beams in the water band.\"\"\"\n    # Main support beam for structural integrity\n    main_beam = sandbox.add_beam(15.0, 2.5, 0.6, 0.3, density=150.0)\n    sandbox.set_material_properties(main_beam, restitution=0.01)\n    sandbox.add_joint(main_beam, None, (15.0, 2.5), type=\"rigid\")\n    \n    # Ballast beams at lower y to lower center of mass\n    ballast1 = sandbox.add_beam(14.5, 2.0, 0.2, 0.2, density=100.0)\n    sandbox.set_material_properties(ballast1, restitution=0.01)\n    sandbox.add_joint(ballast1, main_beam, (14.5, 2.0), type=\"rigid\")\n    \n    ballast2 = sandbox.add_beam(15.5, 2.0, 0.2, 0.2, density=100.0)\n    sandbox.set_material_properties(ballast2, restitution=0.01)\n    sandbox.add_joint(ballast2, main_beam, (15.5, 2.0), type=\"rigid\")\n    \n    # Lower support beams in the water band at y=2.0 m to hold cargo\n    lower_beam1 = sandbox.add_beam(14.5, 2.0, 0.2, 0.2, density=100.0)\n    sandbox.set_material_properties(lower_beam1, restitution=0.01)\n    sandbox.add_joint(lower_beam1, main_beam, (14.5, 2.0), type=\"rigid\")\n    \n    lower_beam2 = sandbox.add_beam(15.5, 2.0, 0.2, 0.2, density=100.0)\n    sandbox.set_material_properties(lower_beam2, restitution=0.01)\n    sandbox.add_joint(lower_beam2, main_beam, (15.5, 2.0), type=\"rigid\")\n    \n    # Rails in the water band at y=2.0 m to hold cargo\n    rail1 = sandbox.add_beam(14.0, 2.0, 0.1, 0.1, density=100.0)\n    sandbox.set_material_properties(rail1, restitution=0.01)\n    sandbox.add_joint(rail1, main_beam, (14.0, 2.0), type=\"rigid\")\n    \n    rail2 = sandbox.add_beam(16.0, 2.0, 0.1, 0.1, density=100.0)\n    sandbox.set_material_properties(rail2, restitution=0.01)\n    sandbox.add_joint(rail2, main_beam, (16.0, 2.0), type=\"rigid\")\n    \n    # Verify mass constraints\n    total_mass = sandbox.get_structure_mass()\n    if total_mass > sandbox.MAX_STRUCTURE_MASS:\n        raise ValueError(f\"Structure mass {total_mass:.2f} kg exceeds limit {sandbox.MAX_STRUCTURE_MASS:.2f} kg\")\n    \n    return main_beam\n\n\ndef agent_action(sandbox, agent_body, step_count):\n    \"\"\"Passive control with no direct force application.\"\"\"\n    pass",
+      "code_sha256": "34161f49f5c92625b7023b8a801df01e847cfb44380b11ec40c7b8dbd6b348e2",
+      "constraints": {
+        "count": 0,
+        "violated": false,
+        "violations": []
+      },
+      "generation": {
+        "latency_seconds": 53.942934369668365,
+        "model": "Qwen3-4B",
+        "token_usage": {
+          "completion_tokens": 5936,
+          "prompt_tokens": 3856,
+          "total_tokens": 9792
+        }
+      },
+      "outcome": {
+        "category": "construction_error",
+        "error": "Error building agent: Beam footprint corner (14.40, 1.90) outside build zone x=[12.00, 18.00], y=[2.00, 4.50]",
+        "error_message": "Beam footprint corner (14.40, 1.90) outside build zone x=[12.00, 18.00], y=[2.00, 4.50]",
+        "error_stage": "agent_construction",
+        "error_type": "agent_building_error"
+      },
+      "phase": "revision",
+      "physics": {},
+      "score": 0.0,
+      "step_count": null,
+      "success": false,
+      "timestamp": 1785733778.5295238,
+      "verification_seconds": 0.006513586267828941
+    },
+    {
+      "artifacts": [],
+      "attempt": 16,
+      "code": "def build_agent(sandbox):\n    \"\"\"Optimized passive structure with distributed ballast and lower support beams in the water band, respecting build zone constraints.\"\"\"\n    # Main support beam for structural integrity\n    main_beam = sandbox.add_beam(15.0, 2.5, 0.6, 0.3, density=150.0)\n    sandbox.set_material_properties(main_beam, restitution=0.01)\n    sandbox.add_joint(main_beam, None, (15.0, 2.5), type=\"rigid\")\n    \n    # Ballast beams at y=2.1 to lower center of mass\n    ballast1 = sandbox.add_beam(14.5, 2.1, 0.2, 0.2, density=100.0)\n    sandbox.set_material_properties(ballast1, restitution=0.01)\n    sandbox.add_joint(ballast1, main_beam, (14.5, 2.1), type=\"rigid\")\n    \n    ballast2 = sandbox.add_beam(15.5, 2.1, 0.2, 0.2, density=100.0)\n    sandbox.set_material_properties(ballast2, restitution=0.01)\n    sandbox.add_joint(ballast2, main_beam, (15.5, 2.1), type=\"rigid\")\n    \n    # Lower support beams in the water band at y=2.1 to hold cargo\n    lower_beam1 = sandbox.add_beam(14.5, 2.1, 0.2, 0.2, density=100.0)\n    sandbox.set_material_properties(lower_beam1, restitution=0.01)\n    sandbox.add_joint(lower_beam1, main_beam, (14.5, 2.1), type=\"rigid\")\n    \n    lower_beam2 = sandbox.add_beam(15.5, 2.1, 0.2, 0.2, density=100.0)\n    sandbox.set_material_properties(lower_beam2, restitution=0.01)\n    sandbox.add_joint(lower_beam2, main_beam, (15.5, 2.1), type=\"rigid\")\n    \n    # Rails in the water band at y=2.1 to hold cargo\n    rail1 = sandbox.add_beam(14.0, 2.1, 0.1, 0.1, density=100.0)\n    sandbox.set_material_properties(rail1, restitution=0.01)\n    sandbox.add_joint(rail1, main_beam, (14.0, 2.1), type=\"rigid\")\n    \n    rail2 = sandbox.add_beam(16.0, 2.1, 0.1, 0.1, density=100.0)\n    sandbox.set_material_properties(rail2, restitution=0.01)\n    sandbox.add_joint(rail2, main_beam, (16.0, 2.1), type=\"rigid\")\n    \n    # Verify mass constraints\n    total_mass = sandbox.get_structure_mass()\n    if total_mass > sandbox.MAX_STRUCTURE_MASS:\n        raise ValueError(f\"Structure mass {total_mass:.2f} kg exceeds limit {sandbox.MAX_STRUCTURE_MASS:.2f} kg\")\n    \n    return main_beam\n\n\ndef agent_action(sandbox, agent_body, step_count):\n    \"\"\"Passive control with no direct force application.\"\"\"\n    pass",
+      "code_sha256": "1229782bda71b75b436bf3787d7dae90870e85ad27a396ad1199959de2da30ea",
+      "constraints": {
+        "count": 0,
+        "violated": false,
+        "violations": []
+      },
+      "generation": {
+        "latency_seconds": 30.39160254597664,
+        "model": "Qwen3-4B",
+        "token_usage": {
+          "completion_tokens": 3278,
+          "prompt_tokens": 3758,
+          "total_tokens": 7036
+        }
+      },
+      "outcome": {
+        "category": "simulation_failure",
+        "failure_reason": "10/10 cargo particles crossed below y=1.98 m after the grace window; Peak hull roll 195.73 deg exceeded 18.00 deg"
+      },
+      "phase": "revision",
+      "physics": {
+        "structure_broken": false
+      },
+      "score": 0.0,
+      "step_count": 10000,
+      "success": false,
+      "timestamp": 1785734046.3183138,
+      "verification_seconds": 0.8907225169241428
+    },
+    {
+      "artifacts": [],
+      "attempt": 17,
+      "code": "def build_agent(sandbox):\n    \"\"\"Optimized passive structure with distributed ballast and lower support beams in the water band, respecting build zone constraints.\"\"\"\n    # Main support beam for structural integrity\n    main_beam = sandbox.add_beam(15.0, 2.5, 0.6, 0.3, density=150.0)\n    sandbox.set_material_properties(main_beam, restitution=0.01)\n    sandbox.add_joint(main_beam, None, (15.0, 2.5), type=\"rigid\")\n    \n    # Ballast beams at y=2.1 to lower center of mass\n    ballast1 = sandbox.add_beam(14.5, 2.1, 0.2, 0.2, density=100.0)\n    sandbox.set_material_properties(ballast1, restitution=0.01)\n    sandbox.add_joint(ballast1, main_beam, (14.5, 2.1), type=\"rigid\")\n    \n    ballast2 = sandbox.add_beam(15.5, 2.1, 0.2, 0.2, density=100.0)\n    sandbox.set_material_properties(ballast2, restitution=0.01)\n    sandbox.add_joint(ballast2, main_beam, (15.5, 2.1), type=\"rigid\")\n    \n    # Lower support beams at y=2.1 to hold cargo\n    lower_beam1 = sandbox.add_beam(14.5, 2.1, 0.2, 0.2, density=100.0)\n    sandbox.set_material_properties(lower_beam1, restitution=0.01)\n    sandbox.add_joint(lower_beam1, main_beam, (14.5, 2.1), type=\"rigid\")\n    \n    lower_beam2 = sandbox.add_beam(15.5, 2.1, 0.2, 0.2, density=100.0)\n    sandbox.set_material_properties(lower_beam2, restitution=0.01)\n    sandbox.add_joint(lower_beam2, main_beam, (15.5, 2.1), type=\"rigid\")\n    \n    # Rails at y=2.05 to hold cargo\n    rail1 = sandbox.add_beam(14.0, 2.05, 0.1, 0.1, density=100.0)\n    sandbox.set_material_properties(rail1, restitution=0.01)\n    sandbox.add_joint(rail1, main_beam, (14.0, 2.05), type=\"rigid\")\n    \n    rail2 = sandbox.add_beam(16.0, 2.05, 0.1, 0.1, density=100.0)\n    sandbox.set_material_properties(rail2, restitution=0.01)\n    sandbox.add_joint(rail2, main_beam, (16.0, 2.05), type=\"rigid\")\n    \n    # Verify mass constraints\n    total_mass = sandbox.get_structure_mass()\n    if total_mass > sandbox.MAX_STRUCTURE_MASS:\n        raise ValueError(f\"Structure mass {total_mass:.2f} kg exceeds limit {sandbox.MAX_STRUCTURE_MASS:.2f} kg\")\n    \n    return main_beam\n\n\ndef agent_action(sandbox, agent_body, step_count):\n    \"\"\"Passive control with no direct force application.\"\"\"\n    pass",
+      "code_sha256": "a7b11e7013dbf9613b1c34393656fa5f80dfaedb1a3b90dc7ebfa233d96a6390",
+      "constraints": {
+        "count": 0,
+        "violated": false,
+        "violations": []
+      },
+      "generation": {
+        "latency_seconds": 32.525515055283904,
+        "model": "Qwen3-4B",
+        "token_usage": {
+          "completion_tokens": 3785,
+          "prompt_tokens": 3783,
+          "total_tokens": 7568
+        }
+      },
+      "outcome": {
+        "category": "construction_error",
+        "error": "Error building agent: Beam footprint corner (13.95, 2.00) outside build zone x=[12.00, 18.00], y=[2.00, 4.50]",
+        "error_message": "Beam footprint corner (13.95, 2.00) outside build zone x=[12.00, 18.00], y=[2.00, 4.50]",
+        "error_stage": "agent_construction",
+        "error_type": "agent_building_error"
+      },
+      "phase": "revision",
+      "physics": {},
+      "score": 0.0,
+      "step_count": null,
+      "success": false,
+      "timestamp": 1785734230.9091518,
+      "verification_seconds": 0.004651295021176338
+    },
+    {
+      "artifacts": [],
+      "attempt": 18,
+      "code": "def build_agent(sandbox):\n    \"\"\"Optimized passive structure with distributed ballast and support beams in the water band, respecting build zone constraints.\"\"\"\n    # Main support beam for structural integrity\n    main_beam = sandbox.add_beam(15.0, 2.5, 0.6, 0.3, density=150.0)\n    sandbox.set_material_properties(main_beam, restitution=0.01)\n    sandbox.add_joint(main_beam, None, (15.0, 2.5), type=\"rigid\")\n    \n    # Ballast beams at y=2.3 to lower center of mass\n    ballast1 = sandbox.add_beam(14.5, 2.3, 0.2, 0.2, density=100.0)\n    sandbox.set_material_properties(ballast1, restitution=0.01)\n    sandbox.add_joint(ballast1, main_beam, (14.5, 2.3), type=\"rigid\")\n    \n    ballast2 = sandbox.add_beam(15.5, 2.3, 0.2, 0.2, density=100.0)\n    sandbox.set_material_properties(ballast2, restitution=0.01)\n    sandbox.add_joint(ballast2, main_beam, (15.5, 2.3), type=\"rigid\")\n    \n    # Support beams at y=2.1 to hold cargo in the water band\n    support1 = sandbox.add_beam(14.5, 2.1, 0.2, 0.2, density=100.0)\n    sandbox.set_material_properties(support1, restitution=0.01)\n    sandbox.add_joint(support1, main_beam, (14.5, 2.1), type=\"rigid\")\n    \n    support2 = sandbox.add_beam(15.5, 2.1, 0.2, 0.2, density=100.0)\n    sandbox.set_material_properties(support2, restitution=0.01)\n    sandbox.add_joint(support2, main_beam, (15.5, 2.1), type=\"rigid\")\n    \n    # Rails at y=2.05 to hold cargo in the water band\n    rail1 = sandbox.add_beam(14.0, 2.05, 0.1, 0.1, density=100.0)\n    sandbox.set_material_properties(rail1, restitution=0.01)\n    sandbox.add_joint(rail1, main_beam, (14.0, 2.05), type=\"rigid\")\n    \n    rail2 = sandbox.add_beam(16.0, 2.05, 0.1, 0.1, density=100.0)\n    sandbox.set_material_properties(rail2, restitution=0.01)\n    sandbox.add_joint(rail2, main_beam, (16.0, 2.05), type=\"rigid\")\n    \n    # Verify mass constraints\n    total_mass = sandbox.get_structure_mass()\n    if total_mass > sandbox.MAX_STRUCTURE_MASS:\n        raise ValueError(f\"Structure mass {total_mass:.2f} kg exceeds limit {sandbox.MAX_STRUCTURE_MASS:.2f} kg\")\n    \n    return main_beam\n\n\ndef agent_action(sandbox, agent_body, step_count):\n    \"\"\"Passive control with no direct force application.\"\"\"\n    pass",
+      "code_sha256": "c35a58008a3b37ffe7e9f1bb453f7a9c7fe7aaed28f8e9d94d95fff116a57189",
+      "constraints": {
+        "count": 0,
+        "violated": false,
+        "violations": []
+      },
+      "generation": {
+        "latency_seconds": 36.267299972474575,
+        "model": "Qwen3-4B",
+        "token_usage": {
+          "completion_tokens": 4097,
+          "prompt_tokens": 9479,
+          "total_tokens": 13576
+        }
+      },
+      "outcome": {
+        "category": "construction_error",
+        "error": "Error building agent: Beam footprint corner (13.95, 2.00) outside build zone x=[12.00, 18.00], y=[2.00, 4.50]",
+        "error_message": "Beam footprint corner (13.95, 2.00) outside build zone x=[12.00, 18.00], y=[2.00, 4.50]",
+        "error_stage": "agent_construction",
+        "error_type": "agent_building_error"
+      },
+      "phase": "revision",
+      "physics": {},
+      "score": 0.0,
+      "step_count": null,
+      "success": false,
+      "timestamp": 1785734305.2707243,
+      "verification_seconds": 0.007398197427392006
+    },
+    {
+      "artifacts": [],
+      "attempt": 19,
+      "code": "def build_agent(sandbox):\n    \"\"\"Optimized passive structure with distributed ballast and support beams in the water band, respecting build zone constraints.\"\"\"\n    # Main support beam for structural integrity\n    main_beam = sandbox.add_beam(15.0, 2.5, 0.6, 0.3, density=150.0)\n    sandbox.set_material_properties(main_beam, restitution=0.01)\n    sandbox.add_joint(main_beam, None, (15.0, 2.5), type=\"rigid\")\n    \n    # Ballast beams at y=2.3 to lower center of mass\n    ballast1 = sandbox.add_beam(14.5, 2.3, 0.2, 0.2, density=100.0)\n    sandbox.set_material_properties(ballast1, restitution=0.01)\n    sandbox.add_joint(ballast1, main_beam, (14.5, 2.3), type=\"rigid\")\n    \n    ballast2 = sandbox.add_beam(15.5, 2.3, 0.2, 0.2, density=100.0)\n    sandbox.set_material_properties(ballast2, restitution=0.01)\n    sandbox.add_joint(ballast2, main_beam, (15.5, 2.3), type=\"rigid\")\n    \n    # Support beams at y=2.1 and y=2.2 to hold cargo in the water band\n    support1 = sandbox.add_beam(14.5, 2.1, 0.2, 0.2, density=100.0)\n    sandbox.set_material_properties(support1, restitution=0.01)\n    sandbox.add_joint(support1, main_beam, (14.5, 2.1), type=\"rigid\")\n    \n    support2 = sandbox.add_beam(15.5, 2.1, 0.2, 0.2, density=100.0)\n    sandbox.set_material_properties(support2, restitution=0.01)\n    sandbox.add_joint(support2, main_beam, (15.5, 2.1), type=\"rigid\")\n    \n    support3 = sandbox.add_beam(14.5, 2.2, 0.2, 0.2, density=100.0)\n    sandbox.set_material_properties(support3, restitution=0.01)\n    sandbox.add_joint(support3, main_beam, (14.5, 2.2), type=\"rigid\")\n    \n    support4 = sandbox.add_beam(15.5, 2.2, 0.2, 0.2, density=100.0)\n    sandbox.set_material_properties(support4, restitution=0.01)\n    sandbox.add_joint(support4, main_beam, (15.5, 2.2), type=\"rigid\")\n    \n    # Rails at y=2.05 to hold cargo in the water band\n    rail1 = sandbox.add_beam(14.0, 2.05, 0.1, 0.1, density=100.0)\n    sandbox.set_material_properties(rail1, restitution=0.01)\n    sandbox.add_joint(rail1, main_beam, (14.0, 2.05), type=\"rigid\")\n    \n    rail2 = sandbox.add_beam(16.0, 2.05, 0.1, 0.1, density=100.0)\n    sandbox.set_material_properties(rail2, restitution=0.01)\n    sandbox.add_joint(rail2, main_beam, (16.0, 2.05), type=\"rigid\")\n    \n    # Verify mass constraints\n    total_mass = sandbox.get_structure_mass()\n    if total_mass > sandbox.MAX_STRUCTURE_MASS:\n        raise ValueError(f\"Structure mass {total_mass:.2f} kg exceeds limit {sandbox.MAX_STRUCTURE_MASS:.2f} kg\")\n    \n    return main_beam\n\n\ndef agent_action(sandbox, agent_body, step_count):\n    \"\"\"Passive control with no direct force application.\"\"\"\n    pass",
+      "code_sha256": "5ccfd5a62e97afb29280b302d2ce9d2a9d5774db1b874a80ed92b7036dfe9d95",
+      "constraints": {
+        "count": 0,
+        "violated": false,
+        "violations": []
+      },
+      "generation": {
+        "latency_seconds": 48.479995634406805,
+        "model": "Qwen3-4B",
+        "token_usage": {
+          "completion_tokens": 5537,
+          "prompt_tokens": 9483,
+          "total_tokens": 15020
+        }
+      },
+      "outcome": {
+        "category": "construction_error",
+        "error": "Error building agent: Beam footprint corner (13.95, 2.00) outside build zone x=[12.00, 18.00], y=[2.00, 4.50]",
+        "error_message": "Beam footprint corner (13.95, 2.00) outside build zone x=[12.00, 18.00], y=[2.00, 4.50]",
+        "error_stage": "agent_construction",
+        "error_type": "agent_building_error"
+      },
+      "phase": "revision",
+      "physics": {},
+      "score": 0.0,
+      "step_count": null,
+      "success": false,
+      "timestamp": 1785734390.3127346,
+      "verification_seconds": 0.00478886254131794
+    },
+    {
+      "artifacts": [],
+      "attempt": 20,
+      "code": "def build_agent(sandbox):\n    \"\"\"Optimized passive structure with distributed ballast and support beams, respecting build zone constraints and mass budget.\"\"\"\n    # Main support beam for structural integrity\n    main_beam = sandbox.add_beam(15.0, 3.0, 0.6, 0.3, density=120.0)\n    sandbox.set_material_properties(main_beam, restitution=0.01)\n    sandbox.add_joint(main_beam, None, (15.0, 3.0), type=\"rigid\")\n    \n    # Ballast beams at y=2.5 to lower center of mass\n    ballast1 = sandbox.add_beam(14.5, 2.5, 0.2, 0.2, density=120.0)\n    sandbox.set_material_properties(ballast1, restitution=0.01)\n    sandbox.add_joint(ballast1, main_beam, (14.5, 2.5), type=\"rigid\")\n    \n    ballast2 = sandbox.add_beam(15.5, 2.5, 0.2, 0.2, density=120.0)\n    sandbox.set_material_properties(ballast2, restitution=0.01)\n    sandbox.add_joint(ballast2, main_beam, (15.5, 2.5), type=\"rigid\")\n    \n    # Support beams at y=2.3 and y=2.6 to hold cargo in the water band\n    support1 = sandbox.add_beam(14.5, 2.3, 0.2, 0.2, density=120.0)\n    sandbox.set_material_properties(support1, restitution=0.01)\n    sandbox.add_joint(support1, main_beam, (14.5, 2.3), type=\"rigid\")\n    \n    support2 = sandbox.add_beam(15.5, 2.3, 0.2, 0.2, density=120.0)\n    sandbox.set_material_properties(support2, restitution=0.01)\n    sandbox.add_joint(support2, main_beam, (15.5, 2.3), type=\"rigid\")\n    \n    support3 = sandbox.add_beam(14.5, 2.6, 0.2, 0.2, density=120.0)\n    sandbox.set_material_properties(support3, restitution=0.01)\n    sandbox.add_joint(support3, main_beam, (14.5, 2.6), type=\"rigid\")\n    \n    support4 = sandbox.add_beam(15.5, 2.6, 0.2, 0.2, density=120.0)\n    sandbox.set_material_properties(support4, restitution=0.01)\n    sandbox.add_joint(support4, main_beam, (15.5, 2.6), type=\"rigid\")\n    \n    # Rails at y=2.05 to hold cargo in the water band\n    rail1 = sandbox.add_beam(14.0, 2.05, 0.1, 0.1, density=120.0)\n    sandbox.set_material_properties(rail1, restitution=0.01)\n    sandbox.add_joint(rail1, main_beam, (14.0, 2.05), type=\"rigid\")\n    \n    rail2 = sandbox.add_beam(16.0, 2.05, 0.1, 0.1, density=120.0)\n    sandbox.set_material_properties(rail2, restitution=0.01)\n    sandbox.add_joint(rail2, main_beam, (16.0, 2.05), type=\"rigid\")\n    \n    # Verify mass constraints\n    total_mass = sandbox.get_structure_mass()\n    if total_mass > sandbox.MAX_STRUCTURE_MASS:\n        raise ValueError(f\"Structure mass {total_mass:.2f} kg exceeds limit {sandbox.MAX_STRUCTURE_MASS:.2f} kg\")\n    \n    return main_beam\n\n\ndef agent_action(sandbox, agent_body, step_count):\n    \"\"\"Passive control with no direct force application.\"\"\"\n    pass",
+      "code_sha256": "398d0746ed71fc43c77cb0b95cd57814c3d6cd27e16cdc4b1d8e4bc23050f572",
+      "constraints": {
+        "count": 0,
+        "violated": false,
+        "violations": []
+      },
+      "generation": {
+        "latency_seconds": 33.143728636205196,
+        "model": "Qwen3-4B",
+        "token_usage": {
+          "completion_tokens": 3783,
+          "prompt_tokens": 3922,
+          "total_tokens": 7705
+        }
+      },
+      "outcome": {
+        "category": "construction_error",
+        "error": "Error building agent: Beam footprint corner (13.95, 2.00) outside build zone x=[12.00, 18.00], y=[2.00, 4.50]",
+        "error_message": "Beam footprint corner (13.95, 2.00) outside build zone x=[12.00, 18.00], y=[2.00, 4.50]",
+        "error_stage": "agent_construction",
+        "error_type": "agent_building_error"
+      },
+      "phase": "revision",
+      "physics": {},
+      "score": 0.0,
+      "step_count": null,
+      "success": false,
+      "timestamp": 1785734500.4681256,
+      "verification_seconds": 0.005145011469721794
+    }
+  ],
+  "best_attempt": 0,
+  "best_score": 0.0,
+  "config": {
+    "attempts": 20,
+    "generation_retries": 2,
+    "headless": true,
+    "max_tokens": 24576,
+    "method_options": {},
+    "run_index": 2,
+    "save_gif": false,
+    "seed": 0,
+    "temperature": 0.7,
+    "timeout_seconds": 7200.0,
+    "top_p": 0.95
+  },
+  "environment_pair": "Initial_to_Stage-2",
+  "error_type": "design_fixation",
+  "finished_at": 1785734500.4682589,
+  "metadata": {
+    "auxiliary_usage": {
+      "calls": 30,
+      "failed_calls": 0,
+      "latency_seconds": 1109.8558634258807,
+      "successful_calls": 30,
+      "token_usage": {
+        "completion_tokens": 128967,
+        "prompt_tokens": 79086,
+        "total_tokens": 208053
+      }
+    },
+    "strategy_runtime": {
+      "auxiliary_calls": [
+        {
+          "latency_seconds": 39.98884474299848,
+          "max_tokens": 24576,
+          "model": "Qwen3-4B",
+          "purpose": "self-refine-feedback",
+          "request_metadata": {
+            "attempt": 1,
+            "method": "self_refine",
+            "purpose": "self-feedback-1"
+          },
+          "seed": 1,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 4564,
+            "prompt_tokens": 2633,
+            "total_tokens": 7197
+          },
+          "top_p": 0.95
+        },
+        {
+          "latency_seconds": 47.2838901206851,
+          "max_tokens": 24576,
+          "model": "Qwen3-4B",
+          "purpose": "self-refine-feedback",
+          "request_metadata": {
+            "attempt": 1,
+            "method": "self_refine",
+            "purpose": "self-feedback-2"
+          },
+          "seed": 1,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 5578,
+            "prompt_tokens": 2658,
+            "total_tokens": 8236
+          },
+          "top_p": 0.95
+        },
+        {
+          "latency_seconds": 39.600918443873525,
+          "max_tokens": 24576,
+          "model": "Qwen3-4B",
+          "purpose": "self-refine-feedback",
+          "request_metadata": {
+            "attempt": 1,
+            "method": "self_refine",
+            "purpose": "self-feedback-3"
+          },
+          "seed": 1,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 6190,
+            "prompt_tokens": 2648,
+            "total_tokens": 8838
+          },
+          "top_p": 0.95
+        },
+        {
+          "latency_seconds": 23.03359535895288,
+          "max_tokens": 24576,
+          "model": "Qwen3-4B",
+          "purpose": "self-refine-feedback",
+          "request_metadata": {
+            "attempt": 2,
+            "method": "self_refine",
+            "purpose": "self-feedback-1"
+          },
+          "seed": 2,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 2420,
+            "prompt_tokens": 2784,
+            "total_tokens": 5204
+          },
+          "top_p": 0.95
+        },
+        {
+          "latency_seconds": 46.71193243376911,
+          "max_tokens": 24576,
+          "model": "Qwen3-4B",
+          "purpose": "self-refine-feedback",
+          "request_metadata": {
+            "attempt": 3,
+            "method": "self_refine",
+            "purpose": "self-feedback-1"
+          },
+          "seed": 3,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 5523,
+            "prompt_tokens": 2791,
+            "total_tokens": 8314
+          },
+          "top_p": 0.95
+        },
+        {
+          "latency_seconds": 43.17672740481794,
+          "max_tokens": 24576,
+          "model": "Qwen3-4B",
+          "purpose": "self-refine-feedback",
+          "request_metadata": {
+            "attempt": 3,
+            "method": "self_refine",
+            "purpose": "self-feedback-2"
+          },
+          "seed": 3,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 5846,
+            "prompt_tokens": 3061,
+            "total_tokens": 8907
+          },
+          "top_p": 0.95
+        },
+        {
+          "latency_seconds": 32.69650496542454,
+          "max_tokens": 24576,
+          "model": "Qwen3-4B",
+          "purpose": "self-refine-feedback",
+          "request_metadata": {
+            "attempt": 3,
+            "method": "self_refine",
+            "purpose": "self-feedback-3"
+          },
+          "seed": 3,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 3888,
+            "prompt_tokens": 2548,
+            "total_tokens": 6436
+          },
+          "top_p": 0.95
+        },
+        {
+          "latency_seconds": 22.74467207118869,
+          "max_tokens": 24576,
+          "model": "Qwen3-4B",
+          "purpose": "self-refine-feedback",
+          "request_metadata": {
+            "attempt": 4,
+            "method": "self_refine",
+            "purpose": "self-feedback-1"
+          },
+          "seed": 4,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 3072,
+            "prompt_tokens": 2553,
+            "total_tokens": 5625
+          },
+          "top_p": 0.95
+        },
+        {
+          "latency_seconds": 28.510504212230444,
+          "max_tokens": 24576,
+          "model": "Qwen3-4B",
+          "purpose": "self-refine-feedback",
+          "request_metadata": {
+            "attempt": 5,
+            "method": "self_refine",
+            "purpose": "self-feedback-1"
+          },
+          "seed": 5,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 3088,
+            "prompt_tokens": 2632,
+            "total_tokens": 5720
+          },
+          "top_p": 0.95
+        },
+        {
+          "latency_seconds": 39.98741381056607,
+          "max_tokens": 24576,
+          "model": "Qwen3-4B",
+          "purpose": "self-refine-feedback",
+          "request_metadata": {
+            "attempt": 6,
+            "method": "self_refine",
+            "purpose": "self-feedback-1"
+          },
+          "seed": 6,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 4593,
+            "prompt_tokens": 2632,
+            "total_tokens": 7225
+          },
+          "top_p": 0.95
+        },
+        {
+          "latency_seconds": 25.244106594473124,
+          "max_tokens": 24576,
+          "model": "Qwen3-4B",
+          "purpose": "self-refine-feedback",
+          "request_metadata": {
+            "attempt": 7,
+            "method": "self_refine",
+            "purpose": "self-feedback-1"
+          },
+          "seed": 7,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 2810,
+            "prompt_tokens": 2612,
+            "total_tokens": 5422
+          },
+          "top_p": 0.95
+        },
+        {
+          "latency_seconds": 34.708539040759206,
+          "max_tokens": 24576,
+          "model": "Qwen3-4B",
+          "purpose": "self-refine-feedback",
+          "request_metadata": {
+            "attempt": 7,
+            "method": "self_refine",
+            "purpose": "self-feedback-2"
+          },
+          "seed": 7,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 3946,
+            "prompt_tokens": 2363,
+            "total_tokens": 6309
+          },
+          "top_p": 0.95
+        },
+        {
+          "latency_seconds": 26.241123804822564,
+          "max_tokens": 24576,
+          "model": "Qwen3-4B",
+          "purpose": "self-refine-feedback",
+          "request_metadata": {
+            "attempt": 8,
+            "method": "self_refine",
+            "purpose": "self-feedback-1"
+          },
+          "seed": 8,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 2910,
+            "prompt_tokens": 2363,
+            "total_tokens": 5273
+          },
+          "top_p": 0.95
+        },
+        {
+          "latency_seconds": 45.67575007490814,
+          "max_tokens": 24576,
+          "model": "Qwen3-4B",
+          "purpose": "self-refine-feedback",
+          "request_metadata": {
+            "attempt": 9,
+            "method": "self_refine",
+            "purpose": "self-feedback-1"
+          },
+          "seed": 9,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 5078,
+            "prompt_tokens": 2449,
+            "total_tokens": 7527
+          },
+          "top_p": 0.95
+        },
+        {
+          "latency_seconds": 31.533234376460314,
+          "max_tokens": 24576,
+          "model": "Qwen3-4B",
+          "purpose": "self-refine-feedback",
+          "request_metadata": {
+            "attempt": 10,
+            "method": "self_refine",
+            "purpose": "self-feedback-1"
+          },
+          "seed": 10,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 3666,
+            "prompt_tokens": 2360,
+            "total_tokens": 6026
+          },
+          "top_p": 0.95
+        },
+        {
+          "latency_seconds": 43.339524790644646,
+          "max_tokens": 24576,
+          "model": "Qwen3-4B",
+          "purpose": "self-refine-feedback",
+          "request_metadata": {
+            "attempt": 11,
+            "method": "self_refine",
+            "purpose": "self-feedback-1"
+          },
+          "seed": 11,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 4569,
+            "prompt_tokens": 2532,
+            "total_tokens": 7101
+          },
+          "top_p": 0.95
+        },
+        {
+          "latency_seconds": 37.241849169135094,
+          "max_tokens": 24576,
+          "model": "Qwen3-4B",
+          "purpose": "self-refine-feedback",
+          "request_metadata": {
+            "attempt": 12,
+            "method": "self_refine",
+            "purpose": "self-feedback-1"
+          },
+          "seed": 12,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 4228,
+            "prompt_tokens": 2686,
+            "total_tokens": 6914
+          },
+          "top_p": 0.95
+        },
+        {
+          "latency_seconds": 38.42013734392822,
+          "max_tokens": 24576,
+          "model": "Qwen3-4B",
+          "purpose": "self-refine-feedback",
+          "request_metadata": {
+            "attempt": 13,
+            "method": "self_refine",
+            "purpose": "self-feedback-1"
+          },
+          "seed": 13,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 4118,
+            "prompt_tokens": 2607,
+            "total_tokens": 6725
+          },
+          "top_p": 0.95
+        },
+        {
+          "latency_seconds": 37.6050681527704,
+          "max_tokens": 24576,
+          "model": "Qwen3-4B",
+          "purpose": "self-refine-feedback",
+          "request_metadata": {
+            "attempt": 14,
+            "method": "self_refine",
+            "purpose": "self-feedback-1"
+          },
+          "seed": 14,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 4210,
+            "prompt_tokens": 2602,
+            "total_tokens": 6812
+          },
+          "top_p": 0.95
+        },
+        {
+          "latency_seconds": 32.894271824508905,
+          "max_tokens": 24576,
+          "model": "Qwen3-4B",
+          "purpose": "self-refine-feedback",
+          "request_metadata": {
+            "attempt": 15,
+            "method": "self_refine",
+            "purpose": "self-feedback-1"
+          },
+          "seed": 15,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 3775,
+            "prompt_tokens": 2630,
+            "total_tokens": 6405
+          },
+          "top_p": 0.95
+        },
+        {
+          "latency_seconds": 59.00257238559425,
+          "max_tokens": 24576,
+          "model": "Qwen3-4B",
+          "purpose": "self-refine-feedback",
+          "request_metadata": {
+            "attempt": 15,
+            "method": "self_refine",
+            "purpose": "self-feedback-2"
+          },
+          "seed": 15,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 6617,
+            "prompt_tokens": 2641,
+            "total_tokens": 9258
+          },
+          "top_p": 0.95
+        },
+        {
+          "latency_seconds": 45.35735974833369,
+          "max_tokens": 24576,
+          "model": "Qwen3-4B",
+          "purpose": "self-refine-feedback",
+          "request_metadata": {
+            "attempt": 16,
+            "method": "self_refine",
+            "purpose": "self-feedback-1"
+          },
+          "seed": 16,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 5208,
+            "prompt_tokens": 2641,
+            "total_tokens": 7849
+          },
+          "top_p": 0.95
+        },
+        {
+          "latency_seconds": 16.471996745094657,
+          "max_tokens": 24576,
+          "model": "Qwen3-4B",
+          "purpose": "self-refine-feedback",
+          "request_metadata": {
+            "attempt": 16,
+            "method": "self_refine",
+            "purpose": "self-feedback-2"
+          },
+          "seed": 16,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 2011,
+            "prompt_tokens": 2641,
+            "total_tokens": 4652
+          },
+          "top_p": 0.95
+        },
+        {
+          "latency_seconds": 54.028682719916105,
+          "max_tokens": 24576,
+          "model": "Qwen3-4B",
+          "purpose": "self-refine-feedback",
+          "request_metadata": {
+            "attempt": 16,
+            "method": "self_refine",
+            "purpose": "self-feedback-3"
+          },
+          "seed": 16,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 6235,
+            "prompt_tokens": 2647,
+            "total_tokens": 8882
+          },
+          "top_p": 0.95
+        },
+        {
+          "latency_seconds": 42.10783189162612,
+          "max_tokens": 24576,
+          "model": "Qwen3-4B",
+          "purpose": "self-refine-feedback",
+          "request_metadata": {
+            "attempt": 17,
+            "method": "self_refine",
+            "purpose": "self-feedback-1"
+          },
+          "seed": 17,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 4923,
+            "prompt_tokens": 2639,
+            "total_tokens": 7562
+          },
+          "top_p": 0.95
+        },
+        {
+          "latency_seconds": 57.392149390652776,
+          "max_tokens": 24576,
+          "model": "Qwen3-4B",
+          "purpose": "self-refine-feedback",
+          "request_metadata": {
+            "attempt": 17,
+            "method": "self_refine",
+            "purpose": "self-feedback-2"
+          },
+          "seed": 17,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 6339,
+            "prompt_tokens": 2644,
+            "total_tokens": 8983
+          },
+          "top_p": 0.95
+        },
+        {
+          "latency_seconds": 38.0864470358938,
+          "max_tokens": 24576,
+          "model": "Qwen3-4B",
+          "purpose": "self-refine-feedback",
+          "request_metadata": {
+            "attempt": 18,
+            "method": "self_refine",
+            "purpose": "self-feedback-1"
+          },
+          "seed": 18,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 4221,
+            "prompt_tokens": 2648,
+            "total_tokens": 6869
+          },
+          "top_p": 0.95
+        },
+        {
+          "latency_seconds": 36.55676543712616,
+          "max_tokens": 24576,
+          "model": "Qwen3-4B",
+          "purpose": "self-refine-feedback",
+          "request_metadata": {
+            "attempt": 19,
+            "method": "self_refine",
+            "purpose": "self-feedback-1"
+          },
+          "seed": 19,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 4257,
+            "prompt_tokens": 2814,
+            "total_tokens": 7071
+          },
+          "top_p": 0.95
+        },
+        {
+          "latency_seconds": 24.055276134982705,
+          "max_tokens": 24576,
+          "model": "Qwen3-4B",
+          "purpose": "self-refine-feedback",
+          "request_metadata": {
+            "attempt": 20,
+            "method": "self_refine",
+            "purpose": "self-feedback-1"
+          },
+          "seed": 20,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 2849,
+            "prompt_tokens": 2814,
+            "total_tokens": 5663
+          },
+          "top_p": 0.95
+        },
+        {
+          "latency_seconds": 20.158173199743032,
+          "max_tokens": 24576,
+          "model": "Qwen3-4B",
+          "purpose": "self-refine-feedback",
+          "request_metadata": {
+            "attempt": 20,
+            "method": "self_refine",
+            "purpose": "self-feedback-2"
+          },
+          "seed": 20,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 2235,
+            "prompt_tokens": 2813,
+            "total_tokens": 5048
+          },
+          "top_p": 0.95
+        }
+      ],
+      "auxiliary_usage": {
+        "calls": 30,
+        "failed_calls": 0,
+        "latency_seconds": 1109.8558634258807,
+        "successful_calls": 30,
+        "token_usage": {
+          "completion_tokens": 128967,
+          "prompt_tokens": 79086,
+          "total_tokens": 208053
+        }
+      },
+      "candidate_calls": [
+        {
+          "attempt": null,
+          "label": "self-refine-initial",
+          "latency_seconds": 19.766297075897455,
+          "max_tokens": 24576,
+          "model": "Qwen3-4B",
+          "request_metadata": {
+            "attempt": 1,
+            "method": "self_refine",
+            "purpose": "initial-candidate"
+          },
+          "retry": 0,
+          "seed": 1,
+          "strategy_owned": true,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 2052,
+            "prompt_tokens": 8611,
+            "total_tokens": 10663
+          },
+          "top_p": 0.95
+        },
+        {
+          "attempt": null,
+          "label": "self-refine-revision",
+          "latency_seconds": 73.69467927888036,
+          "max_tokens": 24576,
+          "model": "Qwen3-4B",
+          "request_metadata": {
+            "attempt": 1,
+            "method": "self_refine",
+            "purpose": "refine-1"
+          },
+          "retry": 0,
+          "seed": 1,
+          "strategy_owned": true,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 7936,
+            "prompt_tokens": 4165,
+            "total_tokens": 12101
+          },
+          "top_p": 0.95
+        },
+        {
+          "attempt": null,
+          "label": "self-refine-revision",
+          "latency_seconds": 69.8692967928946,
+          "max_tokens": 24576,
+          "model": "Qwen3-4B",
+          "request_metadata": {
+            "attempt": 1,
+            "method": "self_refine",
+            "purpose": "refine-2"
+          },
+          "retry": 0,
+          "seed": 1,
+          "strategy_owned": true,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 7829,
+            "prompt_tokens": 4092,
+            "total_tokens": 11921
+          },
+          "top_p": 0.95
+        },
+        {
+          "attempt": null,
+          "label": "self-refine-initial",
+          "latency_seconds": 37.327987948432565,
+          "max_tokens": 24576,
+          "model": "Qwen3-4B",
+          "request_metadata": {
+            "attempt": 2,
+            "method": "self_refine",
+            "purpose": "initial-candidate"
+          },
+          "retry": 0,
+          "seed": 2,
+          "strategy_owned": true,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 4172,
+            "prompt_tokens": 9863,
+            "total_tokens": 14035
+          },
+          "top_p": 0.95
+        },
+        {
+          "attempt": null,
+          "label": "self-refine-initial",
+          "latency_seconds": 36.05414668098092,
+          "max_tokens": 24576,
+          "model": "Qwen3-4B",
+          "request_metadata": {
+            "attempt": 3,
+            "method": "self_refine",
+            "purpose": "initial-candidate"
+          },
+          "retry": 0,
+          "seed": 3,
+          "strategy_owned": true,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 4015,
+            "prompt_tokens": 9618,
+            "total_tokens": 13633
+          },
+          "top_p": 0.95
+        },
+        {
+          "attempt": null,
+          "label": "self-refine-revision",
+          "latency_seconds": 78.52448434196413,
+          "max_tokens": 24576,
+          "model": "Qwen3-4B",
+          "request_metadata": {
+            "attempt": 3,
+            "method": "self_refine",
+            "purpose": "refine-1"
+          },
+          "retry": 0,
+          "seed": 3,
+          "strategy_owned": true,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 8938,
+            "prompt_tokens": 3911,
+            "total_tokens": 12849
+          },
+          "top_p": 0.95
+        },
+        {
+          "attempt": null,
+          "label": "self-refine-revision",
+          "latency_seconds": 54.03283850848675,
+          "max_tokens": 24576,
+          "model": "Qwen3-4B",
+          "request_metadata": {
+            "attempt": 3,
+            "method": "self_refine",
+            "purpose": "refine-2"
+          },
+          "retry": 0,
+          "seed": 3,
+          "strategy_owned": true,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 5813,
+            "prompt_tokens": 4263,
+            "total_tokens": 10076
+          },
+          "top_p": 0.95
+        },
+        {
+          "attempt": null,
+          "label": "self-refine-initial",
+          "latency_seconds": 30.42860148102045,
+          "max_tokens": 24576,
+          "model": "Qwen3-4B",
+          "request_metadata": {
+            "attempt": 4,
+            "method": "self_refine",
+            "purpose": "initial-candidate"
+          },
+          "retry": 0,
+          "seed": 4,
+          "strategy_owned": true,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 3526,
+            "prompt_tokens": 9382,
+            "total_tokens": 12908
+          },
+          "top_p": 0.95
+        },
+        {
+          "attempt": null,
+          "label": "self-refine-initial",
+          "latency_seconds": 25.658108284696937,
+          "max_tokens": 24576,
+          "model": "Qwen3-4B",
+          "request_metadata": {
+            "attempt": 5,
+            "method": "self_refine",
+            "purpose": "initial-candidate"
+          },
+          "retry": 0,
+          "seed": 5,
+          "strategy_owned": true,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 2796,
+            "prompt_tokens": 9719,
+            "total_tokens": 12515
+          },
+          "top_p": 0.95
+        },
+        {
+          "attempt": null,
+          "label": "self-refine-initial",
+          "latency_seconds": 34.01193809323013,
+          "max_tokens": 24576,
+          "model": "Qwen3-4B",
+          "request_metadata": {
+            "attempt": 6,
+            "method": "self_refine",
+            "purpose": "initial-candidate"
+          },
+          "retry": 0,
+          "seed": 6,
+          "strategy_owned": true,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 3858,
+            "prompt_tokens": 9466,
+            "total_tokens": 13324
+          },
+          "top_p": 0.95
+        },
+        {
+          "attempt": null,
+          "label": "self-refine-initial",
+          "latency_seconds": 20.43758722767234,
+          "max_tokens": 24576,
+          "model": "Qwen3-4B",
+          "request_metadata": {
+            "attempt": 7,
+            "method": "self_refine",
+            "purpose": "initial-candidate"
+          },
+          "retry": 0,
+          "seed": 7,
+          "strategy_owned": true,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 2139,
+            "prompt_tokens": 9839,
+            "total_tokens": 11978
+          },
+          "top_p": 0.95
+        },
+        {
+          "attempt": null,
+          "label": "self-refine-revision",
+          "latency_seconds": 46.81841099448502,
+          "max_tokens": 24576,
+          "model": "Qwen3-4B",
+          "request_metadata": {
+            "attempt": 7,
+            "method": "self_refine",
+            "purpose": "refine-1"
+          },
+          "retry": 0,
+          "seed": 7,
+          "strategy_owned": true,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 5317,
+            "prompt_tokens": 3716,
+            "total_tokens": 9033
+          },
+          "top_p": 0.95
+        },
+        {
+          "attempt": null,
+          "label": "self-refine-initial",
+          "latency_seconds": 32.87812748737633,
+          "max_tokens": 24576,
+          "model": "Qwen3-4B",
+          "request_metadata": {
+            "attempt": 8,
+            "method": "self_refine",
+            "purpose": "initial-candidate"
+          },
+          "retry": 0,
+          "seed": 8,
+          "strategy_owned": true,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 3539,
+            "prompt_tokens": 9169,
+            "total_tokens": 12708
+          },
+          "top_p": 0.95
+        },
+        {
+          "attempt": null,
+          "label": "self-refine-initial",
+          "latency_seconds": 24.90273742377758,
+          "max_tokens": 24576,
+          "model": "Qwen3-4B",
+          "request_metadata": {
+            "attempt": 9,
+            "method": "self_refine",
+            "purpose": "initial-candidate"
+          },
+          "retry": 0,
+          "seed": 9,
+          "strategy_owned": true,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 2680,
+            "prompt_tokens": 9197,
+            "total_tokens": 11877
+          },
+          "top_p": 0.95
+        },
+        {
+          "attempt": null,
+          "label": "self-refine-initial",
+          "latency_seconds": 35.371989104896784,
+          "max_tokens": 24576,
+          "model": "Qwen3-4B",
+          "request_metadata": {
+            "attempt": 10,
+            "method": "self_refine",
+            "purpose": "initial-candidate"
+          },
+          "retry": 0,
+          "seed": 10,
+          "strategy_owned": true,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 3648,
+            "prompt_tokens": 9283,
+            "total_tokens": 12931
+          },
+          "top_p": 0.95
+        },
+        {
+          "attempt": null,
+          "label": "self-refine-initial",
+          "latency_seconds": 39.381801806390285,
+          "max_tokens": 24576,
+          "model": "Qwen3-4B",
+          "request_metadata": {
+            "attempt": 11,
+            "method": "self_refine",
+            "purpose": "initial-candidate"
+          },
+          "retry": 0,
+          "seed": 11,
+          "strategy_owned": true,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 4388,
+            "prompt_tokens": 9577,
+            "total_tokens": 13965
+          },
+          "top_p": 0.95
+        },
+        {
+          "attempt": null,
+          "label": "self-refine-initial",
+          "latency_seconds": 39.72248680330813,
+          "max_tokens": 24576,
+          "model": "Qwen3-4B",
+          "request_metadata": {
+            "attempt": 12,
+            "method": "self_refine",
+            "purpose": "initial-candidate"
+          },
+          "retry": 0,
+          "seed": 12,
+          "strategy_owned": true,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 4460,
+            "prompt_tokens": 9339,
+            "total_tokens": 13799
+          },
+          "top_p": 0.95
+        },
+        {
+          "attempt": null,
+          "label": "self-refine-initial",
+          "latency_seconds": 44.37914297543466,
+          "max_tokens": 24576,
+          "model": "Qwen3-4B",
+          "request_metadata": {
+            "attempt": 13,
+            "method": "self_refine",
+            "purpose": "initial-candidate"
+          },
+          "retry": 0,
+          "seed": 13,
+          "strategy_owned": true,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 4981,
+            "prompt_tokens": 9521,
+            "total_tokens": 14502
+          },
+          "top_p": 0.95
+        },
+        {
+          "attempt": null,
+          "label": "self-refine-initial",
+          "latency_seconds": 47.220992187038064,
+          "max_tokens": 24576,
+          "model": "Qwen3-4B",
+          "request_metadata": {
+            "attempt": 14,
+            "method": "self_refine",
+            "purpose": "initial-candidate"
+          },
+          "retry": 0,
+          "seed": 14,
+          "strategy_owned": true,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 4891,
+            "prompt_tokens": 9825,
+            "total_tokens": 14716
+          },
+          "top_p": 0.95
+        },
+        {
+          "attempt": null,
+          "label": "self-refine-initial",
+          "latency_seconds": 39.588558591902256,
+          "max_tokens": 24576,
+          "model": "Qwen3-4B",
+          "request_metadata": {
+            "attempt": 15,
+            "method": "self_refine",
+            "purpose": "initial-candidate"
+          },
+          "retry": 0,
+          "seed": 15,
+          "strategy_owned": true,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 4283,
+            "prompt_tokens": 9437,
+            "total_tokens": 13720
+          },
+          "top_p": 0.95
+        },
+        {
+          "attempt": null,
+          "label": "self-refine-revision",
+          "latency_seconds": 53.942934369668365,
+          "max_tokens": 24576,
+          "model": "Qwen3-4B",
+          "request_metadata": {
+            "attempt": 15,
+            "method": "self_refine",
+            "purpose": "refine-1"
+          },
+          "retry": 0,
+          "seed": 15,
+          "strategy_owned": true,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 5936,
+            "prompt_tokens": 3856,
+            "total_tokens": 9792
+          },
+          "top_p": 0.95
+        },
+        {
+          "attempt": null,
+          "label": "self-refine-initial",
+          "latency_seconds": 70.54687139205635,
+          "max_tokens": 24576,
+          "model": "Qwen3-4B",
+          "request_metadata": {
+            "attempt": 16,
+            "method": "self_refine",
+            "purpose": "initial-candidate"
+          },
+          "retry": 0,
+          "seed": 16,
+          "strategy_owned": true,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 7506,
+            "prompt_tokens": 9476,
+            "total_tokens": 16982
+          },
+          "top_p": 0.95
+        },
+        {
+          "attempt": null,
+          "label": "self-refine-revision",
+          "latency_seconds": 50.100490087643266,
+          "max_tokens": 24576,
+          "model": "Qwen3-4B",
+          "request_metadata": {
+            "attempt": 16,
+            "method": "self_refine",
+            "purpose": "refine-1"
+          },
+          "retry": 0,
+          "seed": 16,
+          "strategy_owned": true,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 5752,
+            "prompt_tokens": 3860,
+            "total_tokens": 9612
+          },
+          "top_p": 0.95
+        },
+        {
+          "attempt": null,
+          "label": "self-refine-revision",
+          "latency_seconds": 30.39160254597664,
+          "max_tokens": 24576,
+          "model": "Qwen3-4B",
+          "request_metadata": {
+            "attempt": 16,
+            "method": "self_refine",
+            "purpose": "refine-2"
+          },
+          "retry": 0,
+          "seed": 16,
+          "strategy_owned": true,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 3278,
+            "prompt_tokens": 3758,
+            "total_tokens": 7036
+          },
+          "top_p": 0.95
+        },
+        {
+          "attempt": null,
+          "label": "self-refine-initial",
+          "latency_seconds": 52.55998960509896,
+          "max_tokens": 24576,
+          "model": "Qwen3-4B",
+          "request_metadata": {
+            "attempt": 17,
+            "method": "self_refine",
+            "purpose": "initial-candidate"
+          },
+          "retry": 0,
+          "seed": 17,
+          "strategy_owned": true,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 5655,
+            "prompt_tokens": 9873,
+            "total_tokens": 15528
+          },
+          "top_p": 0.95
+        },
+        {
+          "attempt": null,
+          "label": "self-refine-revision",
+          "latency_seconds": 32.525515055283904,
+          "max_tokens": 24576,
+          "model": "Qwen3-4B",
+          "request_metadata": {
+            "attempt": 17,
+            "method": "self_refine",
+            "purpose": "refine-1"
+          },
+          "retry": 0,
+          "seed": 17,
+          "strategy_owned": true,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 3785,
+            "prompt_tokens": 3783,
+            "total_tokens": 7568
+          },
+          "top_p": 0.95
+        },
+        {
+          "attempt": null,
+          "label": "self-refine-initial",
+          "latency_seconds": 36.267299972474575,
+          "max_tokens": 24576,
+          "model": "Qwen3-4B",
+          "request_metadata": {
+            "attempt": 18,
+            "method": "self_refine",
+            "purpose": "initial-candidate"
+          },
+          "retry": 0,
+          "seed": 18,
+          "strategy_owned": true,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 4097,
+            "prompt_tokens": 9479,
+            "total_tokens": 13576
+          },
+          "top_p": 0.95
+        },
+        {
+          "attempt": null,
+          "label": "self-refine-initial",
+          "latency_seconds": 48.479995634406805,
+          "max_tokens": 24576,
+          "model": "Qwen3-4B",
+          "request_metadata": {
+            "attempt": 19,
+            "method": "self_refine",
+            "purpose": "initial-candidate"
+          },
+          "retry": 0,
+          "seed": 19,
+          "strategy_owned": true,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 5537,
+            "prompt_tokens": 9483,
+            "total_tokens": 15020
+          },
+          "top_p": 0.95
+        },
+        {
+          "attempt": null,
+          "label": "self-refine-initial",
+          "latency_seconds": 32.792361011728644,
+          "max_tokens": 24576,
+          "model": "Qwen3-4B",
+          "request_metadata": {
+            "attempt": 20,
+            "method": "self_refine",
+            "purpose": "initial-candidate"
+          },
+          "retry": 0,
+          "seed": 20,
+          "strategy_owned": true,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 3734,
+            "prompt_tokens": 9649,
+            "total_tokens": 13383
+          },
+          "top_p": 0.95
+        },
+        {
+          "attempt": null,
+          "label": "self-refine-revision",
+          "latency_seconds": 33.143728636205196,
+          "max_tokens": 24576,
+          "model": "Qwen3-4B",
+          "request_metadata": {
+            "attempt": 20,
+            "method": "self_refine",
+            "purpose": "refine-1"
+          },
+          "retry": 0,
+          "seed": 20,
+          "strategy_owned": true,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 3783,
+            "prompt_tokens": 3922,
+            "total_tokens": 7705
+          },
+          "top_p": 0.95
+        }
+      ],
+      "candidate_usage": {
+        "calls": 30,
+        "failed_calls": 0,
+        "latency_seconds": 1270.8210013993084,
+        "successful_calls": 30,
+        "token_usage": {
+          "completion_tokens": 140324,
+          "prompt_tokens": 229132,
+          "total_tokens": 369456
+        }
+      },
+      "steps": [
+        {
+          "accepted_submissions": 1,
+          "labels": [
+            "self-refine-final"
+          ],
+          "metadata": {
+            "inner_steps": 5
+          },
+          "remaining_attempts": 20,
+          "requested_submissions": 1,
+          "submission_metadata": [
+            {}
+          ]
+        },
+        {
+          "accepted_submissions": 1,
+          "labels": [
+            "self-refine-final"
+          ],
+          "metadata": {
+            "inner_steps": 5
+          },
+          "remaining_attempts": 19,
+          "requested_submissions": 1,
+          "submission_metadata": [
+            {}
+          ]
+        },
+        {
+          "accepted_submissions": 1,
+          "labels": [
+            "self-refine-final"
+          ],
+          "metadata": {
+            "inner_steps": 5
+          },
+          "remaining_attempts": 18,
+          "requested_submissions": 1,
+          "submission_metadata": [
+            {}
+          ]
+        },
+        {
+          "accepted_submissions": 1,
+          "labels": [
+            "self-refine-final"
+          ],
+          "metadata": {
+            "inner_steps": 5
+          },
+          "remaining_attempts": 17,
+          "requested_submissions": 1,
+          "submission_metadata": [
+            {}
+          ]
+        },
+        {
+          "accepted_submissions": 1,
+          "labels": [
+            "self-refine-final"
+          ],
+          "metadata": {
+            "inner_steps": 5
+          },
+          "remaining_attempts": 16,
+          "requested_submissions": 1,
+          "submission_metadata": [
+            {}
+          ]
+        },
+        {
+          "accepted_submissions": 1,
+          "labels": [
+            "self-refine-final"
+          ],
+          "metadata": {
+            "inner_steps": 5
+          },
+          "remaining_attempts": 15,
+          "requested_submissions": 1,
+          "submission_metadata": [
+            {}
+          ]
+        },
+        {
+          "accepted_submissions": 1,
+          "labels": [
+            "self-refine-final"
+          ],
+          "metadata": {
+            "inner_steps": 5
+          },
+          "remaining_attempts": 14,
+          "requested_submissions": 1,
+          "submission_metadata": [
+            {}
+          ]
+        },
+        {
+          "accepted_submissions": 1,
+          "labels": [
+            "self-refine-final"
+          ],
+          "metadata": {
+            "inner_steps": 5
+          },
+          "remaining_attempts": 13,
+          "requested_submissions": 1,
+          "submission_metadata": [
+            {}
+          ]
+        },
+        {
+          "accepted_submissions": 1,
+          "labels": [
+            "self-refine-final"
+          ],
+          "metadata": {
+            "inner_steps": 5
+          },
+          "remaining_attempts": 12,
+          "requested_submissions": 1,
+          "submission_metadata": [
+            {}
+          ]
+        },
+        {
+          "accepted_submissions": 1,
+          "labels": [
+            "self-refine-final"
+          ],
+          "metadata": {
+            "inner_steps": 5
+          },
+          "remaining_attempts": 11,
+          "requested_submissions": 1,
+          "submission_metadata": [
+            {}
+          ]
+        },
+        {
+          "accepted_submissions": 1,
+          "labels": [
+            "self-refine-final"
+          ],
+          "metadata": {
+            "inner_steps": 5
+          },
+          "remaining_attempts": 10,
+          "requested_submissions": 1,
+          "submission_metadata": [
+            {}
+          ]
+        },
+        {
+          "accepted_submissions": 1,
+          "labels": [
+            "self-refine-final"
+          ],
+          "metadata": {
+            "inner_steps": 5
+          },
+          "remaining_attempts": 9,
+          "requested_submissions": 1,
+          "submission_metadata": [
+            {}
+          ]
+        },
+        {
+          "accepted_submissions": 1,
+          "labels": [
+            "self-refine-final"
+          ],
+          "metadata": {
+            "inner_steps": 5
+          },
+          "remaining_attempts": 8,
+          "requested_submissions": 1,
+          "submission_metadata": [
+            {}
+          ]
+        },
+        {
+          "accepted_submissions": 1,
+          "labels": [
+            "self-refine-final"
+          ],
+          "metadata": {
+            "inner_steps": 5
+          },
+          "remaining_attempts": 7,
+          "requested_submissions": 1,
+          "submission_metadata": [
+            {}
+          ]
+        },
+        {
+          "accepted_submissions": 1,
+          "labels": [
+            "self-refine-final"
+          ],
+          "metadata": {
+            "inner_steps": 5
+          },
+          "remaining_attempts": 6,
+          "requested_submissions": 1,
+          "submission_metadata": [
+            {}
+          ]
+        },
+        {
+          "accepted_submissions": 1,
+          "labels": [
+            "self-refine-final"
+          ],
+          "metadata": {
+            "inner_steps": 5
+          },
+          "remaining_attempts": 5,
+          "requested_submissions": 1,
+          "submission_metadata": [
+            {}
+          ]
+        },
+        {
+          "accepted_submissions": 1,
+          "labels": [
+            "self-refine-final"
+          ],
+          "metadata": {
+            "inner_steps": 5
+          },
+          "remaining_attempts": 4,
+          "requested_submissions": 1,
+          "submission_metadata": [
+            {}
+          ]
+        },
+        {
+          "accepted_submissions": 1,
+          "labels": [
+            "self-refine-final"
+          ],
+          "metadata": {
+            "inner_steps": 5
+          },
+          "remaining_attempts": 3,
+          "requested_submissions": 1,
+          "submission_metadata": [
+            {}
+          ]
+        },
+        {
+          "accepted_submissions": 1,
+          "labels": [
+            "self-refine-final"
+          ],
+          "metadata": {
+            "inner_steps": 5
+          },
+          "remaining_attempts": 2,
+          "requested_submissions": 1,
+          "submission_metadata": [
+            {}
+          ]
+        },
+        {
+          "accepted_submissions": 1,
+          "labels": [
+            "self-refine-final"
+          ],
+          "metadata": {
+            "inner_steps": 5
+          },
+          "remaining_attempts": 1,
+          "requested_submissions": 1,
+          "submission_metadata": [
+            {}
+          ]
+        }
+      ]
+    },
+    "strategy_snapshot": {
+      "inner_steps": 5,
+      "last_feedback_available": true,
+      "self_feedback_calls": 30
+    }
+  },
+  "mode": "adaptation",
+  "model": "Qwen3-4B",
+  "provider": "vllm",
+  "revision_attempts": 20,
+  "run_index": 2,
+  "schema_version": "2.0",
+  "source_environment": "Initial",
+  "started_at": 1785731927.6530519,
+  "stop_reason": "budget_exhausted",
+  "strategy": "self_refine",
+  "success": false,
+  "success_attempt": null,
+  "target_environment": "Stage-2",
+  "task_id": "F_05",
+  "task_path": "Category4_Granular_FluidInteraction/F_05",
+  "token_usage": {
+    "completion_tokens": 88314,
+    "prompt_tokens": 150693,
+    "total_tokens": 239007
+  },
+  "total_time_seconds": 2572.8152066078037,
+  "verified_attempts": 21
+}
