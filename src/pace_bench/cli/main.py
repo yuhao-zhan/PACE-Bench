@@ -11,6 +11,7 @@ from typing import Any
 from pace_bench import __version__
 from pace_bench.core.errors import ConfigurationError, PaceBenchError
 from pace_bench.evaluation.config import RunConfig
+from pace_bench.evaluation.paper import export_paper_artifacts
 from pace_bench.evaluation.results import aggregate, load_result, load_results
 from pace_bench.evaluation.runner import enumerate_work_items
 from pace_bench.evaluation.runner import run_work_items
@@ -194,9 +195,19 @@ def build_parser() -> argparse.ArgumentParser:
     validate_parser.add_argument("--max-steps", type=int)
     validate_parser.set_defaults(handler=_validate_command)
 
-    report_parser = commands.add_parser("report", help="Summarize result JSON files")
+    report_parser = commands.add_parser("report", help="Summarize result JSON files and export paper artifacts")
     report_parser.add_argument("--input", type=Path, required=True)
     report_parser.add_argument("--output", type=Path)
+    report_parser.add_argument(
+        "--table-dir",
+        type=Path,
+        help="Directory for LaTeX table fragments; defaults to <result-root>/table",
+    )
+    report_parser.add_argument(
+        "--figure-dir",
+        type=Path,
+        help="Directory for PDF/PNG figures; defaults to <result-root>/figures",
+    )
     report_parser.set_defaults(handler=_report_command)
     return parser
 
@@ -541,6 +552,14 @@ def _report_command(args: argparse.Namespace) -> int:
     if args.output:
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(rendered + "\n", encoding="utf-8")
+    result_root = args.input.parent if args.input.name == "json" else args.input
+    table_dir = args.table_dir or result_root / "table"
+    figure_dir = args.figure_dir or result_root / "figures"
+    artifacts = export_paper_artifacts(summary, table_dir, figure_dir)
+    print(f"Paper tables saved to: {table_dir} ({artifacts['tables']} files)")
+    print(f"Paper figures saved to: {figure_dir} ({artifacts['figures']} PDF files + PNG copies)")
+    if artifacts.get("figure_error"):
+        print(f"warning: {artifacts['figure_error']}")
     for path, error in errors:
         print(f"warning: skipped {path}: {error}")
     return 0 if results else 1

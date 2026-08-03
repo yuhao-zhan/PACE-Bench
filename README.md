@@ -297,8 +297,16 @@ pace-bench validate --task all --contracts-only     # imports/contracts
 pace-bench validate --task S_01                     # one reference matrix
 pace-bench validate --task all                      # full 36-task validation
 pace-bench report --input results/my-run \
-  --output results/my-run/report.json                # aggregate JSON results
+  --output results/my-run/report.json                # aggregate JSON + paper artifacts
 ```
+
+The report command walks the JSON result tree directly.  In addition to the
+canonical aggregate JSON, it writes LaTeX table fragments to
+`results/my-run/table/` and publication-ready PDF/PNG figures to
+`results/my-run/figures/`.  The aggregation is pair-aware: multiple independent
+runs of one task/environment pair contribute to Pass@k, while pair-level pass
+rates count that pair only once.  Use `--table-dir` and `--figure-dir` to
+override the default output locations.
 
 `--runs K` executes `K` complete trajectories for every selected task pair in model or Agent mode. Paper reproduction defaults to two 20-attempt runs per pair, with `temperature=0.7`, `top_p=0.95`, and at most 65,536 output tokens for every method and auxiliary model call. Model-generation seeds deterministically combine the base `--seed`, run index, attempt index, and retry index. `--run-index` can select the first Agent run index. The CLI and `pace-bench report` calculate pair-level `Pass@1` through `Pass@K`, where `Pass@k` means that at least one of the pair's first `k` trajectories succeeds.
 
