@@ -555,7 +555,7 @@ def _report_command(args: argparse.Namespace) -> int:
     result_root = args.input.parent if args.input.name == "json" else args.input
     table_dir = args.table_dir or result_root / "table"
     figure_dir = args.figure_dir or result_root / "figures"
-    artifacts = export_paper_artifacts(summary, table_dir, figure_dir)
+    artifacts = export_paper_artifacts(summary, table_dir, figure_dir, results=results)
     print(f"Paper tables saved to: {table_dir} ({artifacts['tables']} files)")
     print(f"Paper figures saved to: {figure_dir} ({artifacts['figures']} PDF files + PNG copies)")
     if artifacts.get("figure_error"):

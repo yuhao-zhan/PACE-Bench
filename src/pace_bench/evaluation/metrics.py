@@ -399,6 +399,43 @@ def _pass_at_k(results: Sequence[EvaluationResult]) -> dict[str, Any]:
     return values
 
 
+def pass_at_k_by_group(
+    results: Sequence[EvaluationResult],
+    key_function: Any,
+    k: int,
+) -> dict[str, dict[str, float | int]]:
+    """Compute pair-aware Pass@k for arbitrary report groups.
+
+    This is the grouped counterpart of :func:`_pass_at_k`, exposed for paper
+    exporters that need model/category/method rows.  A pair is eligible only
+    when it has at least ``k`` independently indexed runs, matching the
+    top-level Pass@k definition.
+    """
+
+    grouped: dict[str, dict[tuple[str, ...], list[EvaluationResult]]] = defaultdict(
+        lambda: defaultdict(list)
+    )
+    for result in results:
+        grouped[str(key_function(result))][_pair_key(result)].append(result)
+
+    report: dict[str, dict[str, float | int]] = {}
+    for group, pairs in sorted(grouped.items()):
+        eligible = 0
+        passed = 0
+        for trajectories in pairs.values():
+            trajectories.sort(key=_result_run_index)
+            if len(trajectories) < k:
+                continue
+            eligible += 1
+            passed += int(any(item.success for item in trajectories[:k]))
+        report[group] = {
+            "rate": passed / eligible if eligible else 0.0,
+            "passed_pairs": passed,
+            "pair_count": eligible,
+        }
+    return report
+
+
 def _run_count_summary(results: Sequence[EvaluationResult]) -> dict[str, int]:
     counts = Counter(_pair_key(result) for result in results)
     values = list(counts.values())

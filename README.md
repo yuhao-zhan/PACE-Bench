@@ -303,10 +303,17 @@ pace-bench report --input results/my-run \
 The report command walks the JSON result tree directly.  In addition to the
 canonical aggregate JSON, it writes LaTeX table fragments to
 `results/my-run/table/` and publication-ready PDF/PNG figures to
-`results/my-run/figures/`.  The aggregation is pair-aware: multiple independent
-runs of one task/environment pair contribute to Pass@k, while pair-level pass
-rates count that pair only once.  Use `--table-dir` and `--figure-dir` to
-override the default output locations.
+`results/my-run/figures/`.  The table tree follows the paper organization:
+`table/main/main_results.tex`, `table/main/model_category_pass.tex`,
+`table/error/error_taxonomy.tex`, and `table/difficulty/budget_sensitivity.tex`.
+Flat aliases such as `table/main_results.tex` are also emitted for direct
+LaTeX imports.  Figures use paper-facing names such as
+`figures/bar_pass_by_model.pdf`, `figures/heatmap_model_category_pass.pdf`,
+and `figures/discovery_and_score_curves.pdf`; each also has a PNG preview.
+The aggregation is pair-aware: multiple independent runs of one
+task/environment pair contribute to Pass@k, while pair-level pass rates count
+that pair only once.  Use `--table-dir` and `--figure-dir` to override the
+default output locations.
 
 `--runs K` executes `K` complete trajectories for every selected task pair in model or Agent mode. Paper reproduction defaults to two 20-attempt runs per pair, with `temperature=0.7`, `top_p=0.95`, and at most 65,536 output tokens for every method and auxiliary model call. Model-generation seeds deterministically combine the base `--seed`, run index, attempt index, and retry index. `--run-index` can select the first Agent run index. The CLI and `pace-bench report` calculate pair-level `Pass@1` through `Pass@K`, where `Pass@k` means that at least one of the pair's first `k` trajectories succeeds.
 
