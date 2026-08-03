@@ -273,6 +273,8 @@ class EvaluationEngine:
     ) -> tuple[GenerationResult | None, str | None, str | None]:
         request = submission.request
         last_error = "provider produced no candidate"
+        last_provider_error: ProviderError | None = None
+        received_provider_response = submission.generation is not None
         first_retry = 0
         total_provider_calls = self.config.generation_retries + 1
         if submission.generation is not None:
@@ -313,7 +315,9 @@ class EvaluationEngine:
                 )
             except ProviderError as exc:
                 last_error = str(exc)
+                last_provider_error = exc
                 continue
+            received_provider_response = True
             code = (
                 generation.code
                 if generation.code is not None
@@ -324,6 +328,11 @@ class EvaluationEngine:
                 generation.code = code
                 return generation, code, None
             last_error = reason
+        if not received_provider_response and last_provider_error is not None:
+            # A provider outage is an orchestration failure, not invalid solver
+            # output. Propagate it so run_single() never persists a benchmark
+            # result for a run in which the model produced no response.
+            raise last_provider_error
         return None, None, last_error
 
     @staticmethod
