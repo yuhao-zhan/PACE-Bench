@@ -1,0 +1,1552 @@
+{
+  "analysis": {
+    "best_attempt_diagnostics": {
+      "constraint_violation_count": 0,
+      "failure_reason": "Forbidden corridor upper-bound violation",
+      "joints_broken_count": 0,
+      "progress": 0.0,
+      "step_count": 111,
+      "structure_broken": false
+    },
+    "best_code_tokens": 838,
+    "cumulative_best_scores": [
+      {
+        "attempt": 0,
+        "best_score": 0.0
+      },
+      {
+        "attempt": 1,
+        "best_score": 0.0
+      },
+      {
+        "attempt": 2,
+        "best_score": 0.0
+      },
+      {
+        "attempt": 3,
+        "best_score": 0.0
+      },
+      {
+        "attempt": 4,
+        "best_score": 0.0
+      },
+      {
+        "attempt": 5,
+        "best_score": 0.0
+      },
+      {
+        "attempt": 6,
+        "best_score": 0.0
+      },
+      {
+        "attempt": 7,
+        "best_score": 0.0
+      },
+      {
+        "attempt": 8,
+        "best_score": 0.0
+      },
+      {
+        "attempt": 9,
+        "best_score": 0.0
+      },
+      {
+        "attempt": 10,
+        "best_score": 0.0
+      },
+      {
+        "attempt": 11,
+        "best_score": 0.0
+      },
+      {
+        "attempt": 12,
+        "best_score": 0.0
+      },
+      {
+        "attempt": 13,
+        "best_score": 0.0
+      },
+      {
+        "attempt": 14,
+        "best_score": 0.0
+      },
+      {
+        "attempt": 15,
+        "best_score": 0.0
+      },
+      {
+        "attempt": 16,
+        "best_score": 0.0
+      },
+      {
+        "attempt": 17,
+        "best_score": 0.0
+      },
+      {
+        "attempt": 18,
+        "best_score": 0.0
+      },
+      {
+        "attempt": 19,
+        "best_score": 0.0
+      },
+      {
+        "attempt": 20,
+        "best_score": 0.0
+      }
+    ],
+    "error_type": "exploration",
+    "revision_attempts": 20,
+    "success_attempt": null,
+    "tokens": {
+      "all_calls_total": 332690,
+      "auxiliary_completion": 0,
+      "auxiliary_prompt": 0,
+      "auxiliary_total": 0,
+      "completion": 140156,
+      "prompt": 192534,
+      "total": 332690
+    },
+    "trajectory_diagnostics": {
+      "code_length_trend": -0.026194,
+      "code_radicality": 0.199642,
+      "code_similarity_early": 0.825105,
+      "code_similarity_global": 0.800358,
+      "code_similarity_late": 0.840794,
+      "code_similarity_middle": 0.721695,
+      "code_similarity_recent": 0.824886,
+      "code_similarity_trend": 0.015689,
+      "first_positive_index": -1,
+      "improved_late": false,
+      "persistent_constraint_violation": false,
+      "score_trend": 0.0,
+      "total_constraint_violations": 0,
+      "unique_failure_reasons": 6
+    },
+    "verified_attempts": 21
+  },
+  "attempt_budget": 20,
+  "attempts": [
+    {
+      "artifacts": [],
+      "attempt": 0,
+      "code": "import math\n\n\n_DT = 1.0 / 60.0\n\n_LANDER_MASS = 50.0\n\n_MAX_TORQUE = 120.0\n\n\n\ndef _platform_kinematics(t):\n    base = 17.0\n    amp = 1.8\n    per = 6.0\n    if per <= 1e-6:\n        per = 6.0\n    w = 2.0 * math.pi / per\n    plat_x = base + amp * math.sin(w * t)\n    plat_vx = amp * w * math.cos(w * t)\n    return plat_x, plat_vx\n\n\ndef _corridor_target_altitude(yt, yb, clearance_obstacle=2.5, clearance_ceiling=1.5):\n    y_lo = yt + clearance_obstacle\n    y_hi = yb - clearance_ceiling\n    if y_hi <= y_lo:\n        return 0.5 * (yt + yb)\n    inner = y_hi - y_lo\n    y_pref = y_lo + 0.35 * inner\n    return max(y_lo, min(y_pref, y_hi))\n\n\n\ndef _defer_command_one_step(sandbox, agent, thrust, torque):\n    prior_thrust, prior_torque = agent[\"deferred_command\"]\n    sandbox.apply_thrust(prior_thrust, prior_torque)\n    agent[\"deferred_command\"] = (thrust, torque)\n\n\n\ndef _build_precision_agent(sandbox, terminal_target_vy, low_altitude_tilt):\n    return {\n        \"body\": sandbox.get_lander_body(),\n        \"phase\": \"transit\",\n        \"vertical_integral\": 0.0,\n        \"horizontal_integral\": 0.0,\n        \"last_thrust\": 500.0,\n        \"terminal_target_vy\": terminal_target_vy,\n        \"low_altitude_tilt\": low_altitude_tilt,\n    }\n\n\n\ndef _precision_lander_action(sandbox, agent, step_count):\n    body = agent[\"body\"]\n    dt = 1.0 / 60.0\n    x, y = sandbox.get_lander_position()\n    vx = float(body.linearVelocity.x)\n    vy = float(body.linearVelocity.y)\n    angle = sandbox.get_lander_angle()\n    omega = sandbox.get_lander_angular_velocity()\n    delay_steps = sandbox.get_thrust_delay_steps()\n    delay_t = delay_steps * dt\n    ground_y = sandbox.get_ground_y_top()\n    _half_width, half_height = sandbox.get_lander_size()\n    clearance = y - ground_y - half_height\n\n    if agent[\"phase\"] == \"transit\" and x >= 14.0:\n        agent[\"phase\"] = \"rendezvous\"\n\n    if agent[\"phase\"] == \"transit\":\n        target_x = 15.0\n        target_vx = 2.2\n        target_y = 12.0\n        target_vy = 0.0\n        vertical_acceleration = 4.0 * (target_y - y) + 7.0 * (target_vy - vy)\n        horizontal_acceleration = 1.8 * (target_x - x) + 3.5 * (target_vx - vx)\n        max_tilt = 0.26\n    else:\n        command_time = (step_count + delay_steps) * dt + 0.30\n        platform_omega = 2.0 * math.pi / 6.0\n        target_x = 17.0 + 1.8 * math.sin(platform_omega * command_time)\n        target_vx = 1.8 * platform_omega * math.cos(platform_omega * command_time)\n\n        if clearance > 6.0:\n            target_vy = -3.0\n        elif clearance > 3.0:\n            target_vy = -2.5\n        elif clearance > 1.5:\n            target_vy = -1.5\n        elif clearance > 0.80:\n            target_vy = -0.60\n        elif clearance > 0.24:\n            target_vy = -0.50\n        else:\n            target_vy = agent[\"terminal_target_vy\"]\n\n        queued_vertical_acceleration = (\n            agent[\"last_thrust\"] * math.cos(angle) / 50.0 - 10.0\n        )\n        predicted_vy = vy + queued_vertical_acceleration * delay_t\n        agent[\"vertical_integral\"] += (target_vy - predicted_vy) * dt\n        agent[\"vertical_integral\"] = max(\n            -0.25, min(0.25, agent[\"vertical_integral\"])\n        )\n        if clearance <= 0.24:\n            agent[\"vertical_integral\"] = 0.0\n        vertical_acceleration = (\n            5.0 * (target_vy - predicted_vy)\n            + 1.2 * agent[\"vertical_integral\"]\n        )\n\n        predicted_x = x + vx * delay_t\n        horizontal_error = target_x - predicted_x\n        agent[\"horizontal_integral\"] += horizontal_error * dt\n        agent[\"horizontal_integral\"] = max(\n            -0.8, min(0.8, agent[\"horizontal_integral\"])\n        )\n        horizontal_acceleration = (\n            2.0 * horizontal_error\n            + 4.0 * (target_vx - vx)\n            + 0.35 * agent[\"horizontal_integral\"]\n        )\n        if clearance > 2.0:\n            max_tilt = 0.24\n        else:\n            max_tilt = agent[\"low_altitude_tilt\"]\n\n    target_angle = max(\n        -max_tilt, min(max_tilt, -math.atan2(horizontal_acceleration, 10.0))\n    )\n    if clearance < 1.0:\n        low_tilt = agent[\"low_altitude_tilt\"]\n        target_angle = max(-low_tilt, min(low_tilt, target_angle))\n        angle_kp, angle_kd = 100.0, 40.0\n    else:\n        angle_kp, angle_kd = 100.0, 24.0\n    torque = angle_kp * (target_angle - angle) - angle_kd * omega\n    torque = max(-120.0, min(120.0, torque))\n\n    thrust = 50.0 * (10.0 + vertical_acceleration)\n    thrust /= max(0.85, math.cos(angle))\n    thrust = max(0.0, min(600.0, thrust))\n    agent[\"last_thrust\"] = thrust\n    sandbox.apply_thrust(thrust, torque)\n\n\ndef build_agent(sandbox):\n    return _build_precision_agent(sandbox, -0.30, 0.17)\n\n\n\ndef agent_action(sandbox, agent, step_count):\n    _precision_lander_action(sandbox, agent, step_count)\n\n",
+      "code_sha256": "71e3837b7c97fa8569036468a7a6ccaa65c29d870975fd808f0425cdee7084ef",
+      "constraints": {
+        "count": 0,
+        "violated": false,
+        "violations": []
+      },
+      "generation": null,
+      "outcome": {
+        "category": "simulation_failure",
+        "failure_reason": "Forbidden corridor upper-bound violation"
+      },
+      "phase": "reference",
+      "physics": {},
+      "score": 0.0,
+      "step_count": 111,
+      "success": false,
+      "timestamp": 1785742141.404613,
+      "verification_seconds": 0.04106028564274311
+    },
+    {
+      "artifacts": [],
+      "attempt": 1,
+      "code": "import math\n\n_DT = 1.0 / 60.0\n_LANDER_MASS = 50.0\n_MAX_TORQUE = 120.0\n\ndef _platform_kinematics(t):\n    base = 17.0\n    amp = 1.8\n    per = 6.0\n    w = 2.0 * math.pi / per\n    plat_x = base + amp * math.sin(w * t)\n    plat_vx = amp * w * math.cos(w * t)\n    return plat_x, plat_vx\n\ndef _build_precision_agent(sandbox, terminal_target_vy, low_altitude_tilt):\n    return {\n        \"body\": sandbox.get_lander_body(),\n        \"phase\": \"transit\",\n        \"vertical_integral\": 0.0,\n        \"horizontal_integral\": 0.0,\n        \"last_thrust\": 500.0,\n        \"terminal_target_vy\": terminal_target_vy,\n        \"low_altitude_tilt\": low_altitude_tilt,\n    }\n\ndef _precision_lander_action(sandbox, agent, step_count):\n    body = agent[\"body\"]\n    dt = 1.0 / 60.0\n    x, y = sandbox.get_lander_position()\n    vx = float(body.linearVelocity.x)\n    vy = float(body.linearVelocity.y)\n    angle = sandbox.get_lander_angle()\n    omega = sandbox.get_lander_angular_velocity()\n    delay_steps = sandbox.get_thrust_delay_steps()\n    delay_t = delay_steps * dt\n    ground_y = sandbox.get_ground_y_top()\n    _half_width, half_height = sandbox.get_lander_size()\n    clearance = y - ground_y - half_height\n\n    if agent[\"phase\"] == \"transit\" and x >= 14.0:\n        agent[\"phase\"] = \"rendezvous\"\n\n    if agent[\"phase\"] == \"transit\":\n        target_x = 15.0\n        target_vx = 2.2\n        target_y = 6.5  # ✅ Adjusted to stay within the new corridor\n        target_vy = 0.0\n        vertical_acceleration = 4.0 * (target_y - y) + 7.0 * (target_vy - vy)\n        horizontal_acceleration = 1.8 * (target_x - x) + 3.5 * (target_vx - vx)\n        max_tilt = 0.26\n    else:\n        command_time = (step_count + delay_steps) * dt + 0.30\n        platform_omega = 2.0 * math.pi / 6.0\n        target_x = 17.0 + 1.8 * math.sin(platform_omega * command_time)\n        target_vx = 1.8 * platform_omega * math.cos(platform_omega * command_time)\n\n        if clearance > 6.0:\n            target_vy = -3.0\n        elif clearance > 3.0:\n            target_vy = -2.5\n        elif clearance > 1.5:\n            target_vy = -1.5\n        elif clearance > 0.80:\n            target_vy = -0.60\n        elif clearance > 0.24:\n            target_vy = -0.50\n        else:\n            target_vy = agent[\"terminal_target_vy\"]\n\n        queued_vertical_acceleration = (\n            agent[\"last_thrust\"] * math.cos(angle) / 50.0 - 10.0\n        )\n        predicted_vy = vy + queued_vertical_acceleration * delay_t\n        agent[\"vertical_integral\"] += (target_vy - predicted_vy) * dt\n        agent[\"vertical_integral\"] = max(\n            -0.25, min(0.25, agent[\"vertical_integral\"])\n        )\n        if clearance <= 0.24:\n            agent[\"vertical_integral\"] = 0.0\n        vertical_acceleration = (\n            5.0 * (target_vy - predicted_vy)\n            + 1.2 * agent[\"vertical_integral\"]\n        )\n\n        predicted_x = x + vx * delay_t\n        horizontal_error = target_x - predicted_x\n        agent[\"horizontal_integral\"] += horizontal_error * dt\n        agent[\"horizontal_integral\"] = max(\n            -0.8, min(0.8, agent[\"horizontal_integral\"])\n        )\n        horizontal_acceleration = (\n            2.0 * horizontal_error\n            + 4.0 * (target_vx - vx)\n            + 0.35 * agent[\"horizontal_integral\"]\n        )\n        if clearance > 2.0:\n            max_tilt = 0.24\n        else:\n            max_tilt = agent[\"low_altitude_tilt\"]\n\n    target_angle = max(\n        -max_tilt, min(max_tilt, -math.atan2(horizontal_acceleration, 10.0))\n    )\n    if clearance < 1.0:\n        low_tilt = agent[\"low_altitude_tilt\"]\n        target_angle = max(-low_tilt, min(low_tilt, target_angle))\n        angle_kp, angle_kd = 100.0, 40.0\n    else:\n        angle_kp, angle_kd = 100.0, 24.0\n    torque = angle_kp * (target_angle - angle) - angle_kd * omega\n    torque = max(-120.0, min(120.0, torque))\n\n    thrust = 50.0 * (10.0 + vertical_acceleration)\n    thrust /= max(0.85, math.cos(angle))\n    thrust = max(0.0, min(600.0, thrust))\n    agent[\"last_thrust\"] = thrust\n    sandbox.apply_thrust(thrust, torque)\n\ndef build_agent(sandbox):\n    return _build_precision_agent(sandbox, -0.30, 0.17)\n\ndef agent_action(sandbox, agent, step_count):\n    _precision_lander_action(sandbox, agent, step_count)",
+      "code_sha256": "c95aa0059647950cbfe04e602c0468fa0ddc356bb691301a40cb777d216d29d9",
+      "constraints": {
+        "count": 0,
+        "violated": false,
+        "violations": []
+      },
+      "generation": {
+        "latency_seconds": 232.46760976314545,
+        "model": "Qwen3-32B",
+        "token_usage": {
+          "completion_tokens": 5596,
+          "prompt_tokens": 7663,
+          "total_tokens": 13259
+        }
+      },
+      "outcome": {
+        "category": "simulation_failure",
+        "failure_reason": "Forbidden corridor upper-bound violation"
+      },
+      "phase": "revision",
+      "physics": {},
+      "score": 0.0,
+      "step_count": 110,
+      "success": false,
+      "timestamp": 1785742373.9139788,
+      "verification_seconds": 0.04128026403486729
+    },
+    {
+      "artifacts": [],
+      "attempt": 2,
+      "code": "import math\n\n_DT = 1.0 / 60.0\n_LANDER_MASS = 50.0\n_MAX_TORQUE = 120.0\n\ndef _platform_kinematics(t):\n    base = 17.0\n    amp = 1.8\n    per = 6.0\n    w = 2.0 * math.pi / per\n    plat_x = base + amp * math.sin(w * t)\n    plat_vx = amp * w * math.cos(w * t)\n    return plat_x, plat_vx\n\ndef _build_precision_agent(sandbox, terminal_target_vy, low_altitude_tilt):\n    return {\n        \"body\": sandbox.get_lander_body(),\n        \"phase\": \"transit\",\n        \"vertical_integral\": 0.0,\n        \"horizontal_integral\": 0.0,\n        \"last_thrust\": 500.0,\n        \"terminal_target_vy\": terminal_target_vy,\n        \"low_altitude_tilt\": low_altitude_tilt,\n    }\n\ndef _precision_lander_action(sandbox, agent, step_count):\n    body = agent[\"body\"]\n    dt = 1.0 / 60.0\n    x, y = sandbox.get_lander_position()\n    vx = float(body.linearVelocity.x)\n    vy = float(body.linearVelocity.y)\n    angle = sandbox.get_lander_angle()\n    omega = sandbox.get_lander_angular_velocity()\n    delay_steps = sandbox.get_thrust_delay_steps()\n    delay_t = delay_steps * dt\n    ground_y = sandbox.get_ground_y_top()\n    _half_width, half_height = sandbox.get_lander_size()\n    clearance = y - ground_y - half_height\n\n    if agent[\"phase\"] == \"transit\" and x >= 14.0:\n        agent[\"phase\"] = \"rendezvous\"\n\n    if agent[\"phase\"] == \"transit\":\n        target_x = 15.0\n        target_vx = 1.5  # Slower horizontal speed to allow descent\n        target_y = 6.5  # Target Y to ensure safe passage through no-fly zone\n        target_vy = 0.0\n        vertical_acceleration = 8.0 * (target_y - y) + 12.0 * (target_vy - vy)\n        vertical_acceleration = max(-10.0, vertical_acceleration)  # Clamp to avoid clamping thrust to zero\n        horizontal_acceleration = 1.8 * (target_x - x) + 3.5 * (target_vx - vx)\n        max_tilt = 0.26\n    else:\n        command_time = (step_count + delay_steps) * dt + 0.30\n        platform_omega = 2.0 * math.pi / 6.0\n        target_x = 17.0 + 1.8 * math.sin(platform_omega * command_time)\n        target_vx = 1.8 * platform_omega * math.cos(platform_omega * command_time)\n\n        if clearance > 6.0:\n            target_vy = -3.0\n        elif clearance > 3.0:\n            target_vy = -2.5\n        elif clearance > 1.5:\n            target_vy = -1.5\n        elif clearance > 0.80:\n            target_vy = -0.60\n        elif clearance > 0.24:\n            target_vy = -0.50\n        else:\n            target_vy = agent[\"terminal_target_vy\"]\n\n        queued_vertical_acceleration = (\n            agent[\"last_thrust\"] * math.cos(angle) / 50.0 - 10.0\n        )\n        predicted_vy = vy + queued_vertical_acceleration * delay_t\n        agent[\"vertical_integral\"] += (target_vy - predicted_vy) * dt\n        agent[\"vertical_integral\"] = max(\n            -0.25, min(0.25, agent[\"vertical_integral\"])\n        )\n        if clearance <= 0.24:\n            agent[\"vertical_integral\"] = 0.0\n        vertical_acceleration = (\n            5.0 * (target_vy - predicted_vy)\n            + 1.2 * agent[\"vertical_integral\"]\n        )\n\n        predicted_x = x + vx * delay_t\n        horizontal_error = target_x - predicted_x\n        agent[\"horizontal_integral\"] += horizontal_error * dt\n        agent[\"horizontal_integral\"] = max(\n            -0.8, min(0.8, agent[\"horizontal_integral\"])\n        )\n        horizontal_acceleration = (\n            2.0 * horizontal_error\n            + 4.0 * (target_vx - vx)\n            + 0.35 * agent[\"horizontal_integral\"]\n        )\n        if clearance > 2.0:\n            max_tilt = 0.24\n        else:\n            max_tilt = agent[\"low_altitude_tilt\"]\n\n    target_angle = max(\n        -max_tilt, min(max_tilt, -math.atan2(horizontal_acceleration, 10.0))\n    )\n    if clearance < 1.0:\n        low_tilt = agent[\"low_altitude_tilt\"]\n        target_angle = max(-low_tilt, min(low_tilt, target_angle))\n        angle_kp, angle_kd = 100.0, 40.0\n    else:\n        angle_kp, angle_kd = 100.0, 24.0\n    torque = angle_kp * (target_angle - angle) - angle_kd * omega\n    torque = max(-120.0, min(120.0, torque))\n\n    thrust = 50.0 * (10.0 + vertical_acceleration)\n    thrust /= max(0.85, math.cos(angle))\n    thrust = max(0.0, min(600.0, thrust))\n    agent[\"last_thrust\"] = thrust\n    sandbox.apply_thrust(thrust, torque)\n\ndef build_agent(sandbox):\n    return _build_precision_agent(sandbox, -0.30, 0.17)\n\ndef agent_action(sandbox, agent, step_count):\n    _precision_lander_action(sandbox, agent, step_count)",
+      "code_sha256": "9944bd4282b92c0f44d1357b37188d7a554bfceb761668df69c194cff4094b8b",
+      "constraints": {
+        "count": 0,
+        "violated": false,
+        "violations": []
+      },
+      "generation": {
+        "latency_seconds": 374.88207166828215,
+        "model": "Qwen3-32B",
+        "token_usage": {
+          "completion_tokens": 8992,
+          "prompt_tokens": 9469,
+          "total_tokens": 18461
+        }
+      },
+      "outcome": {
+        "category": "simulation_failure",
+        "failure_reason": "Forbidden corridor upper-bound violation"
+      },
+      "phase": "revision",
+      "physics": {},
+      "score": 0.0,
+      "step_count": 111,
+      "success": false,
+      "timestamp": 1785742748.8378003,
+      "verification_seconds": 0.041283950209617615
+    },
+    {
+      "artifacts": [],
+      "attempt": 3,
+      "code": "import math\n\n_DT = 1.0 / 60.0\n_LANDER_MASS = 50.0\n_MAX_TORQUE = 120.0\n\ndef _platform_kinematics(t):\n    base = 17.0\n    amp = 1.8\n    per = 6.0\n    w = 2.0 * math.pi / per\n    plat_x = base + amp * math.sin(w * t)\n    plat_vx = amp * w * math.cos(w * t)\n    return plat_x, plat_vx\n\ndef _build_precision_agent(sandbox, terminal_target_vy, low_altitude_tilt):\n    return {\n        \"body\": sandbox.get_lander_body(),\n        \"phase\": \"transit\",\n        \"vertical_integral\": 0.0,\n        \"horizontal_integral\": 0.0,\n        \"last_thrust\": 500.0,\n        \"terminal_target_vy\": terminal_target_vy,\n        \"low_altitude_tilt\": low_altitude_tilt,\n    }\n\ndef _precision_lander_action(sandbox, agent, step_count):\n    body = agent[\"body\"]\n    dt = 1.0 / 60.0\n    x, y = sandbox.get_lander_position()\n    vx = float(body.linearVelocity.x)\n    vy = float(body.linearVelocity.y)\n    angle = sandbox.get_lander_angle()\n    omega = sandbox.get_lander_angular_velocity()\n    delay_steps = sandbox.get_thrust_delay_steps()\n    delay_t = delay_steps * dt\n    ground_y = sandbox.get_ground_y_top()\n    _half_width, half_height = sandbox.get_lander_size()\n    clearance = y - ground_y - half_height\n\n    # Transition to rendezvous phase\n    if agent[\"phase\"] == \"transit\" and x >= 14.0:\n        agent[\"phase\"] = \"rendezvous\"\n\n    if agent[\"phase\"] == \"transit\":\n        # Dynamic target_y based on x-position to ensure safe passage\n        if x < 8.0:\n            target_y = 12.0\n        elif x < 10.5:\n            # Descend linearly from 12.0 to 7.0 as x increases from 8.0 to 10.5\n            fraction = (x - 8.0) / (10.5 - 8.0)\n            target_y = 12.0 - fraction * (12.0 - 7.0)\n        else:\n            target_y = 7.0  # Maintain at upper bound of no-fly zone\n\n        target_x = 15.0\n        target_vx = 1.2  # Reduced horizontal speed to allow for safer descent\n        target_vy = 0.0\n\n        # Increased gains for vertical control\n        vertical_acceleration = 10.0 * (target_y - y) + 15.0 * (target_vy - vy)\n        vertical_acceleration = max(-10.0, vertical_acceleration)\n\n        # Horizontal acceleration for smooth approach\n        horizontal_acceleration = 1.8 * (target_x - x) + 3.5 * (target_vx - vx)\n        max_tilt = 0.26\n\n    else:\n        command_time = (step_count + delay_steps) * dt + 0.30\n        platform_omega = 2.0 * math.pi / 6.0\n        target_x = 17.0 + 1.8 * math.sin(platform_omega * command_time)\n        target_vx = 1.8 * platform_omega * math.cos(platform_omega * command_time)\n\n        if clearance > 6.0:\n            target_vy = -3.0\n        elif clearance > 3.0:\n            target_vy = -2.5\n        elif clearance > 1.5:\n            target_vy = -1.5\n        elif clearance > 0.80:\n            target_vy = -0.60\n        elif clearance > 0.24:\n            target_vy = -0.50\n        else:\n            target_vy = agent[\"terminal_target_vy\"]\n\n        queued_vertical_acceleration = (\n            agent[\"last_thrust\"] * math.cos(angle) / 50.0 - 10.0\n        )\n        predicted_vy = vy + queued_vertical_acceleration * delay_t\n        agent[\"vertical_integral\"] += (target_vy - predicted_vy) * dt\n        agent[\"vertical_integral\"] = max(-0.25, min(0.25, agent[\"vertical_integral\"]))\n        if clearance <= 0.24:\n            agent[\"vertical_integral\"] = 0.0\n        vertical_acceleration = (\n            5.0 * (target_vy - predicted_vy)\n            + 1.2 * agent[\"vertical_integral\"]\n        )\n\n        predicted_x = x + vx * delay_t\n        horizontal_error = target_x - predicted_x\n        agent[\"horizontal_integral\"] += horizontal_error * dt\n        agent[\"horizontal_integral\"] = max(-0.8, min(0.8, agent[\"horizontal_integral\"]))\n        horizontal_acceleration = (\n            2.0 * horizontal_error\n            + 4.0 * (target_vx - vx)\n            + 0.35 * agent[\"horizontal_integral\"]\n        )\n        if clearance > 2.0:\n            max_tilt = 0.24\n        else:\n            max_tilt = agent[\"low_altitude_tilt\"]\n\n    # Compute target orientation\n    target_angle = max(\n        -max_tilt, min(max_tilt, -math.atan2(horizontal_acceleration, 10.0))\n    )\n    if clearance < 1.0:\n        low_tilt = agent[\"low_altitude_tilt\"]\n        target_angle = max(-low_tilt, min(low_tilt, target_angle))\n        angle_kp, angle_kd = 100.0, 40.0\n    else:\n        angle_kp, angle_kd = 100.0, 24.0\n    torque = angle_kp * (target_angle - angle) - angle_kd * omega\n    torque = max(-120.0, min(120.0, torque))\n\n    # Compute thrust\n    thrust = 50.0 * (10.0 + vertical_acceleration)\n    thrust /= max(0.85, math.cos(angle))\n    thrust = max(0.0, min(600.0, thrust))\n    agent[\"last_thrust\"] = thrust\n    sandbox.apply_thrust(thrust, torque)\n\ndef build_agent(sandbox):\n    return _build_precision_agent(sandbox, -0.30, 0.17)\n\ndef agent_action(sandbox, agent, step_count):\n    _precision_lander_action(sandbox, agent, step_count)",
+      "code_sha256": "510e6b780e069ec998efcd5a6248f14d14f542a18af67691ae2e8c09b2498aa4",
+      "constraints": {
+        "count": 0,
+        "violated": false,
+        "violations": []
+      },
+      "generation": {
+        "latency_seconds": 360.9394779652357,
+        "model": "Qwen3-32B",
+        "token_usage": {
+          "completion_tokens": 7230,
+          "prompt_tokens": 9506,
+          "total_tokens": 16736
+        }
+      },
+      "outcome": {
+        "category": "simulation_failure",
+        "failure_reason": "Forbidden corridor upper-bound violation"
+      },
+      "phase": "revision",
+      "physics": {},
+      "score": 0.0,
+      "step_count": 113,
+      "success": false,
+      "timestamp": 1785743109.8193645,
+      "verification_seconds": 0.041618961840867996
+    },
+    {
+      "artifacts": [],
+      "attempt": 4,
+      "code": "import math\n\n_DT = 1.0 / 60.0\n_LANDER_MASS = 50.0\n_MAX_TORQUE = 120.0\n\n\ndef _platform_kinematics(t):\n    base = 17.0\n    amp = 1.8\n    per = 6.0\n    if per <= 1e-6:\n        per = 6.0\n    w = 2.0 * math.pi / per\n    plat_x = base + amp * math.sin(w * t)\n    plat_vx = amp * w * math.cos(w * t)\n    return plat_x, plat_vx\n\n\ndef _build_precision_agent(sandbox, terminal_target_vy, low_altitude_tilt):\n    return {\n        \"body\": sandbox.get_lander_body(),\n        \"phase\": \"transit\",\n        \"vertical_integral\": 0.0,\n        \"horizontal_integral\": 0.0,\n        \"last_thrust\": 500.0,\n        \"terminal_target_vy\": terminal_target_vy,\n        \"low_altitude_tilt\": low_altitude_tilt,\n    }\n\n\ndef _precision_lander_action(sandbox, agent, step_count):\n    body = agent[\"body\"]\n    dt = 1.0 / 60.0\n    x, y = sandbox.get_lander_position()\n    vx = float(body.linearVelocity.x)\n    vy = float(body.linearVelocity.y)\n    angle = sandbox.get_lander_angle()\n    omega = sandbox.get_lander_angular_velocity()\n    delay_steps = sandbox.get_thrust_delay_steps()\n    delay_t = delay_steps * dt\n    ground_y = sandbox.get_ground_y_top()\n    _half_width, half_height = sandbox.get_lander_size()\n    clearance = y - ground_y - half_height\n\n    if agent[\"phase\"] == \"transit\" and x >= 14.0:\n        agent[\"phase\"] = \"rendezvous\"\n\n    if agent[\"phase\"] == \"transit\":\n        # Adjust target_y to ensure top edge <= 7.0 m at no-fly zone\n        if x < 8.0:\n            target_y = 12.0\n        elif x < 10.5:\n            fraction = (x - 8.0) / (10.5 - 8.0)\n            target_y = 12.0 - fraction * (12.0 - 6.7)\n        else:\n            target_y = 6.7  # Safe altitude to stay within the upper bound\n\n        target_x = 15.0\n        target_vx = 0.8  # Reduced horizontal speed for safer descent\n        target_vy = 0.0\n\n        # Strengthened vertical control to descend faster\n        vertical_acceleration = 20.0 * (target_y - y) + 30.0 * (target_vy - vy)\n        vertical_acceleration = max(-10.0, vertical_acceleration)\n\n        # Reduced horizontal gains to prevent overshooting\n        horizontal_acceleration = 1.0 * (target_x - x) + 2.0 * (target_vx - vx)\n        max_tilt = 0.26\n\n    else:\n        command_time = (step_count + delay_steps) * dt + 0.30\n        platform_omega = 2.0 * math.pi / 6.0\n        target_x = 17.0 + 1.8 * math.sin(platform_omega * command_time)\n        target_vx = 1.8 * platform_omega * math.cos(platform_omega * command_time)\n\n        if clearance > 6.0:\n            target_vy = -3.0\n        elif clearance > 3.0:\n            target_vy = -2.5\n        elif clearance > 1.5:\n            target_vy = -1.5\n        elif clearance > 0.80:\n            target_vy = -0.60\n        elif clearance > 0.24:\n            target_vy = -0.50\n        else:\n            target_vy = agent[\"terminal_target_vy\"]\n\n        queued_vertical_acceleration = (\n            agent[\"last_thrust\"] * math.cos(angle) / 50.0 - 10.0\n        )\n        predicted_vy = vy + queued_vertical_acceleration * delay_t\n        agent[\"vertical_integral\"] += (target_vy - predicted_vy) * dt\n        agent[\"vertical_integral\"] = max(\n            -0.25, min(0.25, agent[\"vertical_integral\"])\n        )\n        if clearance <= 0.24:\n            agent[\"vertical_integral\"] = 0.0\n        vertical_acceleration = (\n            5.0 * (target_vy - predicted_vy)\n            + 1.2 * agent[\"vertical_integral\"]\n        )\n\n        predicted_x = x + vx * delay_t\n        horizontal_error = target_x - predicted_x\n        agent[\"horizontal_integral\"] += horizontal_error * dt\n        agent[\"horizontal_integral\"] = max(\n            -0.8, min(0.8, agent[\"horizontal_integral\"])\n        )\n        horizontal_acceleration = (\n            2.0 * horizontal_error\n            + 4.0 * (target_vx - vx)\n            + 0.35 * agent[\"horizontal_integral\"]\n        )\n        if clearance > 2.0:\n            max_tilt = 0.24\n        else:\n            max_tilt = agent[\"low_altitude_tilt\"]\n\n    # Compute target orientation\n    target_angle = max(\n        -max_tilt, min(max_tilt, -math.atan2(horizontal_acceleration, 10.0))\n    )\n    if clearance < 1.0:\n        low_tilt = agent[\"low_altitude_tilt\"]\n        target_angle = max(-low_tilt, min(low_tilt, target_angle))\n        angle_kp, angle_kd = 100.0, 40.0\n    else:\n        angle_kp, angle_kd = 100.0, 24.0\n    torque = angle_kp * (target_angle - angle) - angle_kd * omega\n    torque = max(-120.0, min(120.0, torque))\n\n    # Compute thrust\n    thrust = 50.0 * (10.0 + vertical_acceleration)\n    thrust /= max(0.85, math.cos(angle))\n    thrust = max(0.0, min(600.0, thrust))\n    agent[\"last_thrust\"] = thrust\n    sandbox.apply_thrust(thrust, torque)\n\n\ndef build_agent(sandbox):\n    return _build_precision_agent(sandbox, -0.30, 0.17)\n\n\ndef agent_action(sandbox, agent, step_count):\n    _precision_lander_action(sandbox, agent, step_count)",
+      "code_sha256": "a252bb2fd2c446ba5985fcc541f3dfa88ab651ec6ecb06ffae3b48aec2c590a9",
+      "constraints": {
+        "count": 0,
+        "violated": false,
+        "violations": []
+      },
+      "generation": {
+        "latency_seconds": 316.48328503221273,
+        "model": "Qwen3-32B",
+        "token_usage": {
+          "completion_tokens": 7444,
+          "prompt_tokens": 9648,
+          "total_tokens": 17092
+        }
+      },
+      "outcome": {
+        "category": "simulation_failure",
+        "failure_reason": "Forbidden corridor upper-bound violation"
+      },
+      "phase": "revision",
+      "physics": {},
+      "score": 0.0,
+      "step_count": 115,
+      "success": false,
+      "timestamp": 1785743426.3824437,
+      "verification_seconds": 0.07926992326974869
+    },
+    {
+      "artifacts": [],
+      "attempt": 5,
+      "code": "import math\n\n_DT = 1.0 / 60.0\n_LANDER_MASS = 50.0\n_MAX_TORQUE = 120.0\n\n\ndef _platform_kinematics(t):\n    base = 17.0\n    amp = 1.8\n    per = 6.0\n    if per <= 1e-6:\n        per = 6.0\n    w = 2.0 * math.pi / per\n    plat_x = base + amp * math.sin(w * t)\n    plat_vx = amp * w * math.cos(w * t)\n    return plat_x, plat_vx\n\n\ndef _build_precision_agent(sandbox, terminal_target_vy, low_altitude_tilt):\n    return {\n        \"body\": sandbox.get_lander_body(),\n        \"phase\": \"transit\",\n        \"vertical_integral\": 0.0,\n        \"horizontal_integral\": 0.0,\n        \"last_thrust\": 500.0,\n        \"terminal_target_vy\": terminal_target_vy,\n        \"low_altitude_tilt\": low_altitude_tilt,\n    }\n\n\ndef _precision_lander_action(sandbox, agent, step_count):\n    body = agent[\"body\"]\n    dt = 1.0 / 60.0\n    x, y = sandbox.get_lander_position()\n    vx = float(body.linearVelocity.x)\n    vy = float(body.linearVelocity.y)\n    angle = sandbox.get_lander_angle()\n    omega = sandbox.get_lander_angular_velocity()\n    delay_steps = sandbox.get_thrust_delay_steps()\n    delay_t = delay_steps * dt\n    ground_y = sandbox.get_ground_y_top()\n    _half_width, half_height = sandbox.get_lander_size()\n    clearance = y - ground_y - half_height\n\n    if agent[\"phase\"] == \"transit\" and x >= 14.0:\n        agent[\"phase\"] = \"rendezvous\"\n\n    if agent[\"phase\"] == \"transit\":\n        # Adjust target_y to ensure top edge <= 7.0 m with safety margin\n        if x < 8.0:\n            target_y = 12.0\n        elif x < 10.5:\n            fraction = (x - 8.0) / (10.5 - 8.0)\n            target_y = 12.0 - fraction * (12.0 - 6.5)\n        else:\n            target_y = 6.5  # Safe altitude to stay within the upper bound\n\n        target_x = 15.0\n        target_vx = 0.3  # Reduced horizontal speed for safer approach\n        target_vy = 0.0\n\n        # Reduced vertical gains to avoid overshoot\n        vertical_acceleration = 10.0 * (target_y - y) + 15.0 * (target_vy - vy)\n        vertical_acceleration = max(-10.0, vertical_acceleration)\n\n        # Reduced horizontal gains to prevent overshooting\n        horizontal_acceleration = 0.5 * (target_x - x) + 1.0 * (target_vx - vx)\n        max_tilt = 0.20\n\n    else:\n        command_time = (step_count + delay_steps) * dt + 0.30\n        platform_omega = 2.0 * math.pi / 6.0\n        target_x = 17.0 + 1.8 * math.sin(platform_omega * command_time)\n        target_vx = 1.8 * platform_omega * math.cos(platform_omega * command_time)\n\n        if clearance > 6.0:\n            target_vy = -3.0\n        elif clearance > 3.0:\n            target_vy = -2.5\n        elif clearance > 1.5:\n            target_vy = -1.5\n        elif clearance > 0.80:\n            target_vy = -0.60\n        elif clearance > 0.24:\n            target_vy = -0.50\n        else:\n            target_vy = agent[\"terminal_target_vy\"]\n\n        queued_vertical_acceleration = (\n            agent[\"last_thrust\"] * math.cos(angle) / 50.0 - 10.0\n        )\n        predicted_vy = vy + queued_vertical_acceleration * delay_t\n        agent[\"vertical_integral\"] += (target_vy - predicted_vy) * dt\n        agent[\"vertical_integral\"] = max(\n            -0.25, min(0.25, agent[\"vertical_integral\"])\n        )\n        if clearance <= 0.24:\n            agent[\"vertical_integral\"] = 0.0\n        vertical_acceleration = (\n            5.0 * (target_vy - predicted_vy)\n            + 1.2 * agent[\"vertical_integral\"]\n        )\n\n        predicted_x = x + vx * delay_t\n        horizontal_error = target_x - predicted_x\n        agent[\"horizontal_integral\"] += horizontal_error * dt\n        agent[\"horizontal_integral\"] = max(\n            -0.8, min(0.8, agent[\"horizontal_integral\"])\n        )\n        horizontal_acceleration = (\n            2.0 * horizontal_error\n            + 4.0 * (target_vx - vx)\n            + 0.35 * agent[\"horizontal_integral\"]\n        )\n        if clearance > 2.0:\n            max_tilt = 0.24\n        else:\n            max_tilt = agent[\"low_altitude_tilt\"]\n\n    # Compute target orientation\n    target_angle = max(\n        -max_tilt, min(max_tilt, -math.atan2(horizontal_acceleration, 10.0))\n    )\n    if clearance < 1.0:\n        low_tilt = agent[\"low_altitude_tilt\"]\n        target_angle = max(-low_tilt, min(low_tilt, target_angle))\n        angle_kp, angle_kd = 100.0, 40.0\n    else:\n        angle_kp, angle_kd = 100.0, 24.0\n    torque = angle_kp * (target_angle - angle) - angle_kd * omega\n    torque = max(-120.0, min(120.0, torque))\n\n    # Compute thrust\n    thrust = 50.0 * (10.0 + vertical_acceleration)\n    thrust /= max(0.85, math.cos(angle))\n    thrust = max(0.0, min(600.0, thrust))\n    agent[\"last_thrust\"] = thrust\n    sandbox.apply_thrust(thrust, torque)\n\n\ndef build_agent(sandbox):\n    return _build_precision_agent(sandbox, -0.30, 0.17)\n\n\ndef agent_action(sandbox, agent, step_count):\n    _precision_lander_action(sandbox, agent, step_count)",
+      "code_sha256": "e5917b802e830ac6d4ef5f0f8e4e72c4219dd4a9478d83294d51b0496da78c14",
+      "constraints": {
+        "count": 0,
+        "violated": false,
+        "violations": []
+      },
+      "generation": {
+        "latency_seconds": 201.1409488413483,
+        "model": "Qwen3-32B",
+        "token_usage": {
+          "completion_tokens": 4909,
+          "prompt_tokens": 9642,
+          "total_tokens": 14551
+        }
+      },
+      "outcome": {
+        "category": "simulation_failure",
+        "failure_reason": "Forbidden corridor upper-bound violation"
+      },
+      "phase": "revision",
+      "physics": {},
+      "score": 0.0,
+      "step_count": 128,
+      "success": false,
+      "timestamp": 1785743627.5652516,
+      "verification_seconds": 0.04136244207620621
+    },
+    {
+      "artifacts": [],
+      "attempt": 6,
+      "code": "import math\n\n_DT = 1.0 / 60.0\n_LANDER_MASS = 50.0\n_MAX_TORQUE = 120.0\n\n\ndef _platform_kinematics(t):\n    base = 17.0\n    amp = 1.8\n    per = 6.0\n    if per <= 1e-6:\n        per = 6.0\n    w = 2.0 * math.pi / per\n    plat_x = base + amp * math.sin(w * t)\n    plat_vx = amp * w * math.cos(w * t)\n    return plat_x, plat_vx\n\n\ndef _build_precision_agent(sandbox, terminal_target_vy, low_altitude_tilt):\n    return {\n        \"body\": sandbox.get_lander_body(),\n        \"phase\": \"transit\",\n        \"vertical_integral\": 0.0,\n        \"horizontal_integral\": 0.0,\n        \"last_thrust\": 500.0,\n        \"terminal_target_vy\": terminal_target_vy,\n        \"low_altitude_tilt\": low_altitude_tilt,\n    }\n\n\ndef _precision_lander_action(sandbox, agent, step_count):\n    body = agent[\"body\"]\n    dt = 1.0 / 60.0\n    x, y = sandbox.get_lander_position()\n    vx = float(body.linearVelocity.x)\n    vy = float(body.linearVelocity.y)\n    angle = sandbox.get_lander_angle()\n    omega = sandbox.get_lander_angular_velocity()\n    delay_steps = sandbox.get_thrust_delay_steps()\n    delay_t = delay_steps * dt\n    ground_y = sandbox.get_ground_y_top()\n    half_width, half_height = sandbox.get_lander_size()\n    clearance = y - ground_y - half_height\n\n    if agent[\"phase\"] == \"transit\" and x >= 14.0:\n        agent[\"phase\"] = \"rendezvous\"\n\n    if agent[\"phase\"] == \"transit\":\n        # Adjust target_y to stay under 6.7m (7.0m - 0.3m half-height)\n        if x < 8.0:\n            target_y = 12.0\n        elif x < 10.0:  # Start descent earlier\n            fraction = (x - 8.0) / (10.0 - 8.0)\n            target_y = 12.0 - fraction * (12.0 - 6.7)  # Reach 6.7m by x=10.0\n        else:\n            target_y = 6.7  # Safe altitude for no-fly zone\n\n        target_x = 15.0\n        target_vx = 0.4  # Moderate horizontal speed\n        target_vy = 0.0\n\n        # Aggressive vertical descent control\n        vertical_acceleration = 20.0 * (target_y - y) + 30.0 * (target_vy - vy)\n        vertical_acceleration = max(-15.0, vertical_acceleration)\n\n        # Conservative horizontal control\n        horizontal_acceleration = 0.6 * (target_x - x) + 1.0 * (target_vx - vx)\n        max_tilt = 0.20\n\n    else:\n        command_time = (step_count + delay_steps) * dt + 0.30\n        platform_omega = 2.0 * math.pi / 6.0\n        target_x = 17.0 + 1.8 * math.sin(platform_omega * command_time)\n        target_vx = 1.8 * platform_omega * math.cos(platform_omega * command_time)\n\n        if clearance > 6.0:\n            target_vy = -3.0\n        elif clearance > 3.0:\n            target_vy = -2.5\n        elif clearance > 1.5:\n            target_vy = -1.5\n        elif clearance > 0.80:\n            target_vy = -0.60\n        elif clearance > 0.24:\n            target_vy = -0.50\n        else:\n            target_vy = agent[\"terminal_target_vy\"]\n\n        queued_vertical_acceleration = (\n            agent[\"last_thrust\"] * math.cos(angle) / 50.0 - 10.0\n        )\n        predicted_vy = vy + queued_vertical_acceleration * delay_t\n        agent[\"vertical_integral\"] += (target_vy - predicted_vy) * dt\n        agent[\"vertical_integral\"] = max(\n            -0.25, min(0.25, agent[\"vertical_integral\"])\n        )\n        if clearance <= 0.24:\n            agent[\"vertical_integral\"] = 0.0\n        vertical_acceleration = (\n            5.0 * (target_vy - predicted_vy)\n            + 1.2 * agent[\"vertical_integral\"]\n        )\n\n        predicted_x = x + vx * delay_t\n        horizontal_error = target_x - predicted_x\n        agent[\"horizontal_integral\"] += horizontal_error * dt\n        agent[\"horizontal_integral\"] = max(\n            -0.8, min(0.8, agent[\"horizontal_integral\"])\n        )\n        horizontal_acceleration = (\n            2.0 * horizontal_error\n            + 4.0 * (target_vx - vx)\n            + 0.35 * agent[\"horizontal_integral\"]\n        )\n        if clearance > 2.0:\n            max_tilt = 0.24\n        else:\n            max_tilt = agent[\"low_altitude_tilt\"]\n\n    # Orientation control\n    target_angle = max(\n        -max_tilt, min(max_tilt, -math.atan2(horizontal_acceleration, 10.0))\n    )\n    if clearance < 1.0:\n        low_tilt = agent[\"low_altitude_tilt\"]\n        target_angle = max(-low_tilt, min(low_tilt, target_angle))\n        angle_kp, angle_kd = 100.0, 40.0\n    else:\n        angle_kp, angle_kd = 100.0, 24.0\n    torque = angle_kp * (target_angle - angle) - angle_kd * omega\n    torque = max(-120.0, min(120.0, torque))\n\n    # Thrust computation\n    thrust = 50.0 * (10.0 + vertical_acceleration)\n    thrust /= max(0.85, math.cos(angle))\n    thrust = max(0.0, min(600.0, thrust))\n    agent[\"last_thrust\"] = thrust\n    sandbox.apply_thrust(thrust, torque)\n\n\ndef build_agent(sandbox):\n    return _build_precision_agent(sandbox, -0.30, 0.17)\n\n\ndef agent_action(sandbox, agent, step_count):\n    _precision_lander_action(sandbox, agent, step_count)",
+      "code_sha256": "d3c6c722fa21b90e7c6a455a5f444d000f98e81abd462dd833af3d0b996d35ac",
+      "constraints": {
+        "count": 0,
+        "violated": false,
+        "violations": []
+      },
+      "generation": {
+        "latency_seconds": 279.49326859228313,
+        "model": "Qwen3-32B",
+        "token_usage": {
+          "completion_tokens": 6307,
+          "prompt_tokens": 9640,
+          "total_tokens": 15947
+        }
+      },
+      "outcome": {
+        "category": "simulation_failure",
+        "failure_reason": "Forbidden corridor upper-bound violation"
+      },
+      "phase": "revision",
+      "physics": {},
+      "score": 0.0,
+      "step_count": 127,
+      "success": false,
+      "timestamp": 1785743907.1011536,
+      "verification_seconds": 0.04216508939862251
+    },
+    {
+      "artifacts": [],
+      "attempt": 7,
+      "code": "import math\n\n_DT = 1.0 / 60.0\n_LANDER_MASS = 50.0\n_MAX_TORQUE = 120.0\n\n\ndef _platform_kinematics(t):\n    base = 17.0\n    amp = 1.8\n    per = 6.0\n    w = 2.0 * math.pi / per\n    plat_x = base + amp * math.sin(w * t)\n    plat_vx = amp * w * math.cos(w * t)\n    return plat_x, plat_vx\n\n\ndef _build_precision_agent(sandbox, terminal_target_vy, low_altitude_tilt):\n    return {\n        \"body\": sandbox.get_lander_body(),\n        \"phase\": \"transit\",\n        \"vertical_integral\": 0.0,\n        \"horizontal_integral\": 0.0,\n        \"last_thrust\": 500.0,\n        \"terminal_target_vy\": terminal_target_vy,\n        \"low_altitude_tilt\": low_altitude_tilt,\n    }\n\n\ndef _precision_lander_action(sandbox, agent, step_count):\n    body = agent[\"body\"]\n    dt = 1.0 / 60.0\n    x, y = sandbox.get_lander_position()\n    vx = float(body.linearVelocity.x)\n    vy = float(body.linearVelocity.y)\n    angle = sandbox.get_lander_angle()\n    omega = sandbox.get_lander_angular_velocity()\n    delay_steps = sandbox.get_thrust_delay_steps()\n    delay_t = delay_steps * dt\n    ground_y = sandbox.get_ground_y_top()\n    half_width, half_height = sandbox.get_lander_size()\n    clearance = y - ground_y - half_height\n\n    if agent[\"phase\"] == \"transit\" and x >= 14.0:\n        agent[\"phase\"] = \"rendezvous\"\n\n    if agent[\"phase\"] == \"transit\":\n        # Begin descent earlier to avoid no-fly zone upper bound violation\n        if x < 8.0:\n            target_y = 12.0\n        elif x < 10.5:\n            # Interpolate to reach 6.7 m (7.0 - 0.3 m half-height) by x=10.5\n            fraction = (x - 8.0) / (10.5 - 8.0)\n            target_y = 12.0 - fraction * (12.0 - 6.7)\n        else:\n            target_y = 6.7  # Safe altitude for no-fly zone\n\n        target_x = 15.0\n        target_vx = 0.2  # Reduced horizontal speed for more descent time\n        target_vy = 0.0\n\n        # Increased descent response to reach safe altitude faster\n        vertical_acceleration = 30.0 * (target_y - y) + 40.0 * (target_vy - vy)\n        vertical_acceleration = max(-20.0, vertical_acceleration)\n\n        # Reduced horizontal gain to allow more descent time\n        horizontal_acceleration = 0.3 * (target_x - x) + 0.5 * (target_vx - vx)\n        max_tilt = 0.20\n\n    else:\n        # Rendezvous phase logic (unchanged from original)\n        command_time = (step_count + delay_steps) * dt + 0.30\n        platform_omega = 2.0 * math.pi / 6.0\n        target_x = 17.0 + 1.8 * math.sin(platform_omega * command_time)\n        target_vx = 1.8 * platform_omega * math.cos(platform_omega * command_time)\n\n        if clearance > 6.0:\n            target_vy = -3.0\n        elif clearance > 3.0:\n            target_vy = -2.5\n        elif clearance > 1.5:\n            target_vy = -1.5\n        elif clearance > 0.80:\n            target_vy = -0.60\n        elif clearance > 0.24:\n            target_vy = -0.50\n        else:\n            target_vy = agent[\"terminal_target_vy\"]\n\n        queued_vertical_acceleration = (\n            agent[\"last_thrust\"] * math.cos(angle) / 50.0 - 10.0\n        )\n        predicted_vy = vy + queued_vertical_acceleration * delay_t\n        agent[\"vertical_integral\"] += (target_vy - predicted_vy) * dt\n        agent[\"vertical_integral\"] = max(-0.25, min(0.25, agent[\"vertical_integral\"]))\n        if clearance <= 0.24:\n            agent[\"vertical_integral\"] = 0.0\n        vertical_acceleration = (\n            5.0 * (target_vy - predicted_vy) + 1.2 * agent[\"vertical_integral\"]\n        )\n\n        predicted_x = x + vx * delay_t\n        horizontal_error = target_x - predicted_x\n        agent[\"horizontal_integral\"] += horizontal_error * dt\n        agent[\"horizontal_integral\"] = max(-0.8, min(0.8, agent[\"horizontal_integral\"]))\n        horizontal_acceleration = (\n            2.0 * horizontal_error\n            + 4.0 * (target_vx - vx)\n            + 0.35 * agent[\"horizontal_integral\"]\n        )\n        if clearance > 2.0:\n            max_tilt = 0.24\n        else:\n            max_tilt = agent[\"low_altitude_tilt\"]\n\n    # Orientation control\n    target_angle = max(\n        -max_tilt, min(max_tilt, -math.atan2(horizontal_acceleration, 10.0))\n    )\n    if clearance < 1.0:\n        low_tilt = agent[\"low_altitude_tilt\"]\n        target_angle = max(-low_tilt, min(low_tilt, target_angle))\n        angle_kp, angle_kd = 100.0, 40.0\n    else:\n        angle_kp, angle_kd = 100.0, 24.0\n    torque = angle_kp * (target_angle - angle) - angle_kd * omega\n    torque = max(-120.0, min(120.0, torque))\n\n    # Thrust computation\n    thrust = 50.0 * (10.0 + vertical_acceleration)\n    thrust /= max(0.85, math.cos(angle))\n    thrust = max(0.0, min(600.0, thrust))\n    agent[\"last_thrust\"] = thrust\n    sandbox.apply_thrust(thrust, torque)\n\n\ndef build_agent(sandbox):\n    return _build_precision_agent(sandbox, -0.30, 0.17)\n\n\ndef agent_action(sandbox, agent, step_count):\n    _precision_lander_action(sandbox, agent, step_count)",
+      "code_sha256": "9563514a138c2f618979d4f55c24d56f52a33de9ad5329daa5c1252aecbb86b9",
+      "constraints": {
+        "count": 0,
+        "violated": false,
+        "violations": []
+      },
+      "generation": {
+        "latency_seconds": 232.77621131390333,
+        "model": "Qwen3-32B",
+        "token_usage": {
+          "completion_tokens": 5224,
+          "prompt_tokens": 9658,
+          "total_tokens": 14882
+        }
+      },
+      "outcome": {
+        "category": "simulation_failure",
+        "failure_reason": "Forbidden corridor upper-bound violation"
+      },
+      "phase": "revision",
+      "physics": {},
+      "score": 0.0,
+      "step_count": 132,
+      "success": false,
+      "timestamp": 1785744139.9325116,
+      "verification_seconds": 0.05462740361690521
+    },
+    {
+      "artifacts": [],
+      "attempt": 8,
+      "code": "import math\n\n_DT = 1.0 / 60.0\n_LANDER_MASS = 50.0\n_MAX_TORQUE = 120.0\n\n\ndef _platform_kinematics(t):\n    base = 17.0\n    amp = 1.8\n    per = 6.0\n    w = 2.0 * math.pi / per\n    plat_x = base + amp * math.sin(w * t)\n    plat_vx = amp * w * math.cos(w * t)\n    return plat_x, plat_vx\n\n\ndef _build_precision_agent(sandbox, terminal_target_vy, low_altitude_tilt):\n    return {\n        \"body\": sandbox.get_lander_body(),\n        \"phase\": \"transit\",\n        \"vertical_integral\": 0.0,\n        \"horizontal_integral\": 0.0,\n        \"last_thrust\": 500.0,\n        \"terminal_target_vy\": terminal_target_vy,\n        \"low_altitude_tilt\": low_altitude_tilt,\n        \"vertical_integral_transit\": 0.0,  # For transit-specific integral term\n    }\n\n\ndef _precision_lander_action(sandbox, agent, step_count):\n    body = agent[\"body\"]\n    dt = 1.0 / 60.0\n    x, y = sandbox.get_lander_position()\n    vx = float(body.linearVelocity.x)\n    vy = float(body.linearVelocity.y)\n    angle = sandbox.get_lander_angle()\n    omega = sandbox.get_lander_angular_velocity()\n    delay_steps = sandbox.get_thrust_delay_steps()\n    delay_t = delay_steps * dt\n    ground_y = sandbox.get_ground_y_top()\n    half_width, half_height = sandbox.get_lander_size()\n    clearance = y - ground_y - half_height\n\n    if agent[\"phase\"] == \"transit\" and x >= 10.0 and abs(y - 6.7) < 0.2:\n        agent[\"phase\"] = \"rendezvous\"\n\n    if agent[\"phase\"] == \"transit\":\n        target_y = 6.7  # Ensure top of the lander is at 7.0 m\n        target_x = 10.0  # Stop before entering the no-fly zone\n        target_vx = 0.1  # Very slow horizontal movement\n        target_vy = 0.0\n\n        # Aggressive descent: high proportional and derivative gains\n        vertical_acceleration = 60.0 * (target_y - y) + 80.0 * (target_vy - vy)\n        vertical_acceleration = max(-30.0, vertical_acceleration)\n\n        # Minimal horizontal movement to allow descent time\n        horizontal_acceleration = 0.05 * (target_x - x) + 0.1 * (target_vx - vx)\n        max_tilt = 0.25\n\n    else:\n        # Rendezvous phase logic\n        command_time = (step_count + delay_steps) * dt + 0.30\n        platform_omega = 2.0 * math.pi / 6.0\n        target_x = 17.0 + 1.8 * math.sin(platform_omega * command_time)\n        target_vx = 1.8 * platform_omega * math.cos(platform_omega * command_time)\n\n        if clearance > 6.0:\n            target_vy = -3.0\n        elif clearance > 3.0:\n            target_vy = -2.5\n        elif clearance > 1.5:\n            target_vy = -1.5\n        elif clearance > 0.80:\n            target_vy = -0.60\n        elif clearance > 0.24:\n            target_vy = -0.50\n        else:\n            target_vy = agent[\"terminal_target_vy\"]\n\n        queued_vertical_acceleration = (\n            agent[\"last_thrust\"] * math.cos(angle) / 50.0 - 10.0\n        )\n        predicted_vy = vy + queued_vertical_acceleration * delay_t\n        agent[\"vertical_integral\"] += (target_vy - predicted_vy) * dt\n        agent[\"vertical_integral\"] = max(\n            -0.25, min(0.25, agent[\"vertical_integral\"])\n        )\n        if clearance <= 0.24:\n            agent[\"vertical_integral\"] = 0.0\n        vertical_acceleration = (\n            5.0 * (target_vy - predicted_vy) + 1.2 * agent[\"vertical_integral\"]\n        )\n\n        predicted_x = x + vx * delay_t\n        horizontal_error = target_x - predicted_x\n        agent[\"horizontal_integral\"] += horizontal_error * dt\n        agent[\"horizontal_integral\"] = max(\n            -0.8, min(0.8, agent[\"horizontal_integral\"])\n        )\n        horizontal_acceleration = (\n            2.0 * horizontal_error\n            + 4.0 * (target_vx - vx)\n            + 0.35 * agent[\"horizontal_integral\"]\n        )\n        if clearance > 2.0:\n            max_tilt = 0.24\n        else:\n            max_tilt = agent[\"low_altitude_tilt\"]\n\n    # Orientation control\n    target_angle = max(\n        -max_tilt, min(max_tilt, -math.atan2(horizontal_acceleration, 10.0))\n    )\n    if clearance < 1.0:\n        low_tilt = agent[\"low_altitude_tilt\"]\n        target_angle = max(-low_tilt, min(low_tilt, target_angle))\n        angle_kp, angle_kd = 100.0, 40.0\n    else:\n        angle_kp, angle_kd = 100.0, 24.0\n    torque = angle_kp * (target_angle - angle) - angle_kd * omega\n    torque = max(-120.0, min(120.0, torque))\n\n    # Thrust computation\n    thrust = 50.0 * (10.0 + vertical_acceleration)\n    thrust /= max(0.85, math.cos(angle))\n    thrust = max(0.0, min(600.0, thrust))\n    agent[\"last_thrust\"] = thrust\n    sandbox.apply_thrust(thrust, torque)\n\n\ndef build_agent(sandbox):\n    return _build_precision_agent(sandbox, -0.30, 0.17)\n\n\ndef agent_action(sandbox, agent, step_count):\n    _precision_lander_action(sandbox, agent, step_count)",
+      "code_sha256": "0d089ba5ca53d6e1c85e0671fda02812989678a081f1a728a22c7999565833eb",
+      "constraints": {
+        "count": 0,
+        "violated": false,
+        "violations": []
+      },
+      "generation": {
+        "latency_seconds": 378.37859380804,
+        "model": "Qwen3-32B",
+        "token_usage": {
+          "completion_tokens": 8739,
+          "prompt_tokens": 9653,
+          "total_tokens": 18392
+        }
+      },
+      "outcome": {
+        "category": "simulation_failure",
+        "failure_reason": "Forbidden corridor lower-bound violation"
+      },
+      "phase": "revision",
+      "physics": {},
+      "score": 0.0,
+      "step_count": 327,
+      "success": false,
+      "timestamp": 1785744518.375066,
+      "verification_seconds": 0.06348610296845436
+    },
+    {
+      "artifacts": [],
+      "attempt": 9,
+      "code": "import math\n\n_DT = 1.0 / 60.0\n_LANDER_MASS = 50.0\n_MAX_TORQUE = 120.0\n\n\ndef _platform_kinematics(t):\n    base = 17.0\n    amp = 1.8\n    per = 6.0\n    w = 2.0 * math.pi / per\n    plat_x = base + amp * math.sin(w * t)\n    plat_vx = amp * w * math.cos(w * t)\n    return plat_x, plat_vx\n\n\ndef _build_precision_agent(sandbox, terminal_target_vy, low_altitude_tilt):\n    return {\n        \"body\": sandbox.get_lander_body(),\n        \"phase\": \"transit\",\n        \"vertical_integral\": 0.0,\n        \"horizontal_integral\": 0.0,\n        \"last_thrust\": 500.0,\n        \"terminal_target_vy\": terminal_target_vy,\n        \"low_altitude_tilt\": low_altitude_tilt,\n    }\n\n\ndef _precision_lander_action(sandbox, agent, step_count):\n    body = agent[\"body\"]\n    dt = 1.0 / 60.0\n    x, y = sandbox.get_lander_position()\n    vx = float(body.linearVelocity.x)\n    vy = float(body.linearVelocity.y)\n    angle = sandbox.get_lander_angle()\n    omega = sandbox.get_lander_angular_velocity()\n    delay_steps = sandbox.get_thrust_delay_steps()\n    delay_t = delay_steps * dt\n    ground_y = sandbox.get_ground_y_top()\n    half_width, half_height = sandbox.get_lander_size()\n    clearance = y - ground_y - half_height\n\n    # Transition to rendezvous phase after the no-fly zone\n    if agent[\"phase\"] == \"transit\" and x >= 13.5:\n        agent[\"phase\"] = \"rendezvous\"\n\n    if agent[\"phase\"] == \"transit\":\n        # In the no-fly zone, target center y = 6.5 m (to stay within [6.3, 6.7])\n        if 10.5 <= x <= 13.5:\n            target_y = 6.5\n            target_vy = 0.0\n            target_x = 13.5  # Exit the no-fly zone quickly\n            target_vx = 1.0\n        else:\n            target_y = 12.0\n            target_vy = 0.0\n            target_x = 10.5  # Approach the no-fly zone at a controlled rate\n            target_vx = 1.5\n\n        # Conservative vertical control to avoid overshoot\n        vertical_acceleration = 10.0 * (target_y - y) + 5.0 * (target_vy - vy)\n        vertical_acceleration = max(-10.0, vertical_acceleration)\n\n        # Minimal horizontal movement in the no-fly zone\n        horizontal_acceleration = 0.2 * (target_x - x) + 0.1 * (target_vx - vx)\n        max_tilt = 0.15  # Conservative tilt to maintain stability\n\n    else:\n        # Rendezvous phase: track the platform\n        command_time = (step_count + delay_steps) * dt + 0.30\n        platform_omega = 2.0 * math.pi / 6.0\n        target_x = 17.0 + 1.8 * math.sin(platform_omega * command_time)\n        target_vx = 1.8 * platform_omega * math.cos(platform_omega * command_time)\n\n        if clearance > 6.0:\n            target_vy = -3.0\n        elif clearance > 3.0:\n            target_vy = -2.5\n        elif clearance > 1.5:\n            target_vy = -1.5\n        elif clearance > 0.80:\n            target_vy = -0.60\n        elif clearance > 0.24:\n            target_vy = -0.50\n        else:\n            target_vy = agent[\"terminal_target_vy\"]\n\n        queued_vertical_acceleration = (\n            agent[\"last_thrust\"] * math.cos(angle) / 50.0 - 10.0\n        )\n        predicted_vy = vy + queued_vertical_acceleration * delay_t\n        agent[\"vertical_integral\"] += (target_vy - predicted_vy) * dt\n        agent[\"vertical_integral\"] = max(\n            -0.25, min(0.25, agent[\"vertical_integral\"])\n        )\n        if clearance <= 0.24:\n            agent[\"vertical_integral\"] = 0.0\n        vertical_acceleration = (\n            5.0 * (target_vy - predicted_vy)\n            + 1.2 * agent[\"vertical_integral\"]\n        )\n\n        predicted_x = x + vx * delay_t\n        horizontal_error = target_x - predicted_x\n        agent[\"horizontal_integral\"] += horizontal_error * dt\n        agent[\"horizontal_integral\"] = max(\n            -0.8, min(0.8, agent[\"horizontal_integral\"])\n        )\n        horizontal_acceleration = (\n            2.0 * horizontal_error\n            + 4.0 * (target_vx - vx)\n            + 0.35 * agent[\"horizontal_integral\"]\n        )\n        if clearance > 2.0:\n            max_tilt = 0.24\n        else:\n            max_tilt = agent[\"low_altitude_tilt\"]\n\n    # Orientation control\n    target_angle = max(\n        -max_tilt, min(max_tilt, -math.atan2(horizontal_acceleration, 10.0))\n    )\n    if clearance < 1.0:\n        low_tilt = agent[\"low_altitude_tilt\"]\n        target_angle = max(-low_tilt, min(low_tilt, target_angle))\n        angle_kp, angle_kd = 100.0, 40.0\n    else:\n        angle_kp, angle_kd = 100.0, 24.0\n    torque = angle_kp * (target_angle - angle) - angle_kd * omega\n    torque = max(-120.0, min(120.0, torque))\n\n    # Thrust computation\n    thrust = 50.0 * (10.0 + vertical_acceleration)\n    thrust /= max(0.85, math.cos(angle))\n    thrust = max(0.0, min(600.0, thrust))\n    agent[\"last_thrust\"] = thrust\n    sandbox.apply_thrust(thrust, torque)\n\n\ndef build_agent(sandbox):\n    return _build_precision_agent(sandbox, -0.30, 0.17)\n\n\ndef agent_action(sandbox, agent, step_count):\n    _precision_lander_action(sandbox, agent, step_count)",
+      "code_sha256": "119e7f5e7080a7f9954c632fae56fc0a8b654cd1dfcb74c4d1e2500d53884c63",
+      "constraints": {
+        "count": 0,
+        "violated": false,
+        "violations": []
+      },
+      "generation": {
+        "latency_seconds": 131.23459848947823,
+        "model": "Qwen3-32B",
+        "token_usage": {
+          "completion_tokens": 3247,
+          "prompt_tokens": 9581,
+          "total_tokens": 12828
+        }
+      },
+      "outcome": {
+        "category": "simulation_failure",
+        "failure_reason": "Forbidden corridor upper-bound violation"
+      },
+      "phase": "revision",
+      "physics": {},
+      "score": 0.0,
+      "step_count": 174,
+      "success": false,
+      "timestamp": 1785744649.6627238,
+      "verification_seconds": 0.0525671262294054
+    },
+    {
+      "artifacts": [],
+      "attempt": 10,
+      "code": "import math\n\n_DT = 1.0 / 60.0\n_LANDER_MASS = 50.0\n_MAX_TORQUE = 120.0\n\ndef _platform_kinematics(t):\n    base = 17.0\n    amp = 1.8\n    per = 6.0\n    w = 2.0 * math.pi / per\n    plat_x = base + amp * math.sin(w * t)\n    plat_vx = amp * w * math.cos(w * t)\n    return plat_x, plat_vx\n\ndef _corridor_target_altitude(yt, yb, clearance_obstacle=2.0, clearance_ceiling=1.0):\n    y_lo = yt + clearance_obstacle\n    y_hi = yb - clearance_ceiling\n    if y_hi <= y_lo:\n        return 0.5 * (yt + yb)\n    inner = y_hi - y_lo\n    y_pref = y_lo + 0.35 * inner\n    return max(y_lo, min(y_pref, y_hi))\n\ndef _build_precision_agent(sandbox, terminal_target_vy, low_altitude_tilt):\n    return {\n        \"body\": sandbox.get_lander_body(),\n        \"phase\": \"approach_corridor\",\n        \"vertical_integral\": 0.0,\n        \"horizontal_integral\": 0.0,\n        \"last_thrust\": 500.0,\n        \"terminal_target_vy\": terminal_target_vy,\n        \"low_altitude_tilt\": low_altitude_tilt,\n    }\n\ndef _precision_lander_action(sandbox, agent, step_count):\n    body = agent[\"body\"]\n    dt = 1.0 / 60.0\n    x, y = sandbox.get_lander_position()\n    vx = float(body.linearVelocity.x)\n    vy = float(body.linearVelocity.y)\n    angle = sandbox.get_lander_angle()\n    omega = sandbox.get_lander_angular_velocity()\n    delay_steps = sandbox.get_thrust_delay_steps()\n    delay_t = delay_steps * dt\n    ground_y = sandbox.get_ground_y_top()\n    half_width, half_height = sandbox.get_lander_size()\n    clearance = y - ground_y - half_height\n\n    # Check if in no-fly zone\n    in_no_fly = 10.5 <= x <= 13.5\n    upper_bound = 7.0\n    lower_bound = 6.0\n\n    # Check if any corner is outside bounds\n    corners_y = [y + half_height, y - half_height]  # Top and bottom corners\n    if in_no_fly:\n        if any(y > upper_bound or y < lower_bound for y in corners_y):\n            print(\"CRITICAL: CORNER OUTSIDE NO-FLY ZONE BOUNDS\")\n            return  # Mission fails if any corner is out of bounds\n\n    if agent[\"phase\"] == \"approach_corridor\":\n        if x >= 10.5:\n            agent[\"phase\"] = \"transit\"\n    elif agent[\"phase\"] == \"transit\":\n        if x >= 13.5:\n            agent[\"phase\"] = \"rendezvous\"\n\n    if agent[\"phase\"] == \"approach_corridor\":\n        # Slow approach to no-fly zone\n        target_x = 10.5\n        target_vx = 0.8\n        target_y = _corridor_target_altitude(6.0, 7.0)\n        target_vy = 0.0\n        vertical_acceleration = 8.0 * (target_y - y) + 6.0 * (target_vy - vy)\n        horizontal_acceleration = 1.2 * (target_x - x) + 0.8 * (target_vx - vx)\n        max_tilt = 0.18\n\n    elif agent[\"phase\"] == \"transit\":\n        # Stay in the no-fly zone, strictly within bounds\n        target_y = _corridor_target_altitude(6.0, 7.0)\n        target_vy = 0.0\n        target_x = 13.5\n        target_vx = 1.0\n        vertical_acceleration = 12.0 * (target_y - y) + 8.0 * (target_vy - vy)\n        horizontal_acceleration = 1.8 * (target_x - x) + 1.0 * (target_vx - vx)\n        max_tilt = 0.22\n\n    else:  # rendezvous phase\n        # Predict platform position with delay\n        command_time = (step_count + delay_steps) * dt + 0.30\n        platform_omega = 2.0 * math.pi / 6.0\n        target_x = 17.0 + 1.8 * math.sin(platform_omega * command_time)\n        target_vx = 1.8 * platform_omega * math.cos(platform_omega * command_time)\n\n        if clearance > 6.0:\n            target_vy = -3.0\n        elif clearance > 3.0:\n            target_vy = -2.5\n        elif clearance > 1.5:\n            target_vy = -1.5\n        elif clearance > 0.80:\n            target_vy = -0.60\n        elif clearance > 0.24:\n            target_vy = -0.50\n        else:\n            target_vy = agent[\"terminal_target_vy\"]\n\n        queued_vertical_acceleration = (\n            agent[\"last_thrust\"] * math.cos(angle) / 50.0 - 10.0\n        )\n        predicted_vy = vy + queued_vertical_acceleration * delay_t\n        agent[\"vertical_integral\"] += (target_vy - predicted_vy) * dt\n        agent[\"vertical_integral\"] = max(-0.25, min(0.25, agent[\"vertical_integral\"]))\n        if clearance <= 0.24:\n            agent[\"vertical_integral\"] = 0.0\n        vertical_acceleration = 5.0 * (target_vy - predicted_vy) + 1.2 * agent[\"vertical_integral\"]\n\n        predicted_x = x + vx * delay_t\n        horizontal_error = target_x - predicted_x\n        agent[\"horizontal_integral\"] += horizontal_error * dt\n        agent[\"horizontal_integral\"] = max(-0.8, min(0.8, agent[\"horizontal_integral\"]))\n        horizontal_acceleration = 2.0 * horizontal_error + 4.0 * (target_vx - vx) + 0.35 * agent[\"horizontal_integral\"]\n        if clearance > 2.0:\n            max_tilt = 0.24\n        else:\n            max_tilt = agent[\"low_altitude_tilt\"]\n\n    # Orientation control\n    target_angle = max(\n        -max_tilt, min(max_tilt, -math.atan2(horizontal_acceleration, 10.0))\n    )\n    if clearance < 1.0:\n        low_tilt = agent[\"low_altitude_tilt\"]\n        target_angle = max(-low_tilt, min(low_tilt, target_angle))\n        angle_kp, angle_kd = 100.0, 40.0\n    else:\n        angle_kp, angle_kd = 100.0, 24.0\n    torque = angle_kp * (target_angle - angle) - angle_kd * omega\n    torque = max(-120.0, min(120.0, torque))\n\n    # Thrust computation\n    thrust = 50.0 * (10.0 + vertical_acceleration)\n    thrust /= max(0.85, math.cos(angle))\n    thrust = max(0.0, min(600.0, thrust))\n    agent[\"last_thrust\"] = thrust\n    sandbox.apply_thrust(thrust, torque)\n\ndef build_agent(sandbox):\n    return _build_precision_agent(sandbox, -0.30, 0.17)\n\ndef agent_action(sandbox, agent, step_count):\n    _precision_lander_action(sandbox, agent, step_count)",
+      "code_sha256": "70be8f301f7deb82a0ef44c08559f1c23d62889bebd1c7b81353ee969bae837e",
+      "constraints": {
+        "count": 0,
+        "violated": false,
+        "violations": []
+      },
+      "generation": {
+        "latency_seconds": 200.27502675168216,
+        "model": "Qwen3-32B",
+        "token_usage": {
+          "completion_tokens": 4812,
+          "prompt_tokens": 9645,
+          "total_tokens": 14457
+        }
+      },
+      "outcome": {
+        "category": "simulation_failure",
+        "failure_reason": "Forbidden corridor lower-bound violation"
+      },
+      "phase": "revision",
+      "physics": {},
+      "score": 0.0,
+      "step_count": 138,
+      "success": false,
+      "timestamp": 1785744849.9807148,
+      "verification_seconds": 0.04243255965411663
+    },
+    {
+      "artifacts": [],
+      "attempt": 11,
+      "code": "import math\n\n_DT = 1.0 / 60.0\n_LANDER_MASS = 50.0\n_MAX_TORQUE = 120.0\n\ndef _platform_kinematics(t):\n    base = 17.0\n    amp = 1.8\n    per = 6.0\n    w = 2.0 * math.pi / per\n    plat_x = base + amp * math.sin(w * t)\n    plat_vx = amp * w * math.cos(w * t)\n    return plat_x, plat_vx\n\ndef _corridor_target_altitude(yt, yb, clearance_obstacle=0.5, clearance_ceiling=0.5):\n    y_lo = yt + clearance_obstacle\n    y_hi = yb - clearance_ceiling\n    if y_hi <= y_lo:\n        return 0.5 * (yt + yb)\n    inner = y_hi - y_lo\n    y_pref = y_lo + 0.35 * inner\n    return max(y_lo, min(y_pref, y_hi))\n\ndef _build_precision_agent(sandbox, terminal_target_vy, low_altitude_tilt):\n    return {\n        \"body\": sandbox.get_lander_body(),\n        \"phase\": \"approach_corridor\",\n        \"vertical_integral\": 0.0,\n        \"horizontal_integral\": 0.0,\n        \"last_thrust\": 500.0,\n        \"terminal_target_vy\": terminal_target_vy,\n        \"low_altitude_tilt\": low_altitude_tilt,\n    }\n\ndef _precision_lander_action(sandbox, agent, step_count):\n    body = agent[\"body\"]\n    dt = 1.0 / 60.0\n    x, y = sandbox.get_lander_position()\n    vx = float(body.linearVelocity.x)\n    vy = float(body.linearVelocity.y)\n    angle = sandbox.get_lander_angle()\n    omega = sandbox.get_lander_angular_velocity()\n    delay_steps = sandbox.get_thrust_delay_steps()\n    delay_t = delay_steps * dt\n    ground_y = sandbox.get_ground_y_top()\n    half_width, half_height = sandbox.get_lander_size()\n    clearance = y - ground_y - half_height\n\n    # Check if any corner is in the no-fly zone and violates the bounds\n    corners_x = [x - half_width, x + half_width]\n    in_no_fly = any(10.5 <= cx <= 13.5 for cx in corners_x)\n    if in_no_fly:\n        for corner_x in corners_x:\n            if 10.5 <= corner_x <= 13.5:\n                top_y = y + half_height\n                bottom_y = y - half_height\n                if top_y > 7.0 or bottom_y < 6.0:\n                    return  # Mission fails if any corner is out of bounds\n\n    # Phase transitions\n    if agent[\"phase\"] == \"approach_corridor\":\n        if x >= 10.5 - half_width:  # When the right corner is at 10.5\n            agent[\"phase\"] = \"transit\"\n    elif agent[\"phase\"] == \"transit\":\n        if x >= 13.5 + half_width:  # When the left corner is at 13.5\n            agent[\"phase\"] = \"rendezvous\"\n\n    if agent[\"phase\"] == \"approach_corridor\":\n        # Approach phase: target to enter the no-fly zone\n        target_x = 10.5 - half_width  # Target for the right corner to be at 10.5\n        target_vx = 0.8\n        target_y = _corridor_target_altitude(6.0, 7.0)\n        target_vy = 0.0\n        vertical_acceleration = 10.0 * (target_y - y) + 6.0 * (target_vy - vy)\n        horizontal_acceleration = 1.0 * (target_x - x) + 0.5 * (target_vx - vx)\n        max_tilt = 0.15\n\n    elif agent[\"phase\"] == \"transit\":\n        # Transit phase: stay in the no-fly zone, strictly within bounds\n        target_y = _corridor_target_altitude(6.0, 7.0)\n        target_vy = 0.0\n        target_x = 13.5 + half_width  # Target for the left corner to be at 13.5\n        target_vx = 1.0\n        vertical_acceleration = 10.0 * (target_y - y) + 8.0 * (target_vy - vy)\n        horizontal_acceleration = 1.5 * (target_x - x) + 0.8 * (target_vx - vx)\n        max_tilt = 0.20\n\n    else:  # rendezvous phase\n        # Predict platform position with delay\n        command_time = (step_count + delay_steps) * dt + 0.30\n        platform_omega = 2.0 * math.pi / 6.0\n        target_x = 17.0 + 1.8 * math.sin(platform_omega * command_time)\n        target_vx = 1.8 * platform_omega * math.cos(platform_omega * command_time)\n\n        if clearance > 6.0:\n            target_vy = -3.0\n        elif clearance > 3.0:\n            target_vy = -2.5\n        elif clearance > 1.5:\n            target_vy = -1.5\n        elif clearance > 0.80:\n            target_vy = -0.60\n        elif clearance > 0.24:\n            target_vy = -0.50\n        else:\n            target_vy = agent[\"terminal_target_vy\"]\n\n        queued_vertical_acceleration = (\n            agent[\"last_thrust\"] * math.cos(angle) / 50.0 - 10.0\n        )\n        predicted_vy = vy + queued_vertical_acceleration * delay_t\n        agent[\"vertical_integral\"] += (target_vy - predicted_vy) * dt\n        agent[\"vertical_integral\"] = max(\n            -0.25, min(0.25, agent[\"vertical_integral\"])\n        )\n        if clearance <= 0.24:\n            agent[\"vertical_integral\"] = 0.0\n        vertical_acceleration = (\n            5.0 * (target_vy - predicted_vy)\n            + 1.2 * agent[\"vertical_integral\"]\n        )\n\n        predicted_x = x + vx * delay_t\n        horizontal_error = target_x - predicted_x\n        agent[\"horizontal_integral\"] += horizontal_error * dt\n        agent[\"horizontal_integral\"] = max(\n            -0.8, min(0.8, agent[\"horizontal_integral\"])\n        )\n        horizontal_acceleration = (\n            2.0 * horizontal_error\n            + 4.0 * (target_vx - vx)\n            + 0.35 * agent[\"horizontal_integral\"]\n        )\n        if clearance > 2.0:\n            max_tilt = 0.24\n        else:\n            max_tilt = agent[\"low_altitude_tilt\"]\n\n    # Orientation control\n    target_angle = max(\n        -max_tilt, min(max_tilt, -math.atan2(horizontal_acceleration, 10.0))\n    )\n    if clearance < 1.0:\n        low_tilt = agent[\"low_altitude_tilt\"]\n        target_angle = max(-low_tilt, min(low_tilt, target_angle))\n        angle_kp, angle_kd = 100.0, 40.0\n    else:\n        angle_kp, angle_kd = 100.0, 24.0\n    torque = angle_kp * (target_angle - angle) - angle_kd * omega\n    torque = max(-120.0, min(120.0, torque))\n\n    # Thrust computation\n    thrust = 50.0 * (10.0 + vertical_acceleration)\n    thrust /= max(0.85, math.cos(angle))\n    thrust = max(0.0, min(600.0, thrust))\n    agent[\"last_thrust\"] = thrust\n    sandbox.apply_thrust(thrust, torque)\n\ndef build_agent(sandbox):\n    return _build_precision_agent(sandbox, -0.30, 0.17)\n\ndef agent_action(sandbox, agent, step_count):\n    _precision_lander_action(sandbox, agent, step_count)",
+      "code_sha256": "1545cc742f4be1ca1a4926023c03c9e7c6c44a1cf5cbca82b67ca62e097c3bf6",
+      "constraints": {
+        "count": 0,
+        "violated": false,
+        "violations": []
+      },
+      "generation": {
+        "latency_seconds": 460.62370208092034,
+        "model": "Qwen3-32B",
+        "token_usage": {
+          "completion_tokens": 10695,
+          "prompt_tokens": 9911,
+          "total_tokens": 20606
+        }
+      },
+      "outcome": {
+        "category": "simulation_failure",
+        "failure_reason": "Forbidden corridor lower-bound violation"
+      },
+      "phase": "revision",
+      "physics": {},
+      "score": 0.0,
+      "step_count": 151,
+      "success": false,
+      "timestamp": 1785745310.6583586,
+      "verification_seconds": 0.05342208780348301
+    },
+    {
+      "artifacts": [],
+      "attempt": 12,
+      "code": "import math\n\n_DT = 1.0 / 60.0\n_LANDER_MASS = 50.0\n_MAX_TORQUE = 120.0\n\ndef _platform_kinematics(t):\n    base = 17.0\n    amp = 1.8\n    per = 6.0\n    w = 2.0 * math.pi / per\n    plat_x = base + amp * math.sin(w * t)\n    plat_vx = amp * w * math.cos(w * t)\n    return plat_x, plat_vx\n\ndef _corridor_target_altitude(yt, yb, clearance_obstacle=0.25, clearance_ceiling=0.25):\n    y_lo = yt + clearance_obstacle\n    y_hi = yb - clearance_ceiling\n    if y_hi <= y_lo:\n        return 0.5 * (yt + yb)\n    inner = y_hi - y_lo\n    y_pref = y_lo + 0.35 * inner\n    return max(y_lo, min(y_pref, y_hi))\n\ndef _build_precision_agent(sandbox, terminal_target_vy, low_altitude_tilt):\n    return {\n        \"body\": sandbox.get_lander_body(),\n        \"phase\": \"approach_corridor\",\n        \"vertical_integral\": 0.0,\n        \"horizontal_integral\": 0.0,\n        \"last_thrust\": 500.0,\n        \"terminal_target_vy\": terminal_target_vy,\n        \"low_altitude_tilt\": low_altitude_tilt,\n    }\n\ndef _precision_lander_action(sandbox, agent, step_count):\n    body = agent[\"body\"]\n    dt = 1.0 / 60.0\n    x, y = sandbox.get_lander_position()\n    vx = float(body.linearVelocity.x)\n    vy = float(body.linearVelocity.y)\n    angle = sandbox.get_lander_angle()\n    omega = sandbox.get_lander_angular_velocity()\n    delay_steps = sandbox.get_thrust_delay_steps()\n    delay_t = delay_steps * dt\n    ground_y = sandbox.get_ground_y_top()\n    half_width, half_height = sandbox.get_lander_size()\n\n    # Compute all four corners with rotation\n    local_corners = [\n        (-half_width, -half_height),\n        (half_width, -half_height),\n        (-half_width, half_height),\n        (half_width, half_height),\n    ]\n    world_corners = []\n    for lx, ly in local_corners:\n        cos_a = math.cos(angle)\n        sin_a = math.sin(angle)\n        cx = x + cos_a * lx - sin_a * ly\n        cy = y + sin_a * lx + cos_a * ly\n        world_corners.append((cx, cy))\n\n    # Check for no-fly zone violations\n    for cx, cy in world_corners:\n        if 10.5 <= cx <= 13.5:\n            if cy < 6.0 or cy > 7.0:\n                sandbox.apply_thrust(0, 0)\n                return\n\n    # Phase transitions\n    if agent[\"phase\"] == \"approach_corridor\":\n        if x >= 9.0 - half_width:\n            agent[\"phase\"] = \"transit\"\n    elif agent[\"phase\"] == \"transit\":\n        if x >= 13.5 + half_width:\n            agent[\"phase\"] = \"rendezvous\"\n\n    if agent[\"phase\"] == \"approach_corridor\":\n        target_x = 9.0 - half_width\n        target_vx = 1.2\n        target_y = _corridor_target_altitude(6.0, 7.0)\n        target_vy = 0.0\n        vertical_acceleration = 5.0 * (target_y - y) + 4.0 * (target_vy - vy)\n        horizontal_acceleration = 0.8 * (target_x - x) + 0.4 * (target_vx - vx)\n        max_tilt = 0.10\n\n    elif agent[\"phase\"] == \"transit\":\n        target_y = _corridor_target_altitude(6.0, 7.0)\n        target_vy = 0.0\n        target_x = 13.5 + half_width\n        target_vx = 1.0\n        vertical_acceleration = 5.0 * (target_y - y) + 4.0 * (target_vy - vy)\n        horizontal_acceleration = 0.8 * (target_x - x) + 0.4 * (target_vx - vx)\n        max_tilt = 0.10\n\n    else:  # rendezvous\n        command_time = (step_count + delay_steps) * dt + 0.30\n        platform_omega = 2.0 * math.pi / 6.0\n        target_x = 17.0 + 1.8 * math.sin(platform_omega * command_time)\n        target_vx = 1.8 * platform_omega * math.cos(platform_omega * command_time)\n\n        if y - ground_y > 6.0:\n            target_vy = -3.0\n        elif y - ground_y > 3.0:\n            target_vy = -2.0\n        elif y - ground_y > 1.5:\n            target_vy = -1.0\n        elif y - ground_y > 0.80:\n            target_vy = -0.6\n        elif y - ground_y > 0.24:\n            target_vy = -0.4\n        else:\n            target_vy = agent[\"terminal_target_vy\"]\n\n        queued_vertical_acceleration = (\n            agent[\"last_thrust\"] * math.cos(angle) / 50.0 - 10.0\n        )\n        predicted_vy = vy + queued_vertical_acceleration * delay_t\n        agent[\"vertical_integral\"] += (target_vy - predicted_vy) * dt\n        agent[\"vertical_integral\"] = max(-0.25, min(0.25, agent[\"vertical_integral\"]))\n        if y - ground_y <= 0.24:\n            agent[\"vertical_integral\"] = 0.0\n        vertical_acceleration = (\n            5.0 * (target_vy - predicted_vy)\n            + 1.2 * agent[\"vertical_integral\"]\n        )\n\n        predicted_x = x + vx * delay_t\n        horizontal_error = target_x - predicted_x\n        agent[\"horizontal_integral\"] += horizontal_error * dt\n        agent[\"horizontal_integral\"] = max(-0.8, min(0.8, agent[\"horizontal_integral\"]))\n        horizontal_acceleration = (\n            2.0 * horizontal_error\n            + 4.0 * (target_vx - vx)\n            + 0.35 * agent[\"horizontal_integral\"]\n        )\n        if y - ground_y < 1.0:\n            low_tilt = agent[\"low_altitude_tilt\"]\n            target_angle = max(-low_tilt, min(low_tilt, target_angle))\n            angle_kp, angle_kd = 100.0, 40.0\n        else:\n            angle_kp, angle_kd = 100.0, 24.0\n\n    target_angle = max(\n        -max_tilt, min(max_tilt, -math.atan2(horizontal_acceleration, 10.0))\n    )\n    torque = angle_kp * (target_angle - angle) - angle_kd * omega\n    torque = max(-120.0, min(120.0, torque))\n\n    thrust = 50.0 * (10.0 + vertical_acceleration)\n    thrust /= max(0.85, math.cos(angle))\n    thrust = max(0.0, min(600.0, thrust))\n    agent[\"last_thrust\"] = thrust\n    sandbox.apply_thrust(thrust, torque)\n\ndef build_agent(sandbox):\n    return _build_precision_agent(sandbox, -0.30, 0.17)\n\ndef agent_action(sandbox, agent, step_count):\n    _precision_lander_action(sandbox, agent, step_count)",
+      "code_sha256": "06bd7c29d5eb81dc4bcb4442f102d692fe2794ddd2b853be69dda61ac4789eed",
+      "constraints": {
+        "count": 0,
+        "violated": false,
+        "violations": []
+      },
+      "generation": {
+        "latency_seconds": 341.38574417866766,
+        "model": "Qwen3-32B",
+        "token_usage": {
+          "completion_tokens": 8166,
+          "prompt_tokens": 10016,
+          "total_tokens": 18182
+        }
+      },
+      "outcome": {
+        "category": "runtime_error",
+        "error": "Code name error: local variable 'angle_kp' referenced before assignment",
+        "error_message": "local variable 'angle_kp' referenced before assignment",
+        "error_stage": "code_execution",
+        "error_type": "name_error"
+      },
+      "phase": "revision",
+      "physics": {},
+      "score": 0.0,
+      "step_count": null,
+      "success": false,
+      "timestamp": 1785745652.0871596,
+      "verification_seconds": 0.04254206828773022
+    },
+    {
+      "artifacts": [],
+      "attempt": 13,
+      "code": "import math\n\n_DT = 1.0 / 60.0\n_LANDER_MASS = 50.0\n_MAX_TORQUE = 120.0\n\n\ndef _platform_kinematics(t):\n    base = 17.0\n    amp = 1.8\n    per = 6.0\n    w = 2.0 * math.pi / per\n    plat_x = base + amp * math.sin(w * t)\n    plat_vx = amp * w * math.cos(w * t)\n    return plat_x, plat_vx\n\n\ndef _corridor_target_altitude(yt, yb, clearance_obstacle=0.5, clearance_ceiling=0.5):\n    y_lo = yt + clearance_obstacle\n    y_hi = yb - clearance_ceiling\n    if y_hi <= y_lo:\n        return 0.5 * (yt + yb)\n    inner = y_hi - y_lo\n    y_pref = y_lo + 0.35 * inner\n    return max(y_lo, min(y_pref, y_hi))\n\n\ndef _build_precision_agent(sandbox, terminal_target_vy, low_altitude_tilt):\n    return {\n        \"body\": sandbox.get_lander_body(),\n        \"phase\": \"approach_corridor\",\n        \"vertical_integral\": 0.0,\n        \"horizontal_integral\": 0.0,\n        \"last_thrust\": 500.0,\n        \"terminal_target_vy\": terminal_target_vy,\n        \"low_altitude_tilt\": low_altitude_tilt,\n    }\n\n\ndef _precision_lander_action(sandbox, agent, step_count):\n    body = agent[\"body\"]\n    dt = 1.0 / 60.0\n    x, y = sandbox.get_lander_position()\n    vx = float(body.linearVelocity.x)\n    vy = float(body.linearVelocity.y)\n    angle = sandbox.get_lander_angle()\n    omega = sandbox.get_lander_angular_velocity()\n    delay_steps = sandbox.get_thrust_delay_steps()\n    delay_t = delay_steps * dt\n    ground_y = sandbox.get_ground_y_top()\n    half_width, half_height = sandbox.get_lander_size()\n\n    # Compute all four corners with rotation\n    local_corners = [\n        (-half_width, -half_height),\n        (half_width, -half_height),\n        (-half_width, half_height),\n        (half_width, half_height),\n    ]\n    world_corners = []\n    for lx, ly in local_corners:\n        cos_a = math.cos(angle)\n        sin_a = math.sin(angle)\n        cx = x + cos_a * lx - sin_a * ly\n        cy = y + sin_a * lx + cos_a * ly\n        world_corners.append((cx, cy))\n\n    # No-fly zone check\n    for cx, cy in world_corners:\n        if 10.5 <= cx <= 13.5:\n            if cy < 6.0 or cy > 7.0:\n                sandbox.apply_thrust(0, 0)\n                return\n\n    # Phase transitions\n    if agent[\"phase\"] == \"approach_corridor\":\n        if x >= 9.0 - half_width:\n            agent[\"phase\"] = \"transit\"\n    elif agent[\"phase\"] == \"transit\":\n        if x >= 13.5 + half_width:\n            agent[\"phase\"] = \"rendezvous\"\n\n    if agent[\"phase\"] == \"approach_corridor\":\n        target_x = 9.0 - half_width\n        target_vx = 1.2\n        target_y = _corridor_target_altitude(6.0, 7.0)\n        target_vy = 0.0\n        vertical_acceleration = 3.0 * (target_y - y) + 2.0 * (target_vy - vy)\n        horizontal_acceleration = 0.8 * (target_x - x) + 0.4 * (target_vx - vx)\n        max_tilt = 0.10\n        angle_kp, angle_kd = 100.0, 24.0\n\n    elif agent[\"phase\"] == \"transit\":\n        target_y = _corridor_target_altitude(6.0, 7.0)\n        target_vy = 0.0\n        target_x = 13.5 + half_width\n        target_vx = 1.0\n        vertical_acceleration = 3.0 * (target_y - y) + 2.0 * (target_vy - vy)\n        horizontal_acceleration = 0.8 * (target_x - x) + 0.4 * (target_vx - vx)\n        max_tilt = 0.10\n        angle_kp, angle_kd = 100.0, 24.0\n\n    else:  # rendezvous\n        command_time = (step_count + delay_steps) * dt + 0.30\n        platform_omega = 2.0 * math.pi / 6.0\n        target_x = 17.0 + 1.8 * math.sin(platform_omega * command_time)\n        target_vx = 1.8 * platform_omega * math.cos(platform_omega * command_time)\n\n        if y - ground_y > 6.0:\n            target_vy = -3.0\n        elif y - ground_y > 3.0:\n            target_vy = -2.0\n        elif y - ground_y > 1.5:\n            target_vy = -1.0\n        elif y - ground_y > 0.80:\n            target_vy = -0.6\n        elif y - ground_y > 0.24:\n            target_vy = -0.4\n        else:\n            target_vy = agent[\"terminal_target_vy\"]\n\n        queued_vertical_acceleration = (\n            agent[\"last_thrust\"] * math.cos(angle) / 50.0 - 10.0\n        )\n        predicted_vy = vy + queued_vertical_acceleration * delay_t\n        agent[\"vertical_integral\"] += (target_vy - predicted_vy) * dt\n        agent[\"vertical_integral\"] = max(-0.25, min(0.25, agent[\"vertical_integral\"]))\n        if y - ground_y <= 0.24:\n            agent[\"vertical_integral\"] = 0.0\n        vertical_acceleration = (\n            5.0 * (target_vy - predicted_vy)\n            + 1.2 * agent[\"vertical_integral\"]\n        )\n\n        predicted_x = x + vx * delay_t\n        horizontal_error = target_x - predicted_x\n        agent[\"horizontal_integral\"] += horizontal_error * dt\n        agent[\"horizontal_integral\"] = max(-0.8, min(0.8, agent[\"horizontal_integral\"]))\n        horizontal_acceleration = (\n            2.0 * horizontal_error\n            + 4.0 * (target_vx - vx)\n            + 0.35 * agent[\"horizontal_integral\"]\n        )\n        if y - ground_y < 1.0:\n            low_tilt = agent[\"low_altitude_tilt\"]\n            target_angle = max(-low_tilt, min(low_tilt, target_angle))\n            angle_kp, angle_kd = 100.0, 40.0\n        else:\n            angle_kp, angle_kd = 100.0, 24.0\n\n    target_angle = max(\n        -max_tilt, min(max_tilt, -math.atan2(horizontal_acceleration, 10.0))\n    )\n    torque = angle_kp * (target_angle - angle) - angle_kd * omega\n    torque = max(-120.0, min(120.0, torque))\n\n    thrust = 50.0 * (10.0 + vertical_acceleration)\n    thrust /= max(0.85, math.cos(angle))\n    thrust = max(0.0, min(600.0, thrust))\n    agent[\"last_thrust\"] = thrust\n    sandbox.apply_thrust(thrust, torque)\n\n\ndef build_agent(sandbox):\n    return _build_precision_agent(sandbox, -0.30, 0.17)\n\n\ndef agent_action(sandbox, agent, step_count):\n    _precision_lander_action(sandbox, agent, step_count)",
+      "code_sha256": "6250d854a396e16189a84576c283c8619175aca5839459dee1e1477605c7f1c0",
+      "constraints": {
+        "count": 0,
+        "violated": false,
+        "violations": []
+      },
+      "generation": {
+        "latency_seconds": 353.0060676559806,
+        "model": "Qwen3-32B",
+        "token_usage": {
+          "completion_tokens": 7529,
+          "prompt_tokens": 9500,
+          "total_tokens": 17029
+        }
+      },
+      "outcome": {
+        "category": "simulation_failure",
+        "failure_reason": "Forbidden corridor lower-bound violation"
+      },
+      "phase": "revision",
+      "physics": {},
+      "score": 0.0,
+      "step_count": 174,
+      "success": false,
+      "timestamp": 1785746005.1475928,
+      "verification_seconds": 0.053831445053219795
+    },
+    {
+      "artifacts": [],
+      "attempt": 14,
+      "code": "import math\n\n_DT = 1.0 / 60.0\n_LANDER_MASS = 50.0\n_MAX_TORQUE = 120.0\n\ndef _platform_kinematics(t):\n    base = 17.0\n    amp = 1.8\n    per = 6.0\n    w = 2.0 * math.pi / per\n    plat_x = base + amp * math.sin(w * t)\n    plat_vx = amp * w * math.cos(w * t)\n    return plat_x, plat_vx\n\ndef _corridor_target_altitude(yt, yb, clearance_obstacle=0.3, clearance_ceiling=0.3):\n    y_lo = yt + clearance_obstacle\n    y_hi = yb - clearance_ceiling\n    if y_hi <= y_lo:\n        return 0.5 * (yt + yb)\n    return (y_lo + y_hi) / 2  # Center of allowed range\n\ndef _build_precision_agent(sandbox, terminal_target_vy, low_altitude_tilt):\n    return {\n        \"body\": sandbox.get_lander_body(),\n        \"phase\": \"approach_corridor\",\n        \"vertical_integral\": 0.0,\n        \"horizontal_integral\": 0.0,\n        \"last_thrust\": 500.0,\n        \"terminal_target_vy\": terminal_target_vy,\n        \"low_altitude_tilt\": low_altitude_tilt,\n    }\n\ndef _precision_lander_action(sandbox, agent, step_count):\n    body = agent[\"body\"]\n    dt = 1.0 / 60.0\n    x, y = sandbox.get_lander_position()\n    vx = float(body.linearVelocity.x)\n    vy = float(body.linearVelocity.y)\n    angle = sandbox.get_lander_angle()\n    omega = sandbox.get_lander_angular_velocity()\n    delay_steps = sandbox.get_thrust_delay_steps()\n    delay_t = delay_steps * dt\n    ground_y = sandbox.get_ground_y_top()\n    half_width, half_height = sandbox.get_lander_size()\n\n    # Phase transitions\n    if agent[\"phase\"] == \"approach_corridor\":\n        if x >= 10.0 - half_width:\n            agent[\"phase\"] = \"transit\"\n    elif agent[\"phase\"] == \"transit\":\n        if x >= 13.5 + half_width:\n            agent[\"phase\"] = \"rendezvous\"\n\n    if agent[\"phase\"] == \"approach_corridor\":\n        target_x = 10.0 - half_width\n        target_vx = 1.5\n        target_y = _corridor_target_altitude(6.0, 7.0)\n        target_vy = 0.0\n        vertical_acceleration = 4.0 * (target_y - y) + 2.0 * (target_vy - vy)\n        horizontal_acceleration = 0.9 * (target_x - x) + 0.4 * (target_vx - vx)\n        max_tilt = 0.15\n        angle_kp, angle_kd = 100.0, 24.0\n\n    elif agent[\"phase\"] == \"transit\":\n        target_y = _corridor_target_altitude(6.0, 7.0)\n        target_vy = 0.0\n        target_x = 13.5 + half_width\n        target_vx = 2.0\n        vertical_acceleration = 5.0 * (target_y - y) + 3.0 * (target_vy - vy)\n        horizontal_acceleration = 1.0 * (target_x - x) + 0.5 * (target_vx - vx)\n        max_tilt = 0.1  # Strict tilt limit to maintain vertical thrust\n        angle_kp, angle_kd = 100.0, 24.0\n\n    else:  # rendezvous\n        command_time = (step_count + delay_steps) * dt + 0.30\n        platform_omega = 2.0 * math.pi / 6.0\n        target_x = 17.0 + 1.8 * math.sin(platform_omega * command_time)\n        target_vx = 1.8 * platform_omega * math.cos(platform_omega * command_time)\n\n        if y - ground_y > 6.0:\n            target_vy = -3.0\n        elif y - ground_y > 3.0:\n            target_vy = -2.0\n        elif y - ground_y > 1.5:\n            target_vy = -1.0\n        elif y - ground_y > 0.80:\n            target_vy = -0.6\n        elif y - ground_y > 0.24:\n            target_vy = -0.4\n        else:\n            target_vy = agent[\"terminal_target_vy\"]\n\n        queued_vertical_acceleration = (\n            agent[\"last_thrust\"] * math.cos(angle) / 50.0 - 10.0\n        )\n        predicted_vy = vy + queued_vertical_acceleration * delay_t\n        agent[\"vertical_integral\"] += (target_vy - predicted_vy) * dt\n        agent[\"vertical_integral\"] = max(-0.25, min(0.25, agent[\"vertical_integral\"]))\n        if y - ground_y <= 0.24:\n            agent[\"vertical_integral\"] = 0.0\n        vertical_acceleration = (\n            5.0 * (target_vy - predicted_vy)\n            + 1.2 * agent[\"vertical_integral\"]\n        )\n\n        predicted_x = x + vx * delay_t\n        horizontal_error = target_x - predicted_x\n        agent[\"horizontal_integral\"] += horizontal_error * dt\n        agent[\"horizontal_integral\"] = max(-0.8, min(0.8, agent[\"horizontal_integral\"]))\n        horizontal_acceleration = (\n            2.0 * horizontal_error\n            + 4.0 * (target_vx - vx)\n            + 0.35 * agent[\"horizontal_integral\"]\n        )\n        if y - ground_y < 1.0:\n            low_tilt = agent[\"low_altitude_tilt\"]\n            angle_kp, angle_kd = 100.0, 40.0\n\n    target_angle = max(\n        -max_tilt, min(max_tilt, -math.atan2(horizontal_acceleration, 10.0))\n    )\n    torque = angle_kp * (target_angle - angle) - angle_kd * omega\n    torque = max(-120.0, min(120.0, torque))\n\n    thrust = 50.0 * (10.0 + vertical_acceleration)\n    thrust /= max(0.85, math.cos(angle))\n    thrust = max(0.0, min(600.0, thrust))\n    agent[\"last_thrust\"] = thrust\n    sandbox.apply_thrust(thrust, torque)\n\ndef build_agent(sandbox):\n    return _build_precision_agent(sandbox, -0.30, 0.17)\n\ndef agent_action(sandbox, agent, step_count):\n    _precision_lander_action(sandbox, agent, step_count)",
+      "code_sha256": "aef79a9328165504b2d79194959426908ba79bffe61e8f6631b3851920123069",
+      "constraints": {
+        "count": 0,
+        "violated": false,
+        "violations": []
+      },
+      "generation": {
+        "latency_seconds": 312.8345311433077,
+        "model": "Qwen3-32B",
+        "token_usage": {
+          "completion_tokens": 7394,
+          "prompt_tokens": 9955,
+          "total_tokens": 17349
+        }
+      },
+      "outcome": {
+        "category": "simulation_failure",
+        "failure_reason": "Touchdown vertical speed |vy|=2.93 m/s exceeds limit 2.00 m/s | Hull ground-contact edge x=[9.56, 10.36] not fully inside landing zone [15.90, 19.90] at touchdown"
+      },
+      "phase": "revision",
+      "physics": {},
+      "score": 0.0,
+      "step_count": 150,
+      "success": false,
+      "timestamp": 1785746318.1018732,
+      "verification_seconds": 0.11927371472120285
+    },
+    {
+      "artifacts": [],
+      "attempt": 15,
+      "code": "import math\n\n_DT = 1.0 / 60.0\n_LANDER_MASS = 50.0\n_MAX_TORQUE = 120.0\n\ndef _platform_kinematics(t):\n    base = 17.0\n    amp = 1.8\n    per = 6.0\n    w = 2.0 * math.pi / per\n    plat_x = base + amp * math.sin(w * t)\n    plat_vx = amp * w * math.cos(w * t)\n    return plat_x, plat_vx\n\ndef _corridor_target_altitude(yt, yb, clearance_obstacle=0.4, clearance_ceiling=0.4):\n    y_lo = yt + clearance_obstacle\n    y_hi = yb - clearance_ceiling\n    if y_hi <= y_lo:\n        return 0.5 * (yt + yb)\n    return (y_lo + y_hi) / 2  # Center of allowed range\n\ndef _build_precision_agent(sandbox, terminal_target_vy, low_altitude_tilt):\n    return {\n        \"body\": sandbox.get_lander_body(),\n        \"phase\": \"approach_corridor\",\n        \"vertical_integral\": 0.0,\n        \"horizontal_integral\": 0.0,\n        \"last_thrust\": 500.0,\n        \"terminal_target_vy\": terminal_target_vy,\n        \"low_altitude_tilt\": low_altitude_tilt,\n    }\n\ndef _precision_lander_action(sandbox, agent, step_count):\n    body = agent[\"body\"]\n    dt = 1.0 / 60.0\n    x, y = sandbox.get_lander_position()\n    vx = float(body.linearVelocity.x)\n    vy = float(body.linearVelocity.y)\n    angle = sandbox.get_lander_angle()\n    omega = sandbox.get_lander_angular_velocity()\n    delay_steps = sandbox.get_thrust_delay_steps()\n    delay_t = delay_steps * dt\n    ground_y = sandbox.get_ground_y_top()\n    half_width, half_height = sandbox.get_lander_size()\n\n    # Phase transitions\n    if agent[\"phase\"] == \"approach_corridor\":\n        if x >= 8.0:\n            agent[\"phase\"] = \"transit\"\n    elif agent[\"phase\"] == \"transit\":\n        if x >= 13.5 + half_width:\n            agent[\"phase\"] = \"rendezvous\"\n\n    if agent[\"phase\"] == \"approach_corridor\":\n        target_x = 8.0\n        target_vx = 1.0\n        target_y = _corridor_target_altitude(6.0, 7.0)\n        target_vy = 0.0\n        vertical_acceleration = 6.0 * (target_y - y) + 3.0 * (target_vy - vy)\n        horizontal_acceleration = 0.5 * (target_x - x) + 0.2 * (target_vx - vx)\n        max_tilt = 0.1  # Reduced tilt to avoid ceiling violation\n        angle_kp, angle_kd = 100.0, 24.0\n\n    elif agent[\"phase\"] == \"transit\":\n        target_y = _corridor_target_altitude(6.0, 7.0)\n        target_vy = 0.0\n        target_x = 13.5 + half_width\n        target_vx = 1.5\n        vertical_acceleration = 5.0 * (target_y - y) + 2.5 * (target_vy - vy)\n        horizontal_acceleration = 0.7 * (target_x - x) + 0.3 * (target_vx - vx)\n        max_tilt = 0.08  # Strict tilt to stay upright\n        angle_kp, angle_kd = 100.0, 24.0\n\n    else:  # rendezvous\n        command_time = (step_count + delay_steps) * dt + 0.30\n        platform_omega = 2.0 * math.pi / 6.0\n        target_x = 17.0 + 1.8 * math.sin(platform_omega * command_time)\n        target_vx = 1.8 * platform_omega * math.cos(platform_omega * command_time)\n\n        if y - ground_y > 6.0:\n            target_vy = -3.0\n        elif y - ground_y > 3.0:\n            target_vy = -2.0\n        elif y - ground_y > 1.5:\n            target_vy = -1.0\n        elif y - ground_y > 0.80:\n            target_vy = -0.6\n        elif y - ground_y > 0.24:\n            target_vy = -0.4\n        else:\n            target_vy = agent[\"terminal_target_vy\"]\n\n        queued_vertical_acceleration = (\n            agent[\"last_thrust\"] * math.cos(angle) / 50.0 - 10.0\n        )\n        predicted_vy = vy + queued_vertical_acceleration * delay_t\n        agent[\"vertical_integral\"] += (target_vy - predicted_vy) * dt\n        agent[\"vertical_integral\"] = max(-0.25, min(0.25, agent[\"vertical_integral\"]))\n        if y - ground_y <= 0.24:\n            agent[\"vertical_integral\"] = 0.0\n        vertical_acceleration = (\n            5.0 * (target_vy - predicted_vy)\n            + 1.2 * agent[\"vertical_integral\"]\n        )\n\n        predicted_x = x + vx * delay_t\n        horizontal_error = target_x - predicted_x\n        agent[\"horizontal_integral\"] += horizontal_error * dt\n        agent[\"horizontal_integral\"] = max(-0.8, min(0.8, agent[\"horizontal_integral\"]))\n        horizontal_acceleration = (\n            2.0 * horizontal_error\n            + 4.0 * (target_vx - vx)\n            + 0.35 * agent[\"horizontal_integral\"]\n        )\n        if y - ground_y < 1.0:\n            low_tilt = agent[\"low_altitude_tilt\"]\n            angle_kp, angle_kd = 100.0, 40.0\n\n    target_angle = max(\n        -max_tilt, min(max_tilt, -math.atan2(horizontal_acceleration, 10.0))\n    )\n    torque = angle_kp * (target_angle - angle) - angle_kd * omega\n    torque = max(-120.0, min(120.0, torque))\n\n    thrust = 50.0 * (10.0 + vertical_acceleration)\n    thrust /= max(0.85, math.cos(angle))\n    thrust = max(0.0, min(600.0, thrust))\n    agent[\"last_thrust\"] = thrust\n    sandbox.apply_thrust(thrust, torque)\n\ndef build_agent(sandbox):\n    return _build_precision_agent(sandbox, -0.30, 0.10)\n\ndef agent_action(sandbox, agent, step_count):\n    _precision_lander_action(sandbox, agent, step_count)",
+      "code_sha256": "d009dc31d30e12b13fef199b26fa3c3d1c5c17ae16c3f291165ea63621568c2b",
+      "constraints": {
+        "count": 0,
+        "violated": false,
+        "violations": []
+      },
+      "generation": {
+        "latency_seconds": 446.8762957714498,
+        "model": "Qwen3-32B",
+        "token_usage": {
+          "completion_tokens": 10237,
+          "prompt_tokens": 9906,
+          "total_tokens": 20143
+        }
+      },
+      "outcome": {
+        "category": "simulation_failure",
+        "failure_reason": "Touchdown vertical speed |vy|=3.26 m/s exceeds limit 2.00 m/s | Hull ground-contact edge x=[7.95, 8.75] not fully inside landing zone [16.08, 20.08] at touchdown"
+      },
+      "phase": "revision",
+      "physics": {},
+      "score": 0.0,
+      "step_count": 143,
+      "success": false,
+      "timestamp": 1785746765.0318103,
+      "verification_seconds": 0.05316420458257198
+    },
+    {
+      "artifacts": [],
+      "attempt": 16,
+      "code": "import math\n\n_DT = 1.0 / 60.0\n_LANDER_MASS = 50.0\n_MAX_TORQUE = 120.0\n\n\ndef _platform_kinematics(t):\n    base = 17.0\n    amp = 1.8\n    per = 6.0\n    w = 2.0 * math.pi / per\n    plat_x = base + amp * math.sin(w * t)\n    plat_vx = amp * w * math.cos(w * t)\n    return plat_x, plat_vx\n\n\ndef _corridor_target_altitude(yt, yb, clearance_obstacle=0.3, clearance_ceiling=0.3):\n    y_lo = yt + clearance_obstacle\n    y_hi = yb - clearance_ceiling\n    if y_hi <= y_lo:\n        return 0.5 * (yt + yb)\n    return (y_lo + y_hi) / 2  # Center of allowed range\n\n\ndef _build_precision_agent(sandbox, terminal_target_vy, low_altitude_tilt):\n    return {\n        \"body\": sandbox.get_lander_body(),\n        \"phase\": \"approach_corridor\",\n        \"vertical_integral\": 0.0,\n        \"horizontal_integral\": 0.0,\n        \"last_thrust\": 500.0,\n        \"terminal_target_vy\": terminal_target_vy,\n        \"low_altitude_tilt\": low_altitude_tilt,\n    }\n\n\ndef _precision_lander_action(sandbox, agent, step_count):\n    body = agent[\"body\"]\n    dt = 1.0 / 60.0\n    x, y = sandbox.get_lander_position()\n    vx = float(body.linearVelocity.x)\n    vy = float(body.linearVelocity.y)\n    angle = sandbox.get_lander_angle()\n    omega = sandbox.get_lander_angular_velocity()\n    delay_steps = sandbox.get_thrust_delay_steps()\n    delay_t = delay_steps * dt\n    ground_y = sandbox.get_ground_y_top()\n    half_width, half_height = sandbox.get_lander_size()\n\n    # Phase transitions\n    if agent[\"phase\"] == \"approach_corridor\":\n        if x >= 10.5 - half_width:\n            agent[\"phase\"] = \"transit\"\n    elif agent[\"phase\"] == \"transit\":\n        if x >= 13.5 + half_width:\n            agent[\"phase\"] = \"rendezvous\"\n    elif agent[\"phase\"] == \"rendezvous\":\n        if y - ground_y <= 0.02:\n            return  # Already landed\n\n    if agent[\"phase\"] == \"approach_corridor\":\n        # Move towards entry point of the no-fly zone\n        target_x = 10.5 - half_width\n        target_vx = 1.5\n        target_y = 10.0  # Sufficient clearance before corridor\n        target_vy = 0.0\n        vertical_acceleration = 4.0 * (target_y - y) + 3.0 * (target_vy - vy)\n        horizontal_acceleration = 0.5 * (target_x - x) + 0.2 * (target_vx - vx)\n        max_tilt = 0.1\n        angle_kp, angle_kd = 100.0, 24.0\n\n    elif agent[\"phase\"] == \"transit\":\n        # Pass through the corridor with tight vertical control\n        target_y = _corridor_target_altitude(6.0, 7.0)\n        target_vy = 0.0\n        target_x = 13.5 + half_width\n        target_vx = 1.0\n        vertical_acceleration = 3.0 * (target_y - y) + 2.0 * (target_vy - vy)\n        horizontal_acceleration = 0.3 * (target_x - x) + 0.1 * (target_vx - vx)\n        max_tilt = 0.1\n        angle_kp, angle_kd = 100.0, 24.0\n\n    else:  # rendezvous\n        command_time = (step_count + delay_steps) * dt\n        platform_omega = 2.0 * math.pi / 6.0\n        plat_x, plat_vx = _platform_kinematics(command_time)\n        target_x = plat_x\n        target_vx = plat_vx\n\n        # Vertical descent control\n        if y - ground_y > 6.0:\n            target_vy = -2.5\n        elif y - ground_y > 3.0:\n            target_vy = -1.8\n        elif y - ground_y > 1.5:\n            target_vy = -1.0\n        elif y - ground_y > 0.80:\n            target_vy = -0.6\n        elif y - ground_y > 0.24:\n            target_vy = -0.3\n        else:\n            target_vy = agent[\"terminal_target_vy\"]\n\n        # Predict future velocity with delay\n        queued_vertical_acceleration = (\n            agent[\"last_thrust\"] * math.cos(angle) / _LANDER_MASS - 10.0\n        )\n        predicted_vy = vy + queued_vertical_acceleration * delay_t\n        agent[\"vertical_integral\"] += (target_vy - predicted_vy) * dt\n        agent[\"vertical_integral\"] = max(-0.2, min(0.2, agent[\"vertical_integral\"]))\n        if y - ground_y <= 0.24:\n            agent[\"vertical_integral\"] = 0.0\n        vertical_acceleration = (\n            4.0 * (target_vy - predicted_vy)\n            + 0.8 * agent[\"vertical_integral\"]\n        )\n\n        # Horizontal control\n        predicted_x = x + vx * delay_t\n        horizontal_error = target_x - predicted_x\n        agent[\"horizontal_integral\"] += horizontal_error * dt\n        agent[\"horizontal_integral\"] = max(-0.8, min(0.8, agent[\"horizontal_integral\"]))\n        horizontal_acceleration = (\n            1.5 * horizontal_error\n            + 3.5 * (target_vx - vx)\n            + 0.2 * agent[\"horizontal_integral\"]\n        )\n\n        max_tilt = agent[\"low_altitude_tilt\"]\n        angle_kp, angle_kd = 100.0, 40.0\n\n    # Compute angle target and torque\n    target_angle = max(\n        -max_tilt, min(max_tilt, -math.atan2(horizontal_acceleration, 10.0))\n    )\n    torque = angle_kp * (target_angle - angle) - angle_kd * omega\n    torque = max(-120.0, min(120.0, torque))\n\n    # Compute thrust\n    thrust = 50.0 * (10.0 + vertical_acceleration)\n    thrust /= max(0.85, math.cos(angle))\n    thrust = max(0.0, min(600.0, thrust))\n    agent[\"last_thrust\"] = thrust\n    sandbox.apply_thrust(thrust, torque)\n\n\ndef build_agent(sandbox):\n    return _build_precision_agent(sandbox, -0.20, 0.10)\n\n\ndef agent_action(sandbox, agent, step_count):\n    _precision_lander_action(sandbox, agent, step_count)",
+      "code_sha256": "31e8d439ceb6ce2ff25ff468e8f2b5e18d15afa217a76e35aa37fb7b8ade8aa5",
+      "constraints": {
+        "count": 0,
+        "violated": false,
+        "violations": []
+      },
+      "generation": {
+        "latency_seconds": 155.885783450678,
+        "model": "Qwen3-32B",
+        "token_usage": {
+          "completion_tokens": 3619,
+          "prompt_tokens": 9897,
+          "total_tokens": 13516
+        }
+      },
+      "outcome": {
+        "category": "simulation_failure",
+        "failure_reason": "Forbidden corridor upper-bound violation"
+      },
+      "phase": "revision",
+      "physics": {},
+      "score": 0.0,
+      "step_count": 161,
+      "success": false,
+      "timestamp": 1785746920.9712434,
+      "verification_seconds": 0.05311281979084015
+    },
+    {
+      "artifacts": [],
+      "attempt": 17,
+      "code": "import math\n\n_DT = 1.0 / 60.0\n_LANDER_MASS = 50.0\n_MAX_TORQUE = 120.0\n\n\ndef _platform_kinematics(t):\n    base = 17.0\n    amp = 1.8\n    per = 6.0\n    w = 2.0 * math.pi / per\n    plat_x = base + amp * math.sin(w * t)\n    plat_vx = amp * w * math.cos(w * t)\n    return plat_x, plat_vx\n\n\ndef _corridor_target_altitude(yt, yb, clearance_obstacle=0.2, clearance_ceiling=0.2):\n    y_lo = yt + clearance_obstacle\n    y_hi = yb - clearance_ceiling\n    if y_hi <= y_lo:\n        return 0.5 * (yt + yb)\n    return (y_lo + y_hi) / 2  # Center of allowed range\n\n\ndef _build_precision_agent(sandbox, terminal_target_vy, low_altitude_tilt):\n    return {\n        \"body\": sandbox.get_lander_body(),\n        \"phase\": \"approach_corridor\",\n        \"vertical_integral\": 0.0,\n        \"horizontal_integral\": 0.0,\n        \"last_thrust\": 500.0,\n        \"terminal_target_vy\": terminal_target_vy,\n        \"low_altitude_tilt\": low_altitude_tilt,\n    }\n\n\ndef _precision_lander_action(sandbox, agent, step_count):\n    body = agent[\"body\"]\n    dt = 1.0 / 60.0\n    x, y = sandbox.get_lander_position()\n    vx = float(body.linearVelocity.x)\n    vy = float(body.linearVelocity.y)\n    angle = sandbox.get_lander_angle()\n    omega = sandbox.get_lander_angular_velocity()\n    delay_steps = sandbox.get_thrust_delay_steps()\n    delay_t = delay_steps * dt\n    ground_y = sandbox.get_ground_y_top()\n    half_width, half_height = sandbox.get_lander_size()\n    clearance = y - ground_y - half_height\n\n    # Phase transitions\n    if agent[\"phase\"] == \"approach_corridor\":\n        if x >= 10.5 - half_width:\n            agent[\"phase\"] = \"transit\"\n    elif agent[\"phase\"] == \"transit\":\n        if x >= 13.5 + half_width:\n            agent[\"phase\"] = \"rendezvous\"\n    elif agent[\"phase\"] == \"rendezvous\":\n        if y - ground_y <= 0.02:\n            return  # Already landed\n\n    if agent[\"phase\"] == \"approach_corridor\":\n        # Move towards entry point of the no-fly zone\n        target_x = 10.5 - half_width\n        target_vx = 1.0\n        target_y = 8.0  # Lower target altitude\n        target_vy = 0.0\n        vertical_acceleration = 2.0 * (target_y - y) + 1.5 * (target_vy - vy)\n        horizontal_acceleration = 0.3 * (target_x - x) + 0.1 * (target_vx - vx)\n        max_tilt = 0.1\n        angle_kp, angle_kd = 100.0, 24.0\n\n    elif agent[\"phase\"] == \"transit\":\n        # Pass through the corridor with tight vertical control\n        target_y = _corridor_target_altitude(6.0, 7.0)\n        target_vy = 0.0\n        target_x = 13.5 + half_width\n        target_vx = 1.0\n        vertical_acceleration = 2.0 * (target_y - y) + 1.0 * (target_vy - vy)\n        horizontal_acceleration = 0.3 * (target_x - x) + 0.1 * (target_vx - vx)\n        max_tilt = 0.1\n        angle_kp, angle_kd = 100.0, 24.0\n\n    else:  # rendezvous\n        command_time = (step_count + delay_steps) * dt\n        platform_omega = 2.0 * math.pi / 6.0\n        plat_x, plat_vx = _platform_kinematics(command_time)\n        target_x = plat_x\n        target_vx = plat_vx\n\n        # Vertical descent control\n        if y - ground_y > 6.0:\n            target_vy = -2.5\n        elif y - ground_y > 3.0:\n            target_vy = -1.8\n        elif y - ground_y > 1.5:\n            target_vy = -1.0\n        elif y - ground_y > 0.80:\n            target_vy = -0.6\n        elif y - ground_y > 0.24:\n            target_vy = -0.3\n        else:\n            target_vy = agent[\"terminal_target_vy\"]\n\n        # Predict future velocity with delay\n        queued_vertical_acceleration = (\n            agent[\"last_thrust\"] * math.cos(angle) / _LANDER_MASS - 10.0\n        )\n        predicted_vy = vy + queued_vertical_acceleration * delay_t\n        agent[\"vertical_integral\"] += (target_vy - predicted_vy) * dt\n        agent[\"vertical_integral\"] = max(-0.2, min(0.2, agent[\"vertical_integral\"]))\n        if y - ground_y <= 0.24:\n            agent[\"vertical_integral\"] = 0.0\n        vertical_acceleration = (\n            4.0 * (target_vy - predicted_vy)\n            + 0.8 * agent[\"vertical_integral\"]\n        )\n\n        # Horizontal control\n        predicted_x = x + vx * delay_t\n        horizontal_error = target_x - predicted_x\n        agent[\"horizontal_integral\"] += horizontal_error * dt\n        agent[\"horizontal_integral\"] = max(-0.8, min(0.8, agent[\"horizontal_integral\"]))\n        horizontal_acceleration = (\n            1.5 * horizontal_error\n            + 3.5 * (target_vx - vx)\n            + 0.2 * agent[\"horizontal_integral\"]\n        )\n\n        max_tilt = agent[\"low_altitude_tilt\"]\n        angle_kp, angle_kd = 100.0, 40.0\n\n    # Compute angle target and torque\n    target_angle = max(\n        -max_tilt, min(max_tilt, -math.atan2(horizontal_acceleration, 10.0))\n    )\n    torque = angle_kp * (target_angle - angle) - angle_kd * omega\n    torque = max(-120.0, min(120.0, torque))\n\n    # Compute thrust\n    thrust = 30.0 * (10.0 + vertical_acceleration)\n    thrust /= max(0.85, math.cos(angle))\n    thrust = max(0.0, min(600.0, thrust))\n    agent[\"last_thrust\"] = thrust\n    sandbox.apply_thrust(thrust, torque)\n\n\ndef build_agent(sandbox):\n    return _build_precision_agent(sandbox, -0.20, 0.10)\n\n\ndef agent_action(sandbox, agent, step_count):\n    _precision_lander_action(sandbox, agent, step_count)",
+      "code_sha256": "9892cf39c15127784a36998724dc3e9e4c9c91837aa038b9be205844612289c3",
+      "constraints": {
+        "count": 0,
+        "violated": false,
+        "violations": []
+      },
+      "generation": {
+        "latency_seconds": 331.38947790674865,
+        "model": "Qwen3-32B",
+        "token_usage": {
+          "completion_tokens": 7112,
+          "prompt_tokens": 9753,
+          "total_tokens": 16865
+        }
+      },
+      "outcome": {
+        "category": "simulation_failure",
+        "failure_reason": "Forbidden corridor lower-bound violation"
+      },
+      "phase": "revision",
+      "physics": {},
+      "score": 0.0,
+      "step_count": 178,
+      "success": false,
+      "timestamp": 1785747252.4143515,
+      "verification_seconds": 0.053109368309378624
+    },
+    {
+      "artifacts": [],
+      "attempt": 18,
+      "code": "import math\n\n_DT = 1.0 / 60.0\n_LANDER_MASS = 50.0\n_MAX_TORQUE = 120.0\n\ndef _platform_kinematics(t):\n    base = 17.0\n    amp = 1.8\n    per = 6.0\n    w = 2.0 * math.pi / per\n    plat_x = base + amp * math.sin(w * t)\n    plat_vx = amp * w * math.cos(w * t)\n    return plat_x, plat_vx\n\ndef _corridor_target_altitude(yt, yb, clearance_obstacle=0.3, clearance_ceiling=0.3):\n    y_lo = yt + clearance_obstacle\n    y_hi = yb - clearance_ceiling\n    if y_hi <= y_lo:\n        return (yt + yb) / 2  # Fallback to midpoint\n    return (y_lo + y_hi) / 2  # Center of safe vertical range\n\ndef _build_precision_agent(sandbox, terminal_target_vy, low_altitude_tilt):\n    return {\n        \"body\": sandbox.get_lander_body(),\n        \"phase\": \"approach_corridor\",\n        \"vertical_integral\": 0.0,\n        \"horizontal_integral\": 0.0,\n        \"last_thrust\": 500.0,\n        \"terminal_target_vy\": terminal_target_vy,\n        \"low_altitude_tilt\": low_altitude_tilt,\n    }\n\ndef _precision_lander_action(sandbox, agent, step_count):\n    body = agent[\"body\"]\n    dt = 1.0 / 60.0\n    x, y = sandbox.get_lander_position()\n    vx = float(body.linearVelocity.x)\n    vy = float(body.linearVelocity.y)\n    angle = sandbox.get_lander_angle()\n    omega = sandbox.get_lander_angular_velocity()\n    delay_steps = sandbox.get_thrust_delay_steps()\n    delay_t = delay_steps * dt\n    ground_y = sandbox.get_ground_y_top()\n    half_width, half_height = sandbox.get_lander_size()\n    clearance = y - ground_y - half_height\n\n    # Phase transitions\n    if agent[\"phase\"] == \"approach_corridor\":\n        if x >= 10.5 + half_width:  # Enter corridor when left edge reaches 10.5m\n            agent[\"phase\"] = \"transit\"\n    elif agent[\"phase\"] == \"transit\":\n        if x >= 13.5 - half_width:  # Exit corridor when right edge reaches 13.5m\n            agent[\"phase\"] = \"rendezvous\"\n    elif agent[\"phase\"] == \"rendezvous\":\n        if y - ground_y <= 0.02:\n            return  # Already landed\n\n    if agent[\"phase\"] == \"approach_corridor\":\n        # Move toward corridor entry\n        target_x = 10.5 + half_width\n        target_vx = 1.0\n        target_y = 8.0\n        target_vy = 0.0\n        vertical_acceleration = 2.0 * (target_y - y) + 1.5 * (target_vy - vy)\n        horizontal_acceleration = 0.3 * (target_x - x) + 0.1 * (target_vx - vx)\n        max_tilt = 0.1\n        angle_kp, angle_kd = 100.0, 24.0\n\n    elif agent[\"phase\"] == \"transit\":\n        # Pass through corridor with tight vertical control\n        target_y = _corridor_target_altitude(6.0, 7.0)\n        target_vy = 0.0\n        target_x = 13.5 - half_width  # Corrected to exit corridor at 13.1m\n        target_vx = 1.0\n        vertical_acceleration = 4.0 * (target_y - y) + 2.0 * (target_vy - vy)\n        horizontal_acceleration = 0.5 * (target_x - x) + 0.2 * (target_vx - vx)\n        max_tilt = 0.1\n        angle_kp, angle_kd = 100.0, 24.0\n\n    else:  # rendezvous\n        command_time = (step_count + delay_steps) * dt\n        plat_x, plat_vx = _platform_kinematics(command_time)\n        target_x = plat_x\n        target_vx = plat_vx\n\n        if y - ground_y > 6.0:\n            target_vy = -2.5\n        elif y - ground_y > 3.0:\n            target_vy = -1.8\n        elif y - ground_y > 1.5:\n            target_vy = -1.0\n        elif y - ground_y > 0.80:\n            target_vy = -0.6\n        elif y - ground_y > 0.24:\n            target_vy = -0.3\n        else:\n            target_vy = agent[\"terminal_target_vy\"]\n\n        queued_vertical_acceleration = (\n            agent[\"last_thrust\"] * math.cos(angle) / _LANDER_MASS - 10.0\n        )\n        predicted_vy = vy + queued_vertical_acceleration * delay_t\n        agent[\"vertical_integral\"] += (target_vy - predicted_vy) * dt\n        agent[\"vertical_integral\"] = max(-0.2, min(0.2, agent[\"vertical_integral\"]))\n        if y - ground_y <= 0.24:\n            agent[\"vertical_integral\"] = 0.0\n        vertical_acceleration = (\n            4.0 * (target_vy - predicted_vy)\n            + 0.8 * agent[\"vertical_integral\"]\n        )\n\n        predicted_x = x + vx * delay_t\n        horizontal_error = target_x - predicted_x\n        agent[\"horizontal_integral\"] += horizontal_error * dt\n        agent[\"horizontal_integral\"] = max(-0.8, min(0.8, agent[\"horizontal_integral\"]))\n        horizontal_acceleration = (\n            1.5 * horizontal_error\n            + 3.5 * (target_vx - vx)\n            + 0.2 * agent[\"horizontal_integral\"]\n        )\n        max_tilt = agent[\"low_altitude_tilt\"]\n        angle_kp, angle_kd = 100.0, 40.0\n\n    # Compute angle and torque\n    target_angle = max(\n        -max_tilt, min(max_tilt, -math.atan2(horizontal_acceleration, 10.0))\n    )\n    torque = angle_kp * (target_angle - angle) - angle_kd * omega\n    torque = max(-120.0, min(120.0, torque))\n\n    # Compute thrust\n    thrust = 50.0 * (10.0 + vertical_acceleration)\n    thrust /= max(0.85, math.cos(angle))\n    thrust = max(0.0, min(600.0, thrust))\n    agent[\"last_thrust\"] = thrust\n    sandbox.apply_thrust(thrust, torque)\n\ndef build_agent(sandbox):\n    return _build_precision_agent(sandbox, -0.20, 0.10)\n\ndef agent_action(sandbox, agent, step_count):\n    _precision_lander_action(sandbox, agent, step_count)",
+      "code_sha256": "72de98e9eeea9605ec69a7f5c036c6a4d1ac31d9add2e8c7edc639800af17bc6",
+      "constraints": {
+        "count": 0,
+        "violated": false,
+        "violations": []
+      },
+      "generation": {
+        "latency_seconds": 246.87234633788466,
+        "model": "Qwen3-32B",
+        "token_usage": {
+          "completion_tokens": 6017,
+          "prompt_tokens": 9767,
+          "total_tokens": 15784
+        }
+      },
+      "outcome": {
+        "category": "simulation_failure",
+        "failure_reason": "Forbidden corridor upper-bound violation"
+      },
+      "phase": "revision",
+      "physics": {},
+      "score": 0.0,
+      "step_count": 166,
+      "success": false,
+      "timestamp": 1785747499.340062,
+      "verification_seconds": 0.0528531838208437
+    },
+    {
+      "artifacts": [],
+      "attempt": 19,
+      "code": "import math\n\n_DT = 1.0 / 60.0\n\n_LANDER_MASS = 50.0\n_MAX_TORQUE = 120.0\n\ndef _platform_kinematics(t):\n    base = 17.0\n    amp = 1.8\n    per = 6.0\n    w = 2.0 * math.pi / per\n    plat_x = base + amp * math.sin(w * t)\n    plat_vx = amp * w * math.cos(w * t)\n    return plat_x, plat_vx\n\ndef _corridor_target_altitude(yt, yb, clearance_obstacle=0.3, clearance_ceiling=0.3):\n    y_lo = yt + clearance_obstacle\n    y_hi = yb - clearance_ceiling\n    if y_hi <= y_lo:\n        return (yt + yb) / 2  # Fallback to midpoint\n    return (y_lo + y_hi) / 2  # Center of safe vertical range\n\ndef _build_precision_agent(sandbox, terminal_target_vy, low_altitude_tilt):\n    return {\n        \"body\": sandbox.get_lander_body(),\n        \"phase\": \"approach_corridor\",\n        \"vertical_integral\": 0.0,\n        \"horizontal_integral\": 0.0,\n        \"last_thrust\": 500.0,\n        \"terminal_target_vy\": terminal_target_vy,\n        \"low_altitude_tilt\": low_altitude_tilt,\n    }\n\ndef _precision_lander_action(sandbox, agent, step_count):\n    body = agent[\"body\"]\n    dt = 1.0 / 60.0\n    x, y = sandbox.get_lander_position()\n    vx = float(body.linearVelocity.x)\n    vy = float(body.linearVelocity.y)\n    angle = sandbox.get_lander_angle()\n    omega = sandbox.get_lander_angular_velocity()\n    delay_steps = sandbox.get_thrust_delay_steps()\n    delay_t = delay_steps * dt\n    ground_y = sandbox.get_ground_y_top()\n    half_width, half_height = sandbox.get_lander_size()\n    clearance = y - ground_y - half_height\n\n    # Phase transitions\n    if agent[\"phase\"] == \"approach_corridor\":\n        if x >= 10.5 + half_width and y <= 6.5 + 0.5:  # Ensure safe altitude before entering\n            agent[\"phase\"] = \"transit\"\n    elif agent[\"phase\"] == \"transit\":\n        if x >= 13.5 - half_width:  # Exit corridor when right edge reaches 13.5m\n            agent[\"phase\"] = \"rendezvous\"\n    elif agent[\"phase\"] == \"rendezvous\":\n        if y - ground_y <= 0.02:\n            return  # Already landed\n\n    if agent[\"phase\"] == \"approach_corridor\":\n        # Move toward corridor with lower target_y and reduced horizontal gain\n        target_x = 10.5 + half_width\n        target_vx = 0.8\n        target_y = 6.5  # Lower than before to stay well under ceiling\n        target_vy = 0.0\n        vertical_acceleration = 4.0 * (target_y - y) + 2.0 * (target_vy - vy)\n        horizontal_acceleration = 0.1 * (target_x - x) + 0.05 * (target_vx - vx)\n        max_tilt = 0.1\n        angle_kp, angle_kd = 100.0, 24.0\n\n    elif agent[\"phase\"] == \"transit\":\n        # Pass through corridor with tight vertical control\n        target_y = _corridor_target_altitude(6.0, 7.0)\n        target_vy = 0.0\n        target_x = 13.5 - half_width\n        target_vx = 0.8\n        vertical_acceleration = 4.0 * (target_y - y) + 2.0 * (target_vy - vy)\n        horizontal_acceleration = 0.5 * (target_x - x) + 0.2 * (target_vx - vx)\n        max_tilt = 0.1\n        angle_kp, angle_kd = 100.0, 24.0\n\n    else:  # rendezvous\n        command_time = (step_count + delay_steps) * dt\n        plat_x, plat_vx = _platform_kinematics(command_time)\n        target_x = plat_x\n        target_vx = plat_vx\n\n        if y - ground_y > 6.0:\n            target_vy = -2.5\n        elif y - ground_y > 3.0:\n            target_vy = -1.8\n        elif y - ground_y > 1.5:\n            target_vy = -1.0\n        elif y - ground_y > 0.80:\n            target_vy = -0.6\n        elif y - ground_y > 0.24:\n            target_vy = -0.3\n        else:\n            target_vy = agent[\"terminal_target_vy\"]\n\n        queued_vertical_acceleration = (\n            agent[\"last_thrust\"] * math.cos(angle) / _LANDER_MASS - 10.0\n        )\n        predicted_vy = vy + queued_vertical_acceleration * delay_t\n        agent[\"vertical_integral\"] += (target_vy - predicted_vy) * dt\n        agent[\"vertical_integral\"] = max(-0.2, min(0.2, agent[\"vertical_integral\"]))\n        if y - ground_y <= 0.24:\n            agent[\"vertical_integral\"] = 0.0\n        vertical_acceleration = (\n            4.0 * (target_vy - predicted_vy)\n            + 0.8 * agent[\"vertical_integral\"]\n        )\n\n        predicted_x = x + vx * delay_t\n        horizontal_error = target_x - predicted_x\n        agent[\"horizontal_integral\"] += horizontal_error * dt\n        agent[\"horizontal_integral\"] = max(-0.8, min(0.8, agent[\"horizontal_integral\"]))\n        horizontal_acceleration = (\n            1.5 * horizontal_error\n            + 3.5 * (target_vx - vx)\n            + 0.2 * agent[\"horizontal_integral\"]\n        )\n        max_tilt = agent[\"low_altitude_tilt\"]\n        angle_kp, angle_kd = 100.0, 40.0\n\n    # Compute angle and torque\n    target_angle = max(\n        -max_tilt, min(max_tilt, -math.atan2(horizontal_acceleration, 10.0))\n    )\n    torque = angle_kp * (target_angle - angle) - angle_kd * omega\n    torque = max(-120.0, min(120.0, torque))\n\n    # Compute thrust\n    thrust = 50.0 * (10.0 + vertical_acceleration)\n    thrust /= max(0.85, math.cos(angle))\n    thrust = max(0.0, min(600.0, thrust))\n    agent[\"last_thrust\"] = thrust\n    sandbox.apply_thrust(thrust, torque)\n\ndef build_agent(sandbox):\n    return _build_precision_agent(sandbox, -0.20, 0.10)\n\ndef agent_action(sandbox, agent, step_count):\n    _precision_lander_action(sandbox, agent, step_count)",
+      "code_sha256": "2f23bae407d51c3ddbf24279bd408054c849aed85f108b7ccc7f95909f8e1f46",
+      "constraints": {
+        "count": 0,
+        "violated": false,
+        "violations": []
+      },
+      "generation": {
+        "latency_seconds": 319.2412206120789,
+        "model": "Qwen3-32B",
+        "token_usage": {
+          "completion_tokens": 7533,
+          "prompt_tokens": 9768,
+          "total_tokens": 17301
+        }
+      },
+      "outcome": {
+        "category": "simulation_failure",
+        "failure_reason": "Touchdown vertical speed |vy|=2.66 m/s exceeds limit 2.00 m/s | Hull ground-contact edge x=[7.57, 8.37] not fully inside landing zone [15.82, 19.82] at touchdown"
+      },
+      "phase": "revision",
+      "physics": {},
+      "score": 0.0,
+      "step_count": 153,
+      "success": false,
+      "timestamp": 1785747818.6370347,
+      "verification_seconds": 0.055163828656077385
+    },
+    {
+      "artifacts": [],
+      "attempt": 20,
+      "code": "import math\n\n_DT = 1.0 / 60.0\n\n_LANDER_MASS = 50.0\n_MAX_TORQUE = 120.0\n\n\ndef _platform_kinematics(t):\n    base = 17.0\n    amp = 1.8\n    per = 6.0\n    w = 2.0 * math.pi / per\n    plat_x = base + amp * math.sin(w * t)\n    plat_vx = amp * w * math.cos(w * t)\n    return plat_x, plat_vx\n\n\ndef _build_precision_agent(sandbox, terminal_target_vy, low_altitude_tilt):\n    return {\n        \"body\": sandbox.get_lander_body(),\n        \"phase\": \"approach_corridor\",\n        \"vertical_integral\": 0.0,\n        \"horizontal_integral\": 0.0,\n        \"last_thrust\": 500.0,\n        \"terminal_target_vy\": terminal_target_vy,\n        \"low_altitude_tilt\": low_altitude_tilt,\n    }\n\n\ndef _precision_lander_action(sandbox, agent, step_count):\n    body = agent[\"body\"]\n    dt = 1.0 / 60.0\n    x, y = sandbox.get_lander_position()\n    vx = float(body.linearVelocity.x)\n    vy = float(body.linearVelocity.y)\n    angle = sandbox.get_lander_angle()\n    omega = sandbox.get_lander_angular_velocity()\n    delay_steps = sandbox.get_thrust_delay_steps()\n    delay_t = delay_steps * dt\n    ground_y = sandbox.get_ground_y_top()\n    half_width, half_height = sandbox.get_lander_size()\n    clearance = y - ground_y - half_height\n\n    if agent[\"phase\"] == \"approach_corridor\":\n        target_x = 10.9  # x = 10.9 => left edge at 10.5\n        target_vx = 0.8\n        target_y = 6.5\n        target_vy = 0.0\n        vertical_acceleration = 4.0 * (target_y - y) + 2.0 * (target_vy - vy)\n        horizontal_acceleration = 1.0 * (target_x - x) + 0.5 * (target_vx - vx)\n        max_tilt = 0.1\n        angle_kp, angle_kd = 100.0, 24.0\n        if x >= target_x - 0.1:\n            agent[\"phase\"] = \"transit\"\n\n    elif agent[\"phase\"] == \"transit\":\n        target_x = 13.1  # x = 13.1 => right edge at 13.5\n        target_vx = 2.0\n        target_y = 6.5\n        target_vy = 0.0\n        vertical_acceleration = 4.0 * (target_y - y) + 2.0 * (target_vy - vy)\n        horizontal_acceleration = 2.0 * (target_x - x) + 1.0 * (target_vx - vx)\n        max_tilt = 0.1\n        angle_kp, angle_kd = 100.0, 24.0\n        if x >= target_x - 0.1:\n            agent[\"phase\"] = \"rendezvous\"\n\n    elif agent[\"phase\"] == \"rendezvous\":\n        current_time = (step_count + delay_steps) * dt\n        plat_x, plat_vx = _platform_kinematics(current_time)\n        time_to_land = (y - 1.0) / 1.5  # Estimated time to descend\n        estimated_landing_time = current_time + time_to_land\n        plat_x_at_landing, _ = _platform_kinematics(estimated_landing_time)\n        target_x = plat_x_at_landing\n        target_vx = plat_vx\n\n        if y - ground_y > 6.0:\n            target_vy = -2.5\n        elif y - ground_y > 3.0:\n            target_vy = -1.8\n        elif y - ground_y > 1.5:\n            target_vy = -1.0\n        elif y - ground_y > 0.80:\n            target_vy = -0.6\n        elif y - ground_y > 0.24:\n            target_vy = -0.3\n        else:\n            target_vy = agent[\"terminal_target_vy\"]\n\n        queued_vertical_acceleration = (\n            agent[\"last_thrust\"] * math.cos(angle) / _LANDER_MASS - 10.0\n        )\n        predicted_vy = vy + queued_vertical_acceleration * delay_t\n        agent[\"vertical_integral\"] += (target_vy - predicted_vy) * dt\n        agent[\"vertical_integral\"] = max(-0.2, min(0.2, agent[\"vertical_integral\"]))\n        if y - ground_y <= 0.24:\n            agent[\"vertical_integral\"] = 0.0\n        vertical_acceleration = (\n            4.0 * (target_vy - predicted_vy)\n            + 0.8 * agent[\"vertical_integral\"]\n        )\n\n        predicted_x = x + vx * delay_t\n        horizontal_error = target_x - predicted_x\n        agent[\"horizontal_integral\"] += horizontal_error * dt\n        agent[\"horizontal_integral\"] = max(-0.8, min(0.8, agent[\"horizontal_integral\"]))\n        horizontal_acceleration = (\n            1.5 * horizontal_error\n            + 3.5 * (target_vx - vx)\n            + 0.2 * agent[\"horizontal_integral\"]\n        )\n        max_tilt = agent[\"low_altitude_tilt\"]\n        angle_kp, angle_kd = 100.0, 40.0\n\n    else:\n        return  # Already landed\n\n    target_angle = max(\n        -max_tilt, min(max_tilt, -math.atan2(horizontal_acceleration, 10.0))\n    )\n    torque = angle_kp * (target_angle - angle) - angle_kd * omega\n    torque = max(-120.0, min(120.0, torque))\n\n    thrust = 50.0 * (10.0 + vertical_acceleration)\n    thrust /= max(0.85, math.cos(angle))\n    thrust = max(0.0, min(600.0, thrust))\n    agent[\"last_thrust\"] = thrust\n    sandbox.apply_thrust(thrust, torque)\n\n\ndef build_agent(sandbox):\n    return _build_precision_agent(sandbox, -0.20, 0.10)\n\n\ndef agent_action(sandbox, agent, step_count):\n    _precision_lander_action(sandbox, agent, step_count)",
+      "code_sha256": "377c5da1e7fac7323085062450a12014205397ba7305c0124438bf43d2bf53d1",
+      "constraints": {
+        "count": 0,
+        "violated": false,
+        "violations": []
+      },
+      "generation": {
+        "latency_seconds": 385.8538757264614,
+        "model": "Qwen3-32B",
+        "token_usage": {
+          "completion_tokens": 9354,
+          "prompt_tokens": 9956,
+          "total_tokens": 19310
+        }
+      },
+      "outcome": {
+        "category": "simulation_failure",
+        "failure_reason": "Touchdown vertical speed |vy|=2.81 m/s exceeds limit 2.00 m/s | Hull ground-contact edge x=[8.64, 9.43] not fully inside landing zone [15.87, 19.87] at touchdown"
+      },
+      "phase": "revision",
+      "physics": {},
+      "score": 0.0,
+      "step_count": 151,
+      "success": false,
+      "timestamp": 1785748204.5439634,
+      "verification_seconds": 0.0525458212941885
+    }
+  ],
+  "best_attempt": 0,
+  "best_score": 0.0,
+  "config": {
+    "attempts": 20,
+    "generation_retries": 2,
+    "headless": true,
+    "max_tokens": 65536,
+    "method_options": {},
+    "run_index": 1,
+    "save_gif": false,
+    "seed": 0,
+    "temperature": 0.7,
+    "timeout_seconds": 7200.0,
+    "top_p": 0.95
+  },
+  "environment_pair": "Initial_to_Stage-2",
+  "error_type": "exploration",
+  "finished_at": 1785748204.5440986,
+  "metadata": {
+    "auxiliary_usage": {
+      "calls": 0,
+      "failed_calls": 0,
+      "latency_seconds": 0,
+      "successful_calls": 0,
+      "token_usage": {}
+    },
+    "strategy_runtime": {
+      "auxiliary_calls": [],
+      "auxiliary_usage": {
+        "calls": 0,
+        "failed_calls": 0,
+        "latency_seconds": 0,
+        "successful_calls": 0,
+        "token_usage": {}
+      },
+      "candidate_calls": [
+        {
+          "attempt": 1,
+          "label": null,
+          "latency_seconds": 232.46760976314545,
+          "max_tokens": 65536,
+          "model": "Qwen3-32B",
+          "request_metadata": {
+            "attempt": 1,
+            "method": "vanilla",
+            "retry": 0
+          },
+          "retry": 0,
+          "seed": 1001,
+          "strategy_owned": false,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 5596,
+            "prompt_tokens": 7663,
+            "total_tokens": 13259
+          },
+          "top_p": 0.95
+        },
+        {
+          "attempt": 2,
+          "label": null,
+          "latency_seconds": 374.88207166828215,
+          "max_tokens": 65536,
+          "model": "Qwen3-32B",
+          "request_metadata": {
+            "attempt": 2,
+            "method": "vanilla",
+            "retry": 0
+          },
+          "retry": 0,
+          "seed": 1002,
+          "strategy_owned": false,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 8992,
+            "prompt_tokens": 9469,
+            "total_tokens": 18461
+          },
+          "top_p": 0.95
+        },
+        {
+          "attempt": 3,
+          "label": null,
+          "latency_seconds": 360.9394779652357,
+          "max_tokens": 65536,
+          "model": "Qwen3-32B",
+          "request_metadata": {
+            "attempt": 3,
+            "method": "vanilla",
+            "retry": 0
+          },
+          "retry": 0,
+          "seed": 1003,
+          "strategy_owned": false,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 7230,
+            "prompt_tokens": 9506,
+            "total_tokens": 16736
+          },
+          "top_p": 0.95
+        },
+        {
+          "attempt": 4,
+          "label": null,
+          "latency_seconds": 316.48328503221273,
+          "max_tokens": 65536,
+          "model": "Qwen3-32B",
+          "request_metadata": {
+            "attempt": 4,
+            "method": "vanilla",
+            "retry": 0
+          },
+          "retry": 0,
+          "seed": 1004,
+          "strategy_owned": false,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 7444,
+            "prompt_tokens": 9648,
+            "total_tokens": 17092
+          },
+          "top_p": 0.95
+        },
+        {
+          "attempt": 5,
+          "label": null,
+          "latency_seconds": 201.1409488413483,
+          "max_tokens": 65536,
+          "model": "Qwen3-32B",
+          "request_metadata": {
+            "attempt": 5,
+            "method": "vanilla",
+            "retry": 0
+          },
+          "retry": 0,
+          "seed": 1005,
+          "strategy_owned": false,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 4909,
+            "prompt_tokens": 9642,
+            "total_tokens": 14551
+          },
+          "top_p": 0.95
+        },
+        {
+          "attempt": 6,
+          "label": null,
+          "latency_seconds": 279.49326859228313,
+          "max_tokens": 65536,
+          "model": "Qwen3-32B",
+          "request_metadata": {
+            "attempt": 6,
+            "method": "vanilla",
+            "retry": 0
+          },
+          "retry": 0,
+          "seed": 1006,
+          "strategy_owned": false,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 6307,
+            "prompt_tokens": 9640,
+            "total_tokens": 15947
+          },
+          "top_p": 0.95
+        },
+        {
+          "attempt": 7,
+          "label": null,
+          "latency_seconds": 232.77621131390333,
+          "max_tokens": 65536,
+          "model": "Qwen3-32B",
+          "request_metadata": {
+            "attempt": 7,
+            "method": "vanilla",
+            "retry": 0
+          },
+          "retry": 0,
+          "seed": 1007,
+          "strategy_owned": false,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 5224,
+            "prompt_tokens": 9658,
+            "total_tokens": 14882
+          },
+          "top_p": 0.95
+        },
+        {
+          "attempt": 8,
+          "label": null,
+          "latency_seconds": 378.37859380804,
+          "max_tokens": 65536,
+          "model": "Qwen3-32B",
+          "request_metadata": {
+            "attempt": 8,
+            "method": "vanilla",
+            "retry": 0
+          },
+          "retry": 0,
+          "seed": 1008,
+          "strategy_owned": false,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 8739,
+            "prompt_tokens": 9653,
+            "total_tokens": 18392
+          },
+          "top_p": 0.95
+        },
+        {
+          "attempt": 9,
+          "label": null,
+          "latency_seconds": 131.23459848947823,
+          "max_tokens": 65536,
+          "model": "Qwen3-32B",
+          "request_metadata": {
+            "attempt": 9,
+            "method": "vanilla",
+            "retry": 0
+          },
+          "retry": 0,
+          "seed": 1009,
+          "strategy_owned": false,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 3247,
+            "prompt_tokens": 9581,
+            "total_tokens": 12828
+          },
+          "top_p": 0.95
+        },
+        {
+          "attempt": 10,
+          "label": null,
+          "latency_seconds": 200.27502675168216,
+          "max_tokens": 65536,
+          "model": "Qwen3-32B",
+          "request_metadata": {
+            "attempt": 10,
+            "method": "vanilla",
+            "retry": 0
+          },
+          "retry": 0,
+          "seed": 1010,
+          "strategy_owned": false,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 4812,
+            "prompt_tokens": 9645,
+            "total_tokens": 14457
+          },
+          "top_p": 0.95
+        },
+        {
+          "attempt": 11,
+          "label": null,
+          "latency_seconds": 460.62370208092034,
+          "max_tokens": 65536,
+          "model": "Qwen3-32B",
+          "request_metadata": {
+            "attempt": 11,
+            "method": "vanilla",
+            "retry": 0
+          },
+          "retry": 0,
+          "seed": 1011,
+          "strategy_owned": false,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 10695,
+            "prompt_tokens": 9911,
+            "total_tokens": 20606
+          },
+          "top_p": 0.95
+        },
+        {
+          "attempt": 12,
+          "label": null,
+          "latency_seconds": 341.38574417866766,
+          "max_tokens": 65536,
+          "model": "Qwen3-32B",
+          "request_metadata": {
+            "attempt": 12,
+            "method": "vanilla",
+            "retry": 0
+          },
+          "retry": 0,
+          "seed": 1012,
+          "strategy_owned": false,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 8166,
+            "prompt_tokens": 10016,
+            "total_tokens": 18182
+          },
+          "top_p": 0.95
+        },
+        {
+          "attempt": 13,
+          "label": null,
+          "latency_seconds": 353.0060676559806,
+          "max_tokens": 65536,
+          "model": "Qwen3-32B",
+          "request_metadata": {
+            "attempt": 13,
+            "method": "vanilla",
+            "retry": 0
+          },
+          "retry": 0,
+          "seed": 1013,
+          "strategy_owned": false,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 7529,
+            "prompt_tokens": 9500,
+            "total_tokens": 17029
+          },
+          "top_p": 0.95
+        },
+        {
+          "attempt": 14,
+          "label": null,
+          "latency_seconds": 312.8345311433077,
+          "max_tokens": 65536,
+          "model": "Qwen3-32B",
+          "request_metadata": {
+            "attempt": 14,
+            "method": "vanilla",
+            "retry": 0
+          },
+          "retry": 0,
+          "seed": 1014,
+          "strategy_owned": false,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 7394,
+            "prompt_tokens": 9955,
+            "total_tokens": 17349
+          },
+          "top_p": 0.95
+        },
+        {
+          "attempt": 15,
+          "label": null,
+          "latency_seconds": 446.8762957714498,
+          "max_tokens": 65536,
+          "model": "Qwen3-32B",
+          "request_metadata": {
+            "attempt": 15,
+            "method": "vanilla",
+            "retry": 0
+          },
+          "retry": 0,
+          "seed": 1015,
+          "strategy_owned": false,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 10237,
+            "prompt_tokens": 9906,
+            "total_tokens": 20143
+          },
+          "top_p": 0.95
+        },
+        {
+          "attempt": 16,
+          "label": null,
+          "latency_seconds": 155.885783450678,
+          "max_tokens": 65536,
+          "model": "Qwen3-32B",
+          "request_metadata": {
+            "attempt": 16,
+            "method": "vanilla",
+            "retry": 0
+          },
+          "retry": 0,
+          "seed": 1016,
+          "strategy_owned": false,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 3619,
+            "prompt_tokens": 9897,
+            "total_tokens": 13516
+          },
+          "top_p": 0.95
+        },
+        {
+          "attempt": 17,
+          "label": null,
+          "latency_seconds": 331.38947790674865,
+          "max_tokens": 65536,
+          "model": "Qwen3-32B",
+          "request_metadata": {
+            "attempt": 17,
+            "method": "vanilla",
+            "retry": 0
+          },
+          "retry": 0,
+          "seed": 1017,
+          "strategy_owned": false,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 7112,
+            "prompt_tokens": 9753,
+            "total_tokens": 16865
+          },
+          "top_p": 0.95
+        },
+        {
+          "attempt": 18,
+          "label": null,
+          "latency_seconds": 246.87234633788466,
+          "max_tokens": 65536,
+          "model": "Qwen3-32B",
+          "request_metadata": {
+            "attempt": 18,
+            "method": "vanilla",
+            "retry": 0
+          },
+          "retry": 0,
+          "seed": 1018,
+          "strategy_owned": false,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 6017,
+            "prompt_tokens": 9767,
+            "total_tokens": 15784
+          },
+          "top_p": 0.95
+        },
+        {
+          "attempt": 19,
+          "label": null,
+          "latency_seconds": 319.2412206120789,
+          "max_tokens": 65536,
+          "model": "Qwen3-32B",
+          "request_metadata": {
+            "attempt": 19,
+            "method": "vanilla",
+            "retry": 0
+          },
+          "retry": 0,
+          "seed": 1019,
+          "strategy_owned": false,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 7533,
+            "prompt_tokens": 9768,
+            "total_tokens": 17301
+          },
+          "top_p": 0.95
+        },
+        {
+          "attempt": 20,
+          "label": null,
+          "latency_seconds": 385.8538757264614,
+          "max_tokens": 65536,
+          "model": "Qwen3-32B",
+          "request_metadata": {
+            "attempt": 20,
+            "method": "vanilla",
+            "retry": 0
+          },
+          "retry": 0,
+          "seed": 1020,
+          "strategy_owned": false,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 9354,
+            "prompt_tokens": 9956,
+            "total_tokens": 19310
+          },
+          "top_p": 0.95
+        }
+      ],
+      "candidate_usage": {
+        "calls": 20,
+        "failed_calls": 0,
+        "latency_seconds": 6062.040137089789,
+        "successful_calls": 20,
+        "token_usage": {
+          "completion_tokens": 140156,
+          "prompt_tokens": 192534,
+          "total_tokens": 332690
+        }
+      },
+      "steps": [
+        {
+          "accepted_submissions": 1,
+          "labels": [
+            null
+          ],
+          "metadata": {},
+          "remaining_attempts": 20,
+          "requested_submissions": 1,
+          "submission_metadata": [
+            {}
+          ]
+        },
+        {
+          "accepted_submissions": 1,
+          "labels": [
+            null
+          ],
+          "metadata": {},
+          "remaining_attempts": 19,
+          "requested_submissions": 1,
+          "submission_metadata": [
+            {}
+          ]
+        },
+        {
+          "accepted_submissions": 1,
+          "labels": [
+            null
+          ],
+          "metadata": {},
+          "remaining_attempts": 18,
+          "requested_submissions": 1,
+          "submission_metadata": [
+            {}
+          ]
+        },
+        {
+          "accepted_submissions": 1,
+          "labels": [
+            null
+          ],
+          "metadata": {},
+          "remaining_attempts": 17,
+          "requested_submissions": 1,
+          "submission_metadata": [
+            {}
+          ]
+        },
+        {
+          "accepted_submissions": 1,
+          "labels": [
+            null
+          ],
+          "metadata": {},
+          "remaining_attempts": 16,
+          "requested_submissions": 1,
+          "submission_metadata": [
+            {}
+          ]
+        },
+        {
+          "accepted_submissions": 1,
+          "labels": [
+            null
+          ],
+          "metadata": {},
+          "remaining_attempts": 15,
+          "requested_submissions": 1,
+          "submission_metadata": [
+            {}
+          ]
+        },
+        {
+          "accepted_submissions": 1,
+          "labels": [
+            null
+          ],
+          "metadata": {},
+          "remaining_attempts": 14,
+          "requested_submissions": 1,
+          "submission_metadata": [
+            {}
+          ]
+        },
+        {
+          "accepted_submissions": 1,
+          "labels": [
+            null
+          ],
+          "metadata": {},
+          "remaining_attempts": 13,
+          "requested_submissions": 1,
+          "submission_metadata": [
+            {}
+          ]
+        },
+        {
+          "accepted_submissions": 1,
+          "labels": [
+            null
+          ],
+          "metadata": {},
+          "remaining_attempts": 12,
+          "requested_submissions": 1,
+          "submission_metadata": [
+            {}
+          ]
+        },
+        {
+          "accepted_submissions": 1,
+          "labels": [
+            null
+          ],
+          "metadata": {},
+          "remaining_attempts": 11,
+          "requested_submissions": 1,
+          "submission_metadata": [
+            {}
+          ]
+        },
+        {
+          "accepted_submissions": 1,
+          "labels": [
+            null
+          ],
+          "metadata": {},
+          "remaining_attempts": 10,
+          "requested_submissions": 1,
+          "submission_metadata": [
+            {}
+          ]
+        },
+        {
+          "accepted_submissions": 1,
+          "labels": [
+            null
+          ],
+          "metadata": {},
+          "remaining_attempts": 9,
+          "requested_submissions": 1,
+          "submission_metadata": [
+            {}
+          ]
+        },
+        {
+          "accepted_submissions": 1,
+          "labels": [
+            null
+          ],
+          "metadata": {},
+          "remaining_attempts": 8,
+          "requested_submissions": 1,
+          "submission_metadata": [
+            {}
+          ]
+        },
+        {
+          "accepted_submissions": 1,
+          "labels": [
+            null
+          ],
+          "metadata": {},
+          "remaining_attempts": 7,
+          "requested_submissions": 1,
+          "submission_metadata": [
+            {}
+          ]
+        },
+        {
+          "accepted_submissions": 1,
+          "labels": [
+            null
+          ],
+          "metadata": {},
+          "remaining_attempts": 6,
+          "requested_submissions": 1,
+          "submission_metadata": [
+            {}
+          ]
+        },
+        {
+          "accepted_submissions": 1,
+          "labels": [
+            null
+          ],
+          "metadata": {},
+          "remaining_attempts": 5,
+          "requested_submissions": 1,
+          "submission_metadata": [
+            {}
+          ]
+        },
+        {
+          "accepted_submissions": 1,
+          "labels": [
+            null
+          ],
+          "metadata": {},
+          "remaining_attempts": 4,
+          "requested_submissions": 1,
+          "submission_metadata": [
+            {}
+          ]
+        },
+        {
+          "accepted_submissions": 1,
+          "labels": [
+            null
+          ],
+          "metadata": {},
+          "remaining_attempts": 3,
+          "requested_submissions": 1,
+          "submission_metadata": [
+            {}
+          ]
+        },
+        {
+          "accepted_submissions": 1,
+          "labels": [
+            null
+          ],
+          "metadata": {},
+          "remaining_attempts": 2,
+          "requested_submissions": 1,
+          "submission_metadata": [
+            {}
+          ]
+        },
+        {
+          "accepted_submissions": 1,
+          "labels": [
+            null
+          ],
+          "metadata": {},
+          "remaining_attempts": 1,
+          "requested_submissions": 1,
+          "submission_metadata": [
+            {}
+          ]
+        }
+      ]
+    },
+    "strategy_snapshot": {}
+  },
+  "mode": "adaptation",
+  "model": "Qwen3-32B",
+  "provider": "vllm",
+  "revision_attempts": 20,
+  "run_index": 1,
+  "schema_version": "2.0",
+  "source_environment": "Initial",
+  "started_at": 1785742141.360684,
+  "stop_reason": "budget_exhausted",
+  "strategy": "vanilla",
+  "success": false,
+  "success_attempt": null,
+  "target_environment": "Stage-2",
+  "task_id": "C_02",
+  "task_path": "Category5_Cybernetics_Control/C_02",
+  "token_usage": {
+    "completion_tokens": 140156,
+    "prompt_tokens": 192534,
+    "total_tokens": 332690
+  },
+  "total_time_seconds": 6063.183414300904,
+  "verified_attempts": 21
+}

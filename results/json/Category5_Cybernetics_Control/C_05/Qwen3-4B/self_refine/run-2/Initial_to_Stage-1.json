@@ -1,0 +1,345 @@
+{
+  "analysis": {
+    "best_attempt_diagnostics": {
+      "constraint_violation_count": 0,
+      "failure_reason": null,
+      "joints_broken_count": 0,
+      "progress": 0.0,
+      "step_count": 1000,
+      "structure_broken": false
+    },
+    "best_code_tokens": 1322,
+    "cumulative_best_scores": [
+      {
+        "attempt": 0,
+        "best_score": 0.0
+      },
+      {
+        "attempt": 1,
+        "best_score": 0.0
+      },
+      {
+        "attempt": 2,
+        "best_score": 100.0
+      }
+    ],
+    "error_type": "success",
+    "revision_attempts": 2,
+    "success_attempt": 2,
+    "tokens": {
+      "all_calls_total": 42530,
+      "auxiliary_completion": 3863,
+      "auxiliary_prompt": 7839,
+      "auxiliary_total": 11702,
+      "completion": 10247,
+      "prompt": 20581,
+      "total": 30828
+    },
+    "trajectory_diagnostics": {
+      "code_length_trend": 0.222432,
+      "code_radicality": 0.150348,
+      "code_similarity_early": 0.849652,
+      "code_similarity_global": 0.849652,
+      "code_similarity_late": 0.849652,
+      "code_similarity_middle": 0.849652,
+      "code_similarity_recent": 0.849652,
+      "code_similarity_trend": 0.0,
+      "first_positive_index": 2,
+      "improved_late": false,
+      "persistent_constraint_violation": false,
+      "score_trend": 100.0,
+      "total_constraint_violations": 0,
+      "unique_failure_reasons": 1
+    },
+    "verified_attempts": 3
+  },
+  "attempt_budget": 20,
+  "attempts": [
+    {
+      "artifacts": [],
+      "attempt": 0,
+      "code": "import math\n\n\n_ZONE_CENTERS_FALLBACK = {\"A\": (2.0, 2.0), \"B\": (4.95, 3.2), \"C\": (8.0, 2.0)}\n\n\n_ZONE_EXTENTS_FALLBACK = {\n    \"A\": (1.5, 2.5, 1.5, 2.5),\n    \"B\": (4.25, 5.65, 2.8, 3.6),\n    \"C\": (7.5, 8.5, 1.5, 2.5),\n\n\n}\n\n\ndef _max_agent_force(sandbox):\n    del sandbox\n    return 50.0\n\n\ndef _zone_center(sandbox, name: str):\n    del sandbox\n    return _ZONE_CENTERS_FALLBACK[name]\n\n\ndef is_inside_zone(sandbox, x, y, zone_name):\n    del sandbox\n    x_min, x_max, y_min, y_max = _ZONE_EXTENTS_FALLBACK[zone_name]\n    return x_min <= x <= x_max and y_min <= y <= y_max\n\n\nHOLD_RADIUS = 0.75\n\n\nAPPROACH_RADIUS = 2.0\n\n\nGAIN_APPROACH = 6.0\n\n\nGAIN_NORMAL = 15.0\n\n\nHOLD_GAIN = 2.5\n\n\nHOLD_DAMP = 5.5\n\n\nAPPROACH_DAMP = 1.8\n\n\nRAMP_X_LO, RAMP_X_HI = 3.5, 6.0\n\n\nRAMP_Y_TARGET = 3.5\n\n\nRAMP_X_FRAC = 0.3\n\n\nRAMP_Y_GAIN = 48.0\n\n\n_step_when_a_triggered = [None]\n\n\n_step_when_a_triggered_s1 = [None]\n\n\n_step_when_b_triggered_s1 = [None]\n\n\n_step_when_a_triggered_s2 = [None]\n\n\n_step_when_a_triggered_s3 = [None]\n\n\n_step_when_a_triggered_s4 = [None]\n\n\ndef build_agent(sandbox):\n    _step_when_a_triggered[0] = None\n    return sandbox.get_agent_body()\n\n\ndef agent_action(sandbox, agent_body, step_count):\n    bx = float(sandbox.get_barrier_x())\n    mf = _max_agent_force(sandbox)\n    triggered = sandbox.get_triggered_switches()\n    if triggered and \"A\" in triggered and _step_when_a_triggered[0] is None:\n        _step_when_a_triggered[0] = step_count\n    next_switch = sandbox.get_next_required_switch()\n    cooldown = sandbox.get_cooldown_remaining()\n    if next_switch is None:\n        vx, vy = sandbox.get_agent_velocity()\n        sandbox.apply_agent_force(-HOLD_DAMP * 2.0 * vx, -HOLD_DAMP * 2.0 * vy)\n        return\n    if cooldown > 0:\n        vx, vy = sandbox.get_agent_velocity()\n        sandbox.apply_agent_force(-HOLD_DAMP * 2.0 * vx, -HOLD_DAMP * 2.0 * vy)\n        return\n    if next_switch == \"B\" and _step_when_a_triggered[0] is not None:\n        delay = int(sandbox.get_barrier_delay_steps())\n        steps_since_a = step_count - _step_when_a_triggered[0]\n        if steps_since_a < delay:\n            tx, ty = _zone_center(sandbox, \"A\")\n            x, y = sandbox.get_agent_position()\n            vx, vy = sandbox.get_agent_velocity()\n            dx, dy = tx - x, ty - y\n            sandbox.apply_agent_force(15.0 * dx - HOLD_DAMP * vx, 15.0 * dy - HOLD_DAMP * vy)\n            return\n    tx, ty = _zone_center(sandbox, next_switch)\n    x, y = sandbox.get_agent_position()\n    vx, vy = sandbox.get_agent_velocity()\n    dx = tx - x\n    dy = ty - y\n    dist = math.sqrt(dx * dx + dy * dy)\n    in_ramp = RAMP_X_LO <= x <= RAMP_X_HI\n    use_ramp = in_ramp and (next_switch == \"B\" or (next_switch == \"C\" and (x < bx or y > 2.4)))\n    on_flat_for_c = (y <= 2.6 or x >= 6.4) and not (3.5 <= x < bx)\n    if next_switch == \"C\" and x < 7.5 and dist > 0.2 and on_flat_for_c:\n        fx = mf * 0.98 if dx > 0 else -mf * 0.4\n        fy = -HOLD_DAMP * vy\n        sandbox.apply_agent_force(fx, fy)\n        return\n    if dist < 1e-6:\n        sandbox.apply_agent_force(-HOLD_DAMP * vx, -HOLD_DAMP * vy)\n        return\n    inside = is_inside_zone(sandbox, x, y, next_switch)\n    if inside or dist < HOLD_RADIUS:\n        speed = math.sqrt(vx * vx + vy * vy)\n        if next_switch == \"C\" or speed > 0.1:\n            fx = 10.0 * dx - HOLD_DAMP * 8.0 * vx\n            fy = 10.0 * dy - HOLD_DAMP * 8.0 * vy\n        else:\n            fx = HOLD_GAIN * 10.0 * dx - HOLD_DAMP * 2.0 * vx\n            fy = HOLD_GAIN * 10.0 * dy - HOLD_DAMP * 2.0 * vy\n        mag = math.sqrt(fx * fx + fy * fy)\n        if mag > mf:\n            fx, fy = fx * mf / mag, fy * mf / mag\n        sandbox.apply_agent_force(fx, fy)\n        return\n    if use_ramp:\n        if next_switch == \"B\" or (next_switch == \"C\" and x < bx):\n            y_target = 3.3\n            fx = min(mf * 0.6, 30.0) * (1.0 if dx > 0 else -0.5) - APPROACH_DAMP * 2.0 * vx\n            fy = RAMP_Y_GAIN * (y_target - y) - APPROACH_DAMP * 2.0 * vy\n        else:\n            y_target = 2.0\n            dy_local = y_target - y\n            if y > 3.0:\n                fx = mf * 0.98 if dx > 0 else -mf * 0.3\n                y_target_local = 3.9 if x < 6.4 else 2.0\n                fy = 60.0 * (y_target_local - y) - APPROACH_DAMP * vy\n            else:\n                fx = min(mf * 0.95, 47.0) * (1.0 if dx > 0 else 0.5) - APPROACH_DAMP * 2.0 * vx\n                fy = RAMP_Y_GAIN * dy_local - APPROACH_DAMP * 2.0 * vy\n        mag = math.sqrt(fx * fx + fy * fy)\n        if mag > mf:\n            fx, fy = fx * mf / mag, fy * mf / mag\n        sandbox.apply_agent_force(fx, fy)\n        return\n    if dist < APPROACH_RADIUS:\n        force_mag = min(mf * 0.5, GAIN_APPROACH * 2.0 * dist)\n        ux, uy = (dx / dist, dy / dist) if dist > 1e-6 else (0, 0)\n        fx = force_mag * ux - APPROACH_DAMP * 3.0 * vx\n        fy = force_mag * uy - APPROACH_DAMP * 3.0 * vy\n        mag = math.sqrt(fx * fx + fy * fy)\n        if mag > mf:\n            fx, fy = fx * mf / mag, fy * mf / mag\n        sandbox.apply_agent_force(fx, fy)\n        return\n    gain = GAIN_NORMAL * 0.8 if next_switch == \"B\" else GAIN_NORMAL\n    force_mag = min(mf, gain * dist)\n    ux, uy = (dx / dist, dy / dist) if dist > 1e-6 else (0, 0)\n    sandbox.apply_agent_force(force_mag * ux - 2.0 * vx, force_mag * uy - 2.0 * vy)\n",
+      "code_sha256": "7f9946d74e5af0fe1f5dd7f74f0bc99cf651a66ebb0ecdede9da30b7a9b6d403",
+      "constraints": {
+        "count": 0,
+        "violated": false,
+        "violations": []
+      },
+      "generation": null,
+      "outcome": {
+        "category": "simulation_failure",
+        "failure_reason": "Time limit reached before completing the required switch sequence"
+      },
+      "phase": "reference",
+      "physics": {},
+      "score": 0.0,
+      "step_count": 35000,
+      "success": false,
+      "timestamp": 1785765825.4767933,
+      "verification_seconds": 1.376211753115058
+    },
+    {
+      "artifacts": [],
+      "attempt": 1,
+      "code": "import math\n\n\n_ZONE_CENTERS_FALLBACK = {\"A\": (2.0, 2.0), \"B\": (4.95, 3.2), \"C\": (8.0, 2.0)}\n\n\n_ZONE_EXTENTS_FALLBACK = {\n    \"A\": (1.5, 2.5, 1.5, 2.5),\n    \"B\": (4.25, 5.65, 2.8, 3.6),\n    \"C\": (7.5, 8.5, 1.5, 2.5),\n}\n\n\ndef _max_agent_force(sandbox):\n    del sandbox\n    return 50.0\n\n\ndef _zone_center(sandbox, name: str):\n    del sandbox\n    return _ZONE_CENTERS_FALLBACK[name]\n\n\ndef is_inside_zone(sandbox, x, y, zone_name):\n    del sandbox\n    x_min, x_max, y_min, y_max = _ZONE_EXTENTS_FALLBACK[zone_name]\n    return x_min <= x <= x_max and y_min <= y <= y_max\n\n\nHOLD_RADIUS = 0.75\n\n\nAPPROACH_RADIUS = 2.0\n\n\nGAIN_APPROACH = 8.0  # Increased for faster approach\n\n\nGAIN_NORMAL = 20.0  # Increased for stronger guidance\n\n\nHOLD_GAIN = 3.0\n\n\nHOLD_DAMP = 6.5  # Increased for better zone retention\n\n\nAPPROACH_DAMP = 3.0  # Increased for stronger approach damping\n\n\nRAMP_X_LO, RAMP_X_HI = 3.5, 6.0\n\n\nRAMP_Y_TARGET = 3.5\n\n\nRAMP_X_FRAC = 0.3\n\n\nRAMP_Y_GAIN = 60.0  # Increased for stronger ramp guidance\n\n\n_step_when_a_triggered = [None]\n\n\n_step_when_a_triggered_s1 = [None]\n\n\n_step_when_b_triggered_s1 = [None]\n\n\n_step_when_a_triggered_s2 = [None]\n\n\n_step_when_a_triggered_s3 = [None]\n\n\n_step_when_a_triggered_s4 = [None]\n\n\ndef build_agent(sandbox):\n    _step_when_a_triggered[0] = None\n    return sandbox.get_agent_body()\n\n\ndef agent_action(sandbox, agent_body, step_count):\n    bx = float(sandbox.get_barrier_x())\n    mf = _max_agent_force(sandbox)\n    triggered = sandbox.get_triggered_switches()\n    if triggered and \"A\" in triggered and _step_when_a_triggered[0] is None:\n        _step_when_a_triggered[0] = step_count\n    next_switch = sandbox.get_next_required_switch()\n    cooldown = sandbox.get_cooldown_remaining()\n    if next_switch is None:\n        vx, vy = sandbox.get_agent_velocity()\n        sandbox.apply_agent_force(-HOLD_DAMP * 2.0 * vx, -HOLD_DAMP * 2.0 * vy)\n        return\n    if cooldown > 0:\n        vx, vy = sandbox.get_agent_velocity()\n        sandbox.apply_agent_force(-HOLD_DAMP * 2.0 * vx, -HOLD_DAMP * 2.0 * vy)\n        return\n    if next_switch == \"B\" and _step_when_a_triggered[0] is not None:\n        delay = int(sandbox.get_barrier_delay_steps())\n        steps_since_a = step_count - _step_when_a_triggered[0]\n        if steps_since_a < delay:\n            tx, ty = _zone_center(sandbox, \"A\")\n            x, y = sandbox.get_agent_position()\n            vx, vy = sandbox.get_agent_velocity()\n            dx, dy = tx - x, ty - y\n            sandbox.apply_agent_force(15.0 * dx - HOLD_DAMP * vx, 15.0 * dy - HOLD_DAMP * vy)\n            return\n    tx, ty = _zone_center(sandbox, next_switch)\n    x, y = sandbox.get_agent_position()\n    vx, vy = sandbox.get_agent_velocity()\n    dx = tx - x\n    dy = ty - y\n    dist = math.sqrt(dx * dx + dy * dy)\n    in_ramp = RAMP_X_LO <= x <= RAMP_X_HI\n    use_ramp = in_ramp and (next_switch == \"B\" or (next_switch == \"C\" and (x < bx or y > 2.4)))\n    on_flat_for_c = (y <= 2.6 or x >= 6.4) and not (3.5 <= x < bx)\n    if next_switch == \"C\" and x < 7.5 and dist > 0.2 and on_flat_for_c:\n        fx = mf * 0.98 if dx > 0 else -mf * 0.4\n        fy = -HOLD_DAMP * vy\n        sandbox.apply_agent_force(fx, fy)\n        return\n    if dist < 1e-6:\n        sandbox.apply_agent_force(-HOLD_DAMP * vx, -HOLD_DAMP * vy)\n        return\n    inside = is_inside_zone(sandbox, x, y, next_switch)\n    if inside or dist < HOLD_RADIUS:\n        speed = math.sqrt(vx * vx + vy * vy)\n        if next_switch == \"C\" or speed > 0.1:\n            fx = 10.0 * dx - HOLD_DAMP * 8.0 * vx\n            fy = 10.0 * dy - HOLD_DAMP * 8.0 * vy\n        else:\n            fx = HOLD_GAIN * 10.0 * dx - HOLD_DAMP * 2.0 * vx\n            fy = HOLD_GAIN * 10.0 * dy - HOLD_DAMP * 2.0 * vy\n        mag = math.sqrt(fx * fx + fy * fy)\n        if mag > mf:\n            fx, fy = fx * mf / mag, fy * mf / mag\n        sandbox.apply_agent_force(fx, fy)\n        return\n    if use_ramp:\n        if next_switch == \"B\" or (next_switch == \"C\" and x < bx):\n            y_target = 3.3\n            fx = min(mf * 0.6, 30.0) * (1.0 if dx > 0 else -0.5) - APPROACH_DAMP * 2.0 * vx\n            fy = RAMP_Y_GAIN * (y_target - y) - APPROACH_DAMP * 2.0 * vy\n        else:\n            y_target = 2.0\n            dy_local = y_target - y\n            if y > 3.0:\n                fx = mf * 0.98 if dx > 0 else -mf * 0.3\n                y_target_local = 3.9 if x < 6.4 else 2.0\n                fy = 60.0 * (y_target_local - y) - APPROACH_DAMP * vy\n            else:\n                fx = min(mf * 0.95, 47.0) * (1.0 if dx > 0 else 0.5) - APPROACH_DAMP * 2.0 * vx\n                fy = RAMP_Y_GAIN * dy_local - APPROACH_DAMP * 2.0 * vy\n        mag = math.sqrt(fx * fx + fy * fy)\n        if mag > mf:\n            fx, fy = fx * mf / mag, fy * mf / mag\n        sandbox.apply_agent_force(fx, fy)\n        return\n    if dist < APPROACH_RADIUS:\n        force_mag = min(mf * 0.5, GAIN_APPROACH * 2.0 * dist)\n        ux, uy = (dx / dist, dy / dist) if dist > 1e-6 else (0, 0)\n        fx = force_mag * ux - APPROACH_DAMP * 3.0 * vx\n        fy = force_mag * uy - APPROACH_DAMP * 3.0 * vy\n        mag = math.sqrt(fx * fx + fy * fy)\n        if mag > mf:\n            fx, fy = fx * mf / mag, fy * mf / mag\n        sandbox.apply_agent_force(fx, fy)\n        return\n    gain = GAIN_NORMAL * 0.8 if next_switch == \"B\" else GAIN_NORMAL\n    force_mag = min(mf, gain * dist)\n    ux, uy = (dx / dist, dy / dist) if dist > 1e-6 else (0, 0)\n    sandbox.apply_agent_force(force_mag * ux - 2.0 * vx, force_mag * uy - 2.0 * vy)",
+      "code_sha256": "2058bffbe279fec20b74ddd794527e9d9f83ce324e3cbeb7f0305ae07f98a0df",
+      "constraints": {
+        "count": 0,
+        "violated": false,
+        "violations": []
+      },
+      "generation": {
+        "latency_seconds": 50.56843410804868,
+        "model": "Qwen3-4B",
+        "token_usage": {
+          "completion_tokens": 4954,
+          "prompt_tokens": 9141,
+          "total_tokens": 14095
+        }
+      },
+      "outcome": {
+        "category": "simulation_failure",
+        "failure_reason": "Time limit reached before completing the required switch sequence"
+      },
+      "phase": "revision",
+      "physics": {},
+      "score": 0.0,
+      "step_count": 35000,
+      "success": false,
+      "timestamp": 1785765893.0226634,
+      "verification_seconds": 1.2149229254573584
+    },
+    {
+      "artifacts": [],
+      "attempt": 2,
+      "code": "import math\n\n\n_ZONE_CENTERS_FALLBACK = {\"A\": (2.0, 2.0), \"B\": (4.95, 3.2), \"C\": (8.0, 2.0)}\n\n\n_ZONE_EXTENTS_FALLBACK = {\n    \"A\": (1.5, 2.5, 1.5, 2.5),\n    \"B\": (4.25, 5.65, 2.8, 3.6),\n    \"C\": (7.5, 8.5, 1.5, 2.5),\n}\n\n\ndef _max_agent_force(sandbox):\n    del sandbox\n    return 50.0\n\n\ndef _zone_center(sandbox, name: str):\n    del sandbox\n    return _ZONE_CENTERS_FALLBACK[name]\n\n\ndef is_inside_zone(sandbox, x, y, zone_name):\n    del sandbox\n    x_min, x_max, y_min, y_max = _ZONE_EXTENTS_FALLBACK[zone_name]\n    return x_min <= x <= x_max and y_min <= y <= y_max\n\n\nHOLD_RADIUS = 0.75\nAPPROACH_RADIUS = 2.0\nGAIN_APPROACH = 10.0\nGAIN_NORMAL = 25.0\nHOLD_GAIN = 4.0\nHOLD_DAMP = 7.0\nAPPROACH_DAMP = 4.0\nRAMP_X_LO, RAMP_X_HI = 3.5, 6.0\nRAMP_Y_TARGET = 3.5\nRAMP_X_FRAC = 0.3\nRAMP_Y_GAIN = 70.0\n\n_step_when_a_triggered = [None]\n_step_when_b_triggered = [None]\n_step_when_c_triggered = [None]\n\n\ndef build_agent(sandbox):\n    _step_when_a_triggered[0] = None\n    _step_when_b_triggered[0] = None\n    _step_when_c_triggered[0] = None\n    return sandbox.get_agent_body()\n\n\ndef agent_action(sandbox, agent_body, step_count):\n    bx = float(sandbox.get_barrier_x())\n    mf = _max_agent_force(sandbox)\n    triggered = sandbox.get_triggered_switches()\n    if triggered and \"A\" in triggered and _step_when_a_triggered[0] is None:\n        _step_when_a_triggered[0] = step_count\n    next_switch = sandbox.get_next_required_switch()\n    cooldown = sandbox.get_cooldown_remaining()\n    if next_switch is None:\n        vx, vy = sandbox.get_agent_velocity()\n        sandbox.apply_agent_force(-HOLD_DAMP * 2.0 * vx, -HOLD_DAMP * 2.0 * vy)\n        return\n    if cooldown > 0:\n        vx, vy = sandbox.get_agent_velocity()\n        sandbox.apply_agent_force(-HOLD_DAMP * 2.0 * vx, -HOLD_DAMP * 2.0 * vy)\n        return\n\n    # A -> B logic\n    if next_switch == \"B\" and _step_when_a_triggered[0] is not None:\n        delay = int(sandbox.get_barrier_delay_steps())\n        steps_since_a = step_count - _step_when_a_triggered[0]\n        if steps_since_a < delay:\n            tx, ty = _zone_center(sandbox, \"A\")\n            x, y = sandbox.get_agent_position()\n            vx, vy = sandbox.get_agent_velocity()\n            dx, dy = tx - x, ty - y\n            sandbox.apply_agent_force(15.0 * dx - HOLD_DAMP * vx, 15.0 * dy - HOLD_DAMP * vy)\n            return\n\n    # B -> C logic\n    if next_switch == \"C\" and _step_when_b_triggered[0] is not None:\n        tx, ty = _zone_center(sandbox, \"B\")\n        x, y = sandbox.get_agent_position()\n        vx, vy = sandbox.get_agent_velocity()\n        dx, dy = tx - x, ty - y\n        dist = math.sqrt(dx * dx + dy * dy)\n        in_ramp = RAMP_X_LO <= x <= RAMP_X_HI\n        use_ramp = in_ramp and (next_switch == \"C\" or (next_switch == \"C\" and (x < bx or y > 2.4)))\n        on_flat_for_c = (y <= 2.6 or x >= 6.4) and not (3.5 <= x < bx)\n        if next_switch == \"C\" and x < 7.5 and dist > 0.2 and on_flat_for_c:\n            fx = mf * 0.98 if dx > 0 else -mf * 0.4\n            fy = -HOLD_DAMP * vy\n            sandbox.apply_agent_force(fx, fy)\n            return\n\n        # Check if on platform to meet altitude requirement\n        if 5.0 <= x <= 6.0 and 3.0 <= y <= 3.5:\n            # Stay on platform\n            sandbox.apply_agent_force(-HOLD_DAMP * vx, -HOLD_DAMP * vy)\n            return\n\n        # If not on platform, guide to platform\n        platform_center = (5.5, 3.25)\n        dx_platform, dy_platform = platform_center[0] - x, platform_center[1] - y\n        dist_platform = math.sqrt(dx_platform * dx_platform + dy_platform * dy_platform)\n        if dist_platform > 0.5:\n            fx = mf * 0.9 if dx_platform > 0 else -mf * 0.3\n            fy = RAMP_Y_GAIN * (3.25 - y) - APPROACH_DAMP * 2.0 * vy\n            sandbox.apply_agent_force(fx, fy)\n            return\n\n    # Default approach to next switch\n    tx, ty = _zone_center(sandbox, next_switch)\n    x, y = sandbox.get_agent_position()\n    vx, vy = sandbox.get_agent_velocity()\n    dx = tx - x\n    dy = ty - y\n    dist = math.sqrt(dx * dx + dy * dy)\n    in_ramp = RAMP_X_LO <= x <= RAMP_X_HI\n    use_ramp = in_ramp and (next_switch == \"B\" or (next_switch == \"C\" and (x < bx or y > 2.4)))\n\n    if dist < 1e-6:\n        sandbox.apply_agent_force(-HOLD_DAMP * vx, -HOLD_DAMP * vy)\n        return\n\n    inside = is_inside_zone(sandbox, x, y, next_switch)\n    if inside or dist < HOLD_RADIUS:\n        speed = math.sqrt(vx * vx + vy * vy)\n        if next_switch == \"C\" or speed > 0.1:\n            fx = 10.0 * dx - HOLD_DAMP * 8.0 * vx\n            fy = 10.0 * dy - HOLD_DAMP * 8.0 * vy\n        else:\n            fx = HOLD_GAIN * 10.0 * dx - HOLD_DAMP * 2.0 * vx\n            fy = HOLD_GAIN * 10.0 * dy - HOLD_DAMP * 2.0 * vy\n        mag = math.sqrt(fx * fx + fy * fy)\n        if mag > mf:\n            fx, fy = fx * mf / mag, fy * mf / mag\n        sandbox.apply_agent_force(fx, fy)\n        return\n\n    if use_ramp:\n        if next_switch == \"B\" or (next_switch == \"C\" and x < bx):\n            y_target = 3.3\n            fx = min(mf * 0.6, 30.0) * (1.0 if dx > 0 else -0.5) - APPROACH_DAMP * 2.0 * vx\n            fy = RAMP_Y_GAIN * (y_target - y) - APPROACH_DAMP * 2.0 * vy\n        else:\n            y_target = 2.0\n            dy_local = y_target - y\n            if y > 3.0:\n                fx = mf * 0.98 if dx > 0 else -mf * 0.3\n                y_target_local = 3.9 if x < 6.4 else 2.0\n                fy = 60.0 * (y_target_local - y) - APPROACH_DAMP * vy\n            else:\n                fx = min(mf * 0.95, 47.0) * (1.0 if dx > 0 else 0.5) - APPROACH_DAMP * 2.0 * vx\n                fy = RAMP_Y_GAIN * dy_local - APPROACH_DAMP * 2.0 * vy\n        mag = math.sqrt(fx * fx + fy * fy)\n        if mag > mf:\n            fx, fy = fx * mf / mag, fy * mf / mag\n        sandbox.apply_agent_force(fx, fy)\n        return\n\n    if dist < APPROACH_RADIUS:\n        force_mag = min(mf * 0.5, GAIN_APPROACH * 2.0 * dist)\n        ux, uy = (dx / dist, dy / dist) if dist > 1e-6 else (0, 0)\n        fx = force_mag * ux - APPROACH_DAMP * 3.0 * vx\n        fy = force_mag * uy - APPROACH_DAMP * 3.0 * vy\n        mag = math.sqrt(fx * fx + fy * fy)\n        if mag > mf:\n            fx, fy = fx * mf / mag, fy * mf / mag\n        sandbox.apply_agent_force(fx, fy)\n        return\n\n    gain = GAIN_NORMAL * 0.8 if next_switch == \"B\" else GAIN_NORMAL\n    force_mag = min(mf, gain * dist)\n    ux, uy = (dx / dist, dy / dist) if dist > 1e-6 else (0, 0)\n    sandbox.apply_agent_force(force_mag * ux - 2.0 * vx, force_mag * uy - 2.0 * vy)",
+      "code_sha256": "828be2f8d3fef306c33cc18ae84cae5a4e829fd41a269c21ad6770a6abd6af5e",
+      "constraints": {
+        "count": 0,
+        "violated": false,
+        "violations": []
+      },
+      "generation": {
+        "latency_seconds": 54.559607999399304,
+        "model": "Qwen3-4B",
+        "token_usage": {
+          "completion_tokens": 5293,
+          "prompt_tokens": 11440,
+          "total_tokens": 16733
+        }
+      },
+      "outcome": {
+        "category": "success"
+      },
+      "phase": "revision",
+      "physics": {},
+      "score": 100.0,
+      "step_count": 1000,
+      "success": true,
+      "timestamp": 1785765968.3983088,
+      "verification_seconds": 0.07560245878994465
+    }
+  ],
+  "best_attempt": 2,
+  "best_score": 100.0,
+  "config": {
+    "attempts": 20,
+    "generation_retries": 2,
+    "headless": true,
+    "max_tokens": 24576,
+    "method_options": {},
+    "run_index": 2,
+    "save_gif": false,
+    "seed": 0,
+    "temperature": 0.7,
+    "timeout_seconds": 7200.0,
+    "top_p": 0.95
+  },
+  "environment_pair": "Initial_to_Stage-1",
+  "error_type": "success",
+  "finished_at": 1785765968.3984346,
+  "metadata": {
+    "auxiliary_usage": {
+      "calls": 2,
+      "failed_calls": 0,
+      "latency_seconds": 36.50026728771627,
+      "successful_calls": 2,
+      "token_usage": {
+        "completion_tokens": 3863,
+        "prompt_tokens": 7839,
+        "total_tokens": 11702
+      }
+    },
+    "strategy_runtime": {
+      "auxiliary_calls": [
+        {
+          "latency_seconds": 15.760710082948208,
+          "max_tokens": 24576,
+          "model": "Qwen3-4B",
+          "purpose": "self-refine-feedback",
+          "request_metadata": {
+            "attempt": 1,
+            "method": "self_refine",
+            "purpose": "self-feedback-1"
+          },
+          "seed": 1,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 1653,
+            "prompt_tokens": 3757,
+            "total_tokens": 5410
+          },
+          "top_p": 0.95
+        },
+        {
+          "latency_seconds": 20.73955720476806,
+          "max_tokens": 24576,
+          "model": "Qwen3-4B",
+          "purpose": "self-refine-feedback",
+          "request_metadata": {
+            "attempt": 2,
+            "method": "self_refine",
+            "purpose": "self-feedback-1"
+          },
+          "seed": 2,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 2210,
+            "prompt_tokens": 4082,
+            "total_tokens": 6292
+          },
+          "top_p": 0.95
+        }
+      ],
+      "auxiliary_usage": {
+        "calls": 2,
+        "failed_calls": 0,
+        "latency_seconds": 36.50026728771627,
+        "successful_calls": 2,
+        "token_usage": {
+          "completion_tokens": 3863,
+          "prompt_tokens": 7839,
+          "total_tokens": 11702
+        }
+      },
+      "candidate_calls": [
+        {
+          "attempt": null,
+          "label": "self-refine-initial",
+          "latency_seconds": 50.56843410804868,
+          "max_tokens": 24576,
+          "model": "Qwen3-4B",
+          "request_metadata": {
+            "attempt": 1,
+            "method": "self_refine",
+            "purpose": "initial-candidate"
+          },
+          "retry": 0,
+          "seed": 1,
+          "strategy_owned": true,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 4954,
+            "prompt_tokens": 9141,
+            "total_tokens": 14095
+          },
+          "top_p": 0.95
+        },
+        {
+          "attempt": null,
+          "label": "self-refine-initial",
+          "latency_seconds": 54.559607999399304,
+          "max_tokens": 24576,
+          "model": "Qwen3-4B",
+          "request_metadata": {
+            "attempt": 2,
+            "method": "self_refine",
+            "purpose": "initial-candidate"
+          },
+          "retry": 0,
+          "seed": 2,
+          "strategy_owned": true,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 5293,
+            "prompt_tokens": 11440,
+            "total_tokens": 16733
+          },
+          "top_p": 0.95
+        }
+      ],
+      "candidate_usage": {
+        "calls": 2,
+        "failed_calls": 0,
+        "latency_seconds": 105.12804210744798,
+        "successful_calls": 2,
+        "token_usage": {
+          "completion_tokens": 10247,
+          "prompt_tokens": 20581,
+          "total_tokens": 30828
+        }
+      },
+      "steps": [
+        {
+          "accepted_submissions": 1,
+          "labels": [
+            "self-refine-final"
+          ],
+          "metadata": {
+            "inner_steps": 5
+          },
+          "remaining_attempts": 20,
+          "requested_submissions": 1,
+          "submission_metadata": [
+            {}
+          ]
+        },
+        {
+          "accepted_submissions": 1,
+          "labels": [
+            "self-refine-final"
+          ],
+          "metadata": {
+            "inner_steps": 5
+          },
+          "remaining_attempts": 19,
+          "requested_submissions": 1,
+          "submission_metadata": [
+            {}
+          ]
+        }
+      ]
+    },
+    "strategy_snapshot": {
+      "inner_steps": 5,
+      "last_feedback_available": true,
+      "self_feedback_calls": 2
+    }
+  },
+  "mode": "adaptation",
+  "model": "Qwen3-4B",
+  "provider": "vllm",
+  "revision_attempts": 2,
+  "run_index": 2,
+  "schema_version": "2.0",
+  "source_environment": "Initial",
+  "started_at": 1785765824.0449684,
+  "stop_reason": "success",
+  "strategy": "self_refine",
+  "success": true,
+  "success_attempt": 2,
+  "target_environment": "Stage-1",
+  "task_id": "C_05",
+  "task_path": "Category5_Cybernetics_Control/C_05",
+  "token_usage": {
+    "completion_tokens": 10247,
+    "prompt_tokens": 20581,
+    "total_tokens": 30828
+  },
+  "total_time_seconds": 144.35346583463252,
+  "verified_attempts": 3
+}

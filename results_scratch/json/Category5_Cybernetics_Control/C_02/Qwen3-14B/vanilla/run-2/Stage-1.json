@@ -1,0 +1,1522 @@
+{
+  "analysis": {
+    "best_attempt_diagnostics": {
+      "constraint_violation_count": 0,
+      "failure_reason": "Touchdown vertical speed |vy|=1.76 m/s exceeds limit 0.05 m/s | Hull ground-contact edge x=[8.40, 9.20] not fully inside landing zone [14.84, 18.84] at touchdown",
+      "joints_broken_count": 0,
+      "progress": 0.0,
+      "step_count": 355,
+      "structure_broken": false
+    },
+    "best_code_tokens": 367,
+    "cumulative_best_scores": [
+      {
+        "attempt": 1,
+        "best_score": 0.0
+      },
+      {
+        "attempt": 2,
+        "best_score": 0.0
+      },
+      {
+        "attempt": 3,
+        "best_score": 0.0
+      },
+      {
+        "attempt": 4,
+        "best_score": 0.0
+      },
+      {
+        "attempt": 5,
+        "best_score": 0.0
+      },
+      {
+        "attempt": 6,
+        "best_score": 0.0
+      },
+      {
+        "attempt": 7,
+        "best_score": 0.0
+      },
+      {
+        "attempt": 8,
+        "best_score": 0.0
+      },
+      {
+        "attempt": 9,
+        "best_score": 0.0
+      },
+      {
+        "attempt": 10,
+        "best_score": 0.0
+      },
+      {
+        "attempt": 11,
+        "best_score": 0.0
+      },
+      {
+        "attempt": 12,
+        "best_score": 0.0
+      },
+      {
+        "attempt": 13,
+        "best_score": 0.0
+      },
+      {
+        "attempt": 14,
+        "best_score": 0.0
+      },
+      {
+        "attempt": 15,
+        "best_score": 0.0
+      },
+      {
+        "attempt": 16,
+        "best_score": 0.0
+      },
+      {
+        "attempt": 17,
+        "best_score": 0.0
+      },
+      {
+        "attempt": 18,
+        "best_score": 0.0
+      },
+      {
+        "attempt": 19,
+        "best_score": 0.0
+      },
+      {
+        "attempt": 20,
+        "best_score": 0.0
+      }
+    ],
+    "error_type": "design_fixation",
+    "revision_attempts": 20,
+    "success_attempt": null,
+    "tokens": {
+      "all_calls_total": 257950,
+      "auxiliary_completion": 0,
+      "auxiliary_prompt": 0,
+      "auxiliary_total": 0,
+      "completion": 92574,
+      "prompt": 165376,
+      "total": 257950
+    },
+    "trajectory_diagnostics": {
+      "code_length_trend": 0.543969,
+      "code_radicality": 0.116195,
+      "code_similarity_early": 0.850746,
+      "code_similarity_global": 0.883805,
+      "code_similarity_late": 0.894899,
+      "code_similarity_middle": 0.903922,
+      "code_similarity_recent": 0.879793,
+      "code_similarity_trend": 0.044153,
+      "first_positive_index": -1,
+      "improved_late": false,
+      "persistent_constraint_violation": false,
+      "score_trend": 0.0,
+      "total_constraint_violations": 0,
+      "unique_failure_reasons": 16
+    },
+    "verified_attempts": 20
+  },
+  "attempt_budget": 20,
+  "attempts": [
+    {
+      "artifacts": [],
+      "attempt": 1,
+      "code": "import math\n\ndef build_agent(sandbox):\n    lander = sandbox.get_lander_body()\n    return lander\n\ndef agent_action(sandbox, agent_body, step_count):\n    # Get current state of the lander\n    pos = sandbox.get_lander_position()\n    x, y = pos\n    angle = sandbox.get_lander_angle()\n    omega = sandbox.get_lander_angular_velocity()\n    half_w, half_h = sandbox.get_lander_size()\n    remaining_fuel = sandbox.get_remaining_fuel()\n    delay_steps = sandbox.get_thrust_delay_steps()\n    ground_y = sandbox.get_ground_y_top()\n\n    # Calculate corners to check for no-fly zone\n    corners = []\n    for dx, dy in [(0.4, 0.3), (-0.4, 0.3), (-0.4, -0.3), (0.4, -0.3)]:\n        global_x = x + dx * math.cos(angle) - dy * math.sin(angle)\n        global_y = y + dx * math.sin(angle) + dy * math.cos(angle)\n        corners.append((global_x, global_y))\n\n    in_nfz = False\n    for (cx, cy) in corners:\n        if 10.5 <= cx <= 13.5:\n            if cy < 6.0 or cy > 20.0:\n                in_nfz = True\n                break\n\n    # Avoid no-fly zone by adjusting orientation\n    if in_nfz:\n        # Apply torque to rotate left or right to avoid corridor\n        torque = 100.0 * (1 if x < 10.5 else -1)  # Simple heuristic to move left/right\n    else:\n        torque = 0.0\n\n    # Calculate platform position\n    t = step_count * (1/60)\n    x_platform = 17.0 + 1.8 * math.sin((math.pi / 3) * t)\n    # Desired x range for landing: [x_platform - 1.6, x_platform + 1.6]\n    desired_x = x_platform\n    x_error = desired_x - x\n\n    # PID control for angle\n    desired_angle = 0.0\n    angle_error = desired_angle - angle\n    angle_derivative = -omega  # Derivative term for angular velocity\n    torque += 50.0 * angle_error + 10.0 * angle_derivative  # P + D control for angle\n\n    # Control for vertical descent\n    if y > ground_y + 0.02:  # If not yet landed\n        vel = sandbox.get_lander_body().linearVelocity\n        vy = vel.y\n\n        # Calculate desired vertical velocity\n        if y > ground_y + 0.5:\n            # Descend faster if far from ground\n            desired_vy = -1.0\n        else:\n            # Slow down for soft landing\n            desired_vy = -0.05\n\n        # PID control for vertical velocity\n        vy_error = desired_vy - vy\n        thrust = 600.0 * (vy_error / 1.0)  # Proportional control with safety factor\n\n        # Clamp thrust to ensure fuel efficiency\n        if thrust < 0:\n            thrust = 0\n        elif thrust > 600:\n            thrust = 600\n    else:\n        thrust = 0.0\n\n    # Apply thrust and torque\n    sandbox.apply_thrust(thrust, torque)",
+      "code_sha256": "0d9cd0b57942faaa2846ba863a4b17d7358b8b771973683a5491b76bb11bf6f4",
+      "constraints": {
+        "count": 0,
+        "violated": false,
+        "violations": []
+      },
+      "generation": {
+        "latency_seconds": 131.2329781409353,
+        "model": "Qwen3-14B",
+        "token_usage": {
+          "completion_tokens": 8228,
+          "prompt_tokens": 4036,
+          "total_tokens": 12264
+        }
+      },
+      "outcome": {
+        "category": "simulation_failure",
+        "failure_reason": "Touchdown vertical speed |vy|=1.76 m/s exceeds limit 0.05 m/s | Hull ground-contact edge x=[8.40, 9.20] not fully inside landing zone [14.84, 18.84] at touchdown"
+      },
+      "phase": "initial",
+      "physics": {},
+      "score": 0.0,
+      "step_count": 355,
+      "success": false,
+      "timestamp": 1785765118.1303124,
+      "verification_seconds": 0.06948758848011494
+    },
+    {
+      "artifacts": [],
+      "attempt": 2,
+      "code": "import math\n\ndef build_agent(sandbox):\n    lander = sandbox.get_lander_body()\n    return lander\n\ndef agent_action(sandbox, agent_body, step_count):\n    # Get current state\n    pos = sandbox.get_lander_position()\n    x, y = pos\n    angle = sandbox.get_lander_angle()\n    omega = sandbox.get_lander_angular_velocity()\n    vel = sandbox.get_lander_body().linearVelocity\n    vy = vel.y\n    half_w, half_h = sandbox.get_lander_size()\n    remaining_fuel = sandbox.get_remaining_fuel()\n    delay_steps = sandbox.get_thrust_delay_steps()\n    ground_y = sandbox.get_ground_y_top()\n\n    # Calculate corners for no-fly zone check\n    corners = []\n    for dx, dy in [(0.4, 0.3), (-0.4, 0.3), (-0.4, -0.3), (0.4, -0.3)]:\n        global_x = x + dx * math.cos(angle) - dy * math.sin(angle)\n        global_y = y + dx * math.sin(angle) + dy * math.cos(angle)\n        corners.append((global_x, global_y))\n\n    in_nfz = False\n    for (cx, cy) in corners:\n        if 10.5 <= cx <= 13.5:\n            if cy < 6.0 or cy > 20.0:\n                in_nfz = True\n                break\n\n    # Initialize torque\n    torque = 0.0\n\n    # Avoid no-fly zone by adjusting orientation\n    if in_nfz:\n        # Apply torque to move left or right based on x position\n        if x < 10.5:\n            torque += 100.0\n        elif x > 13.5:\n            torque -= 100.0\n\n    # Calculate platform position\n    t = step_count * (1/60)\n    x_platform = 17.0 + 1.8 * math.sin((math.pi / 3) * t)\n    desired_x = x_platform\n    x_error = desired_x - x\n\n    # Apply torque to adjust angle for horizontal movement\n    if abs(x_error) > 0.1:\n        torque_x = 50.0 * x_error\n        torque += torque_x\n\n    # PID control for angle to keep upright\n    desired_angle = 0.0\n    angle_error = desired_angle - angle\n    angle_derivative = -omega\n    torque += 50.0 * angle_error + 10.0 * angle_derivative\n\n    # Clamp torque to max/min\n    torque = max(-120, min(120, torque))\n\n    # Control for vertical descent\n    if y > ground_y + 0.02:  # If not yet landed\n        # Calculate desired vertical velocity\n        if y > ground_y + 0.5:\n            # Descend faster if far from ground\n            desired_vy = -1.0\n            gain = 1.0\n        else:\n            # Slow down for soft landing\n            desired_vy = -0.05\n            gain = 5.0  # Higher gain to decelerate more\n\n        # PID control for vertical velocity\n        vy_error = desired_vy - vy\n        thrust = 600.0 * (vy_error * gain)  # Adjust gain based on proximity to ground\n\n        # Clamp thrust to ensure fuel efficiency\n        if thrust < 0:\n            thrust = 0\n        elif thrust > 600:\n            thrust = 600\n    else:\n        thrust = 0.0\n\n    # Apply thrust and torque\n    sandbox.apply_thrust(thrust, torque)",
+      "code_sha256": "8913b083f9d91cb7d998b30970d755423c3c45ce2463f4364f3bee297e3421ec",
+      "constraints": {
+        "count": 0,
+        "violated": false,
+        "violations": []
+      },
+      "generation": {
+        "latency_seconds": 136.68225659243762,
+        "model": "Qwen3-14B",
+        "token_usage": {
+          "completion_tokens": 8661,
+          "prompt_tokens": 6777,
+          "total_tokens": 15438
+        }
+      },
+      "outcome": {
+        "category": "simulation_failure",
+        "failure_reason": "Touchdown vertical speed |vy|=3.30 m/s exceeds limit 0.05 m/s | Hull ground-contact edge x=[3.31, 4.10] not fully inside landing zone [16.51, 20.51] at touchdown | Landing angle |θ|=890.9° exceeds limit 10.0°"
+      },
+      "phase": "revision",
+      "physics": {},
+      "score": 0.0,
+      "step_count": 123,
+      "success": false,
+      "timestamp": 1785765254.852601,
+      "verification_seconds": 0.03974238969385624
+    },
+    {
+      "artifacts": [],
+      "attempt": 3,
+      "code": "import math\n\ndef build_agent(sandbox):\n    lander = sandbox.get_lander_body()\n    return lander\n\ndef agent_action(sandbox, agent_body, step_count):\n    # Get current state\n    pos = sandbox.get_lander_position()\n    x, y = pos\n    angle = sandbox.get_lander_angle()\n    omega = sandbox.get_lander_angular_velocity()\n    vel = sandbox.get_lander_body().linearVelocity\n    vy = vel.y\n    half_w, half_h = sandbox.get_lander_size()\n    remaining_fuel = sandbox.get_remaining_fuel()\n    delay_steps = sandbox.get_thrust_delay_steps()\n    ground_y = sandbox.get_ground_y_top()\n\n    # Calculate corners for no-fly zone check\n    corners = []\n    for dx, dy in [(0.4, 0.3), (-0.4, 0.3), (-0.4, -0.3), (0.4, -0.3)]:\n        global_x = x + dx * math.cos(angle) - dy * math.sin(angle)\n        global_y = y + dx * math.sin(angle) + dy * math.cos(angle)\n        corners.append((global_x, global_y))\n\n    in_nfz = False\n    for (cx, cy) in corners:\n        if 10.5 <= cx <= 13.5:\n            if cy < 6.0 or cy > 20.0:\n                in_nfz = True\n                break\n\n    # Initialize torque\n    torque = 0.0\n\n    # Avoid no-fly zone by adjusting orientation\n    if in_nfz:\n        # Apply torque to move left or right based on x position\n        if x < 10.5:\n            torque += 100.0\n        elif x > 13.5:\n            torque -= 100.0\n\n    # Calculate platform position\n    t = step_count * (1/60)\n    x_platform = 17.0 + 1.8 * math.sin((math.pi / 3) * t)\n    desired_x = x_platform\n    x_error = desired_x - x\n\n    # Apply torque to adjust horizontal position\n    if abs(x_error) > 0.1:\n        # Use proportional control for horizontal position\n        torque_x = 30.0 * x_error  # Reduced gain to prevent excessive rotation\n        torque += torque_x\n\n    # PID control for angle to keep upright\n    desired_angle = 0.0\n    angle_error = desired_angle - angle\n    angle_derivative = -omega\n    # Adjusted PID gains to prevent overshoot and oscillations\n    torque += 20.0 * angle_error + 5.0 * angle_derivative  # P + D control for angle\n\n    # Clamp torque to max/min\n    torque = max(-120, min(120, torque))\n\n    # Control for vertical descent\n    if y > ground_y + 0.02:  # If not yet landed\n        # Calculate desired vertical velocity\n        if y > ground_y + 0.5:\n            # Descend faster if far from ground\n            desired_vy = -1.0\n            gain = 1.0\n        else:\n            # Slow down for soft landing\n            desired_vy = -0.05\n            gain = 5.0  # Higher gain to decelerate more\n\n        # PID control for vertical velocity\n        vy_error = desired_vy - vy\n        # Adjust gain based on proximity to ground and fuel remaining\n        thrust_gain = 600.0 * (vy_error * gain)  # Adjust gain based on proximity to ground\n\n        # Clamp thrust to ensure fuel efficiency and prevent excessive acceleration\n        if thrust_gain < 0:\n            thrust = max(0, thrust_gain)\n        elif thrust_gain > 600:\n            thrust = 600\n        else:\n            thrust = thrust_gain\n\n        # Ensure enough fuel remains for landing\n        if remaining_fuel < 450:\n            thrust = max(0, thrust_gain * (remaining_fuel / 450))  # Scale down thrust if fuel is low\n    else:\n        thrust = 0.0\n\n    # Apply thrust and torque\n    sandbox.apply_thrust(thrust, torque)",
+      "code_sha256": "2652032210c4e321baf1fbefa7fb06a4bf4145b32270d93017fd2a5e966534dc",
+      "constraints": {
+        "count": 0,
+        "violated": false,
+        "violations": []
+      },
+      "generation": {
+        "latency_seconds": 60.31643435545266,
+        "model": "Qwen3-14B",
+        "token_usage": {
+          "completion_tokens": 3937,
+          "prompt_tokens": 8341,
+          "total_tokens": 12278
+        }
+      },
+      "outcome": {
+        "category": "simulation_failure",
+        "failure_reason": "Touchdown vertical speed |vy|=1.64 m/s exceeds limit 0.05 m/s | Hull ground-contact edge x=[5.08, 5.77] not fully inside landing zone [16.70, 20.70] at touchdown | Landing angle |θ|=1230.4° exceeds limit 10.0°"
+      },
+      "phase": "revision",
+      "physics": {},
+      "score": 0.0,
+      "step_count": 109,
+      "success": false,
+      "timestamp": 1785765315.218357,
+      "verification_seconds": 0.04900053143501282
+    },
+    {
+      "artifacts": [],
+      "attempt": 4,
+      "code": "import math\n\ndef build_agent(sandbox):\n    lander = sandbox.get_lander_body()\n    return lander\n\ndef agent_action(sandbox, agent_body, step_count):\n    # Get current state\n    pos = sandbox.get_lander_position()\n    x, y = pos\n    angle = sandbox.get_lander_angle()\n    omega = sandbox.get_lander_angular_velocity()\n    vel = sandbox.get_lander_body().linearVelocity\n    vy = vel.y\n    half_w, half_h = sandbox.get_lander_size()\n    remaining_fuel = sandbox.get_remaining_fuel()\n    delay_steps = sandbox.get_thrust_delay_steps()\n    ground_y = sandbox.get_ground_y_top()\n    \n    # Calculate corners for no-fly zone check\n    corners = []\n    for dx, dy in [(0.4, 0.3), (-0.4, 0.3), (-0.4, -0.3), (0.4, -0.3)]:\n        global_x = x + dx * math.cos(angle) - dy * math.sin(angle)\n        global_y = y + dx * math.sin(angle) + dy * math.cos(angle)\n        corners.append((global_x, global_y))\n    \n    in_nfz = False\n    for (cx, cy) in corners:\n        if 10.5 <= cx <= 13.5:\n            if cy < 6.0 or cy > 20.0:\n                in_nfz = True\n                break\n    \n    # Initialize torque and thrust\n    torque = 0.0\n    thrust = 0.0\n    \n    # Avoid no-fly zone by adjusting orientation\n    if in_nfz:\n        # Apply torque to move left or right based on position relative to the corridor\n        if x < 10.5:\n            torque += 60.0  # Increased torque to exit corridor faster\n        elif x > 13.5:\n            torque -= 60.0\n    \n    # Calculate platform position\n    t = step_count * (1/60)\n    x_platform = 17.0 + 1.8 * math.sin((math.pi / 3) * t)\n    desired_x = x_platform\n    x_error = desired_x - x\n    \n    # Apply torque to adjust horizontal position\n    if abs(x_error) > 0.5:  # Increased threshold for more robust tracking\n        # Use proportional control for horizontal position\n        torque_x = 20.0 * x_error  # Adjusted gain\n        torque += torque_x\n    \n    # PID control for angle to keep upright\n    desired_angle = 0.0\n    angle_error = desired_angle - angle\n    angle_derivative = -omega\n    # Adjusted PID gains for better stability\n    torque += 30.0 * angle_error + 8.0 * angle_derivative  # P + D control for angle\n    \n    # Clamp torque to max/min\n    torque = max(-120, min(120, torque))\n    \n    # Control for vertical descent\n    if y > ground_y + 0.02:  # If not yet landed\n        # Calculate desired vertical velocity\n        if y > ground_y + 0.5:\n            # Descend faster if far from ground\n            desired_vy = -1.0\n            gain = 0.8\n        else:\n            # Slow down for soft landing\n            desired_vy = -0.05\n            gain = 2.0  # Increased gain for better deceleration\n        \n        # PID control for vertical velocity\n        vy_error = desired_vy - vy\n        # Adjust gain based on proximity to ground and fuel remaining\n        thrust_gain = 600.0 * (vy_error * gain)  # Adjusted gain for better control\n        \n        # Clamp thrust to ensure fuel efficiency and prevent excessive acceleration\n        if thrust_gain < 0:\n            thrust = max(0, thrust_gain)\n        elif thrust_gain > 600:\n            thrust = 600\n        else:\n            thrust = thrust_gain\n        \n        # Ensure enough fuel remains for landing\n        if remaining_fuel < 450:\n            thrust = max(0, thrust_gain * (remaining_fuel / 450))  # Scale down thrust if fuel is low\n    else:\n        thrust = 0.0\n    \n    # Apply thrust and torque\n    sandbox.apply_thrust(thrust, torque)",
+      "code_sha256": "39dd9bfda043f13cbb85c630a72d0c7b7dfbe00b39e667e2dc7b47d739ee78e3",
+      "constraints": {
+        "count": 0,
+        "violated": false,
+        "violations": []
+      },
+      "generation": {
+        "latency_seconds": 61.85526745766401,
+        "model": "Qwen3-14B",
+        "token_usage": {
+          "completion_tokens": 3833,
+          "prompt_tokens": 8465,
+          "total_tokens": 12298
+        }
+      },
+      "outcome": {
+        "category": "simulation_failure",
+        "failure_reason": "Touchdown vertical speed |vy|=15.18 m/s exceeds limit 0.05 m/s | Hull ground-contact edge x=[4.25, 4.66] not fully inside landing zone [16.79, 20.79] at touchdown | Landing angle |θ|=661.4° exceeds limit 10.0°"
+      },
+      "phase": "revision",
+      "physics": {},
+      "score": 0.0,
+      "step_count": 85,
+      "success": false,
+      "timestamp": 1785765377.1223722,
+      "verification_seconds": 0.04840959049761295
+    },
+    {
+      "artifacts": [],
+      "attempt": 5,
+      "code": "import math\n\ndef build_agent(sandbox):\n    lander = sandbox.get_lander_body()\n    return lander\n\ndef agent_action(sandbox, agent_body, step_count):\n    # Get current state\n    pos = sandbox.get_lander_position()\n    x, y = pos\n    angle = sandbox.get_lander_angle()\n    omega = sandbox.get_lander_angular_velocity()\n    vel = agent_body.linearVelocity\n    vy = vel.y\n    half_w, half_h = sandbox.get_lander_size()\n    remaining_fuel = sandbox.get_remaining_fuel()\n    delay_steps = sandbox.get_thrust_delay_steps()\n    ground_y = sandbox.get_ground_y_top()\n    \n    # Calculate corners for no-fly zone check\n    corners = []\n    for dx, dy in [(0.4, 0.3), (-0.4, 0.3), (-0.4, -0.3), (0.4, -0.3)]:\n        global_x = x + dx * math.cos(angle) - dy * math.sin(angle)\n        global_y = y + dx * math.sin(angle) + dy * math.cos(angle)\n        corners.append((global_x, global_y))\n    \n    in_nfz = False\n    for (cx, cy) in corners:\n        if 10.5 <= cx <= 13.5:\n            if cy < 6.0 or cy > 20.0:\n                in_nfz = True\n                break\n    \n    # Initialize torque and thrust\n    torque = 0.0\n    thrust = 0.0\n    \n    # Avoid no-fly zone by adjusting orientation and position\n    if in_nfz:\n        # Calculate center of the no-fly zone corridor\n        corridor_center_x = (10.5 + 13.5) / 2\n        # Calculate desired position to exit corridor (to the left or right)\n        if x < corridor_center_x:\n            desired_x = corridor_center_x - 1.0  # Move left of corridor\n        else:\n            desired_x = corridor_center_x + 1.0  # Move right of corridor\n        \n        # Apply torque to adjust orientation for better horizontal control\n        if abs(angle) > 0.1:  # If not upright, apply torque to stabilize\n            torque += 50.0 * (-angle)  # P control for angle\n        \n        # Apply proportional control for horizontal position\n        x_error = desired_x - x\n        torque += 15.0 * x_error  # Adjust gain for horizontal movement\n    \n    # Calculate platform position and landing time prediction\n    t = step_count * (1/60)\n    x_platform = 17.0 + 1.8 * math.sin((math.pi / 3) * t)\n    # Predict landing time: assume it takes ~10 seconds to descend\n    predicted_landing_time = t + 10.0\n    x_platform_predicted = 17.0 + 1.8 * math.sin((math.pi / 3) * predicted_landing_time)\n    desired_x = x_platform_predicted\n    x_error = desired_x - x\n    \n    # Apply torque to adjust horizontal position\n    if abs(x_error) > 0.5:  # Increased threshold for more robust tracking\n        torque += 20.0 * x_error  # Proportional control for horizontal position\n    \n    # PID control for angle to keep upright\n    desired_angle = 0.0\n    angle_error = desired_angle - angle\n    angle_derivative = -omega\n    # Adjusted PID gains for better stability\n    torque += 30.0 * angle_error + 8.0 * angle_derivative  # P + D control for angle\n    \n    # Clamp torque to max/min\n    torque = max(-120, min(120, torque))\n    \n    # Control for vertical descent\n    if y > ground_y + 0.02:  # If not yet landed\n        # Calculate desired vertical velocity based on distance from ground\n        if y > ground_y + 1.0:\n            # Descend faster if far from ground\n            desired_vy = -1.5\n            gain = 1.0\n        elif y > ground_y + 0.5:\n            # Moderate descent\n            desired_vy = -0.5\n            gain = 1.5\n        else:\n            # Slow down for soft landing\n            desired_vy = -0.05\n            gain = 2.0\n        \n        # PID control for vertical velocity\n        vy_error = desired_vy - vy\n        # Adjust gain based on proximity to ground and fuel remaining\n        thrust_gain = 600.0 * (vy_error * gain)  # Adjusted gain for better control\n        \n        # Clamp thrust to ensure fuel efficiency and prevent excessive acceleration\n        if thrust_gain < 0:\n            thrust = max(0, thrust_gain)\n        elif thrust_gain > 600:\n            thrust = 600\n        else:\n            thrust = thrust_gain\n        \n        # Ensure enough fuel remains for landing\n        if remaining_fuel < 450:\n            thrust = max(0, thrust_gain * (remaining_fuel / 450))  # Scale down thrust if fuel is low\n    else:\n        thrust = 0.0\n    \n    # Apply thrust and torque\n    sandbox.apply_thrust(thrust, torque)",
+      "code_sha256": "38eb1e349110126a26e0a555ae316bb55eb7076f93e1c5e3a49a66bc5938cdd6",
+      "constraints": {
+        "count": 0,
+        "violated": false,
+        "violations": []
+      },
+      "generation": {
+        "latency_seconds": 40.621402624994516,
+        "model": "Qwen3-14B",
+        "token_usage": {
+          "completion_tokens": 2496,
+          "prompt_tokens": 8486,
+          "total_tokens": 10982
+        }
+      },
+      "outcome": {
+        "category": "simulation_failure",
+        "failure_reason": "Touchdown vertical speed |vy|=1.10 m/s exceeds limit 0.05 m/s | Hull ground-contact edge x=[-1.39, -0.66] not fully inside landing zone [16.23, 20.23] at touchdown | Landing angle |θ|=694.6° exceeds limit 10.0°"
+      },
+      "phase": "revision",
+      "physics": {},
+      "score": 0.0,
+      "step_count": 137,
+      "success": false,
+      "timestamp": 1785765417.7955632,
+      "verification_seconds": 0.051427211612463
+    },
+    {
+      "artifacts": [],
+      "attempt": 6,
+      "code": "import math\n\ndef build_agent(sandbox):\n    lander = sandbox.get_lander_body()\n    return lander\n\ndef agent_action(sandbox, agent_body, step_count):\n    # Get current state of the lander\n    pos = sandbox.get_lander_position()\n    x, y = pos\n    angle = sandbox.get_lander_angle()\n    omega = sandbox.get_lander_angular_velocity()\n    vel = agent_body.linearVelocity\n    vy = vel.y\n    half_w, half_h = sandbox.get_lander_size()\n    remaining_fuel = sandbox.get_remaining_fuel()\n    delay_steps = sandbox.get_thrust_delay_steps()\n    ground_y = sandbox.get_ground_y_top()\n    \n    # Calculate corners for no-fly zone check\n    corners = []\n    for dx, dy in [(0.4, 0.3), (-0.4, 0.3), (-0.4, -0.3), (0.4, -0.3)]:\n        global_x = x + dx * math.cos(angle) - dy * math.sin(angle)\n        global_y = y + dx * math.sin(angle) + dy * math.cos(angle)\n        corners.append((global_x, global_y))\n    \n    in_nfz = False\n    for (cx, cy) in corners:\n        if 10.5 <= cx <= 13.5:\n            if cy < 6.0 or cy > 20.0:\n                in_nfz = True\n                break\n    \n    # Initialize torque and thrust\n    torque = 0.0\n    thrust = 0.0\n    \n    # Avoid no-fly zone by adjusting orientation and position\n    if in_nfz:\n        # Calculate center of the no-fly zone corridor\n        corridor_center_x = (10.5 + 13.5) / 2\n        # Calculate desired position to exit corridor (to the left or right)\n        if x < corridor_center_x:\n            desired_x = corridor_center_x - 1.0  # Move left of corridor\n        else:\n            desired_x = corridor_center_x + 1.0  # Move right of corridor\n        \n        # Apply torque to stabilize angle\n        if abs(angle) > 0.1:  # If not upright, apply torque to stabilize\n            torque += 30.0 * (-angle)  # P control for angle\n        \n        # Apply proportional control for horizontal position\n        x_error = desired_x - x\n        torque += 10.0 * x_error  # Adjust gain for horizontal movement\n    \n    # Calculate platform position and landing time prediction\n    t = step_count * (1/60)\n    x_platform = 17.0 + 1.8 * math.sin((math.pi / 3) * t)\n    \n    # Estimate time to landing based on current vertical velocity and position\n    if vy < 0:\n        height_above_ground = y - ground_y\n        time_to_land = (height_above_ground - 0.02) / (-vy)\n    else:\n        # If ascending or not descending, use a safe estimate\n        time_to_land = 10.0\n    \n    predicted_landing_time = t + time_to_land\n    x_platform_predicted = 17.0 + 1.8 * math.sin((math.pi / 3) * predicted_landing_time)\n    desired_x = x_platform_predicted\n    x_error = desired_x - x\n    \n    # Apply torque to adjust horizontal position\n    if abs(x_error) > 0.5:  # Increased threshold for more robust tracking\n        torque += 15.0 * x_error  # Proportional control for horizontal position\n    \n    # PID control for angle to keep upright\n    desired_angle = 0.0\n    angle_error = desired_angle - angle\n    angle_derivative = -omega\n    # Adjusted PID gains for better stability\n    torque += 25.0 * angle_error + 5.0 * angle_derivative  # P + D control for angle\n    \n    # Clamp torque to max/min\n    torque = max(-120, min(120, torque))\n    \n    # Control for vertical descent\n    if y > ground_y + 0.02:  # If not yet landed\n        # Calculate desired vertical velocity based on distance from ground\n        if y > ground_y + 1.0:\n            # Descend faster if far from ground\n            desired_vy = -1.2\n            gain = 1.0\n        elif y > ground_y + 0.5:\n            # Moderate descent\n            desired_vy = -0.4\n            gain = 1.2\n        else:\n            # Slow down for soft landing\n            desired_vy = -0.05\n            gain = 2.0\n        \n        # PID control for vertical velocity\n        vy_error = desired_vy - vy\n        # Adjust gain based on proximity to ground and fuel remaining\n        thrust_gain = 600.0 * (vy_error * gain)  # Adjusted gain for better control\n        \n        # Clamp thrust to ensure fuel efficiency and prevent excessive acceleration\n        if thrust_gain < 0:\n            thrust = max(0, thrust_gain)\n        elif thrust_gain > 600:\n            thrust = 600\n        else:\n            thrust = thrust_gain\n        \n        # Ensure enough fuel remains for landing\n        if remaining_fuel < 450:\n            thrust = max(0, thrust_gain * (remaining_fuel / 450))  # Scale down thrust if fuel is low\n    else:\n        thrust = 0.0\n    \n    # Apply thrust and torque\n    sandbox.apply_thrust(thrust, torque)",
+      "code_sha256": "64def90077d44035133c95ec7dad698646d02d714c0fdc13ca3904cf24fc6a5b",
+      "constraints": {
+        "count": 0,
+        "violated": false,
+        "violations": []
+      },
+      "generation": {
+        "latency_seconds": 115.1273093726486,
+        "model": "Qwen3-14B",
+        "token_usage": {
+          "completion_tokens": 7227,
+          "prompt_tokens": 8692,
+          "total_tokens": 15919
+        }
+      },
+      "outcome": {
+        "category": "simulation_failure",
+        "failure_reason": "Touchdown vertical speed |vy|=0.38 m/s exceeds limit 0.05 m/s | Hull ground-contact edge x=[4.69, 5.32] not fully inside landing zone [16.54, 20.54] at touchdown | Landing angle |θ|=502.9° exceeds limit 10.0°"
+      },
+      "phase": "revision",
+      "physics": {},
+      "score": 0.0,
+      "step_count": 121,
+      "success": false,
+      "timestamp": 1785765532.9982965,
+      "verification_seconds": 0.07426753453910351
+    },
+    {
+      "artifacts": [],
+      "attempt": 7,
+      "code": "import math\n\ndef build_agent(sandbox):\n    lander = sandbox.get_lander_body()\n    return lander\n\ndef agent_action(sandbox, agent_body, step_count):\n    # Get current state of the lander\n    pos = sandbox.get_lander_position()\n    x, y = pos\n    angle = sandbox.get_lander_angle()\n    omega = sandbox.get_lander_angular_velocity()\n    vel = agent_body.linearVelocity\n    vy = vel.y\n    half_w, half_h = sandbox.get_lander_size()\n    remaining_fuel = sandbox.get_remaining_fuel()\n    delay_steps = sandbox.get_thrust_delay_steps()\n    ground_y = sandbox.get_ground_y_top()\n\n    # Calculate corners for no-fly zone check\n    corners = []\n    for dx, dy in [(0.4, 0.3), (-0.4, 0.3), (-0.4, -0.3), (0.4, -0.3)]:\n        global_x = x + dx * math.cos(angle) - dy * math.sin(angle)\n        global_y = y + dx * math.sin(angle) + dy * math.cos(angle)\n        corners.append((global_x, global_y))\n    \n    in_nfz = False\n    for (cx, cy) in corners:\n        if 10.5 <= cx <= 13.5:\n            if cy < 6.0 or cy > 20.0:\n                in_nfz = True\n                break\n\n    # Initialize torque and thrust\n    torque = 0.0\n    thrust = 0.0\n\n    # Avoid no-fly zone by adjusting orientation and position\n    if in_nfz:\n        # Calculate center of the no-fly zone corridor\n        corridor_center_x = (10.5 + 13.5) / 2\n        # Calculate desired position to exit corridor (to the left or right)\n        if x < corridor_center_x:\n            desired_x = corridor_center_x - 1.0  # Move left of corridor\n        else:\n            desired_x = corridor_center_x + 1.0  # Move right of corridor\n        \n        # Apply torque to stabilize angle\n        if abs(angle) > 0.1:  # If not upright, apply torque to stabilize\n            torque += 15.0 * (-angle)  # P control for angle\n        \n        # Apply proportional control for horizontal position\n        x_error = desired_x - x\n        torque += 5.0 * x_error  # Reduced gain to prevent clamping\n    \n    # Calculate platform position and landing time prediction\n    t = step_count * (1/60)\n    x_platform = 17.0 + 1.8 * math.sin((math.pi / 3) * t)\n\n    # Estimate time to landing with safety margin\n    if vy < 0:\n        height_above_ground = y - ground_y\n        # Add safety margin to time_to_land to account for possible acceleration\n        time_to_land = (height_above_ground - 0.02) / (-vy) * 1.2\n    else:\n        # If ascending or not descending, use a safe estimate\n        time_to_land = 15.0\n\n    predicted_landing_time = t + time_to_land\n    x_platform_predicted = 17.0 + 1.8 * math.sin((math.pi / 3) * predicted_landing_time)\n    desired_x = x_platform_predicted\n    x_error = desired_x - x\n\n    # Apply torque to adjust horizontal position with reduced gain\n    if abs(x_error) > 0.5:  # Increased threshold for more robust tracking\n        torque += 5.0 * x_error  # Reduced gain to prevent clamping\n\n    # PID control for angle to keep upright\n    desired_angle = 0.0\n    angle_error = desired_angle - angle\n    angle_derivative = -omega\n    # Adjusted PID gains for better stability and to prevent clamping\n    torque += 10.0 * angle_error + 10.0 * angle_derivative  # P + D control for angle\n\n    # Clamp torque to max/min\n    torque = max(-120, min(120, torque))\n\n    # Control for vertical descent\n    if y > ground_y + 0.02:  # If not yet landed\n        # Calculate desired vertical velocity based on distance from ground\n        if y > ground_y + 1.0:\n            # Descend faster if far from ground\n            desired_vy = -1.2\n            gain = 1.0\n        elif y > ground_y + 0.5:\n            # Moderate descent\n            desired_vy = -0.4\n            gain = 1.2\n        else:\n            # Slow down for soft landing\n            desired_vy = -0.05\n            gain = 2.0\n        \n        # PID control for vertical velocity\n        vy_error = desired_vy - vy\n        # Adjust gain based on proximity to ground and fuel remaining\n        thrust_gain = 600.0 * (vy_error * gain)  # Adjusted gain for better control\n        \n        # Clamp thrust to ensure fuel efficiency and prevent excessive acceleration\n        if thrust_gain < 0:\n            thrust = max(0, thrust_gain)\n        elif thrust_gain > 600:\n            thrust = 600\n        else:\n            thrust = thrust_gain\n        \n        # Ensure enough fuel remains for landing\n        if remaining_fuel < 450:\n            thrust = max(0, thrust_gain * (remaining_fuel / 450))  # Scale down thrust if fuel is low\n    else:\n        thrust = 0.0\n\n    # Apply thrust and torque\n    sandbox.apply_thrust(thrust, torque)",
+      "code_sha256": "b35016aa401a2c0a90a0b2ff1f31b87b0415424cf1b6d0dce6c0314f49d202b4",
+      "constraints": {
+        "count": 0,
+        "violated": false,
+        "violations": []
+      },
+      "generation": {
+        "latency_seconds": 114.23702792078257,
+        "model": "Qwen3-14B",
+        "token_usage": {
+          "completion_tokens": 7207,
+          "prompt_tokens": 8748,
+          "total_tokens": 15955
+        }
+      },
+      "outcome": {
+        "category": "simulation_failure",
+        "failure_reason": "Touchdown vertical speed |vy|=0.31 m/s exceeds limit 0.05 m/s | Hull ground-contact edge x=[1.04, 1.21] not fully inside landing zone [16.80, 20.80] at touchdown | Landing angle |θ|=257.7° exceeds limit 10.0°"
+      },
+      "phase": "revision",
+      "physics": {},
+      "score": 0.0,
+      "step_count": 92,
+      "success": false,
+      "timestamp": 1785765647.2863605,
+      "verification_seconds": 0.04999096691608429
+    },
+    {
+      "artifacts": [],
+      "attempt": 8,
+      "code": "import math\n\ndef build_agent(sandbox):\n    lander = sandbox.get_lander_body()\n    return lander\n\ndef agent_action(sandbox, agent_body, step_count):\n    # Get current state of the lander\n    pos = sandbox.get_lander_position()\n    x, y = pos\n    angle = sandbox.get_lander_angle()\n    omega = sandbox.get_lander_angular_velocity()\n    vel = agent_body.linearVelocity\n    vy = vel.y\n    half_w, half_h = sandbox.get_lander_size()\n    remaining_fuel = sandbox.get_remaining_fuel()\n    delay_steps = sandbox.get_thrust_delay_steps()\n    ground_y = sandbox.get_ground_y_top()\n    t = step_count * (1/60)  # Current simulation time in seconds\n\n    # Calculate corners for no-fly zone check\n    corners = []\n    for dx, dy in [(0.4, 0.3), (-0.4, 0.3), (-0.4, -0.3), (0.4, -0.3)]:\n        global_x = x + dx * math.cos(angle) - dy * math.sin(angle)\n        global_y = y + dx * math.sin(angle) + dy * math.cos(angle)\n        corners.append((global_x, global_y))\n    \n    in_nfz = False\n    for (cx, cy) in corners:\n        if 10.5 <= cx <= 13.5:\n            if cy < 6.0 or cy > 20.0:\n                in_nfz = True\n                break\n\n    # Avoid no-fly zone by adjusting orientation and position\n    torque = 0.0\n    if in_nfz:\n        # Calculate average x position of the lander\n        avg_x = x\n        corridor_center_x = (10.5 + 13.5) / 2\n        # Determine direction to move out of the corridor\n        if avg_x < corridor_center_x:\n            # Move right of corridor\n            desired_x = corridor_center_x + 1.0\n        else:\n            # Move left of corridor\n            desired_x = corridor_center_x - 1.0\n        \n        # Apply proportional control to horizontal position\n        x_error = desired_x - x\n        torque += 5.0 * x_error  # Adjust gain as needed\n\n        # Apply P control for angle to stabilize\n        angle_error = -angle  # Target angle is 0\n        torque += 20.0 * angle_error\n\n    # Calculate platform position and predict landing time\n    x_platform = 17.0 + 1.8 * math.sin((math.pi / 3) * t)\n    # Predict landing time based on current vertical velocity and height\n    if vy < 0 and y > ground_y + 0.02:\n        height_above_ground = y - ground_y\n        time_to_land = (height_above_ground - 0.02) / (-vy) * 1.2  # Safety margin\n    else:\n        time_to_land = 15.0  # Default estimate\n\n    predicted_landing_time = t + time_to_land\n    x_platform_predicted = 17.0 + 1.8 * math.sin((math.pi / 3) * predicted_landing_time)\n    desired_x_platform = x_platform_predicted\n\n    # PID control for horizontal position\n    x_error = desired_x_platform - x\n    if abs(x_error) > 0.5:\n        torque += 3.0 * x_error  # Adjust gain for horizontal tracking\n\n    # PID control for angle to keep upright\n    desired_angle = 0.0\n    angle_error = desired_angle - angle\n    angle_derivative = -omega  # Derivative of angle\n    torque += 15.0 * angle_error + 10.0 * angle_derivative  # P + D control\n\n    # Clamp torque to max/min\n    torque = max(-120, min(120, torque))\n\n    # Control for vertical descent\n    if y > ground_y + 0.02:  # If not yet landed\n        # Calculate desired vertical velocity based on distance from ground\n        if y > ground_y + 1.0:\n            desired_vy = -1.2\n            gain = 1.0\n        elif y > ground_y + 0.5:\n            desired_vy = -0.4\n            gain = 1.5\n        else:\n            desired_vy = -0.05\n            gain = 2.5\n        \n        # PID control for vertical velocity\n        vy_error = desired_vy - vy\n        thrust_gain = 600.0 * (vy_error * gain)\n\n        # Clamp thrust to ensure fuel efficiency and prevent excessive acceleration\n        if thrust_gain < 0:\n            thrust = max(0, thrust_gain)\n        elif thrust_gain > 600:\n            thrust = 600\n        else:\n            thrust = thrust_gain\n        \n        # Ensure enough fuel remains for landing\n        if remaining_fuel < 450:\n            thrust = max(0, thrust_gain * (remaining_fuel / 450))\n    else:\n        thrust = 0.0\n\n    # Apply thrust and torque\n    sandbox.apply_thrust(thrust, torque)",
+      "code_sha256": "6acba900d1369fd069bce20274a7c0a4e8b7206e22f20354b349e38c15e505e3",
+      "constraints": {
+        "count": 0,
+        "violated": false,
+        "violations": []
+      },
+      "generation": {
+        "latency_seconds": 61.620954832062125,
+        "model": "Qwen3-14B",
+        "token_usage": {
+          "completion_tokens": 3725,
+          "prompt_tokens": 8759,
+          "total_tokens": 12484
+        }
+      },
+      "outcome": {
+        "category": "simulation_failure",
+        "failure_reason": "Touchdown vertical speed |vy|=17.60 m/s exceeds limit 0.05 m/s | Hull ground-contact edge x=[-3.54, -2.78] not fully inside landing zone [16.73, 20.73] at touchdown | Landing angle |θ|=163.1° exceeds limit 10.0°"
+      },
+      "phase": "revision",
+      "physics": {},
+      "score": 0.0,
+      "step_count": 106,
+      "success": false,
+      "timestamp": 1785765708.958321,
+      "verification_seconds": 0.05068263225257397
+    },
+    {
+      "artifacts": [],
+      "attempt": 9,
+      "code": "import math\n\ndef build_agent(sandbox):\n    lander = sandbox.get_lander_body()\n    return lander\n\ndef agent_action(sandbox, agent_body, step_count):\n    # Get current state\n    pos = sandbox.get_lander_position()\n    x, y = pos\n    angle = sandbox.get_lander_angle()\n    omega = sandbox.get_lander_angular_velocity()\n    vel = agent_body.linearVelocity\n    vy = vel.y\n    half_w, half_h = sandbox.get_lander_size()\n    remaining_fuel = sandbox.get_remaining_fuel()\n    delay_steps = sandbox.get_thrust_delay_steps()\n    ground_y = sandbox.get_ground_y_top()\n    t = step_count * (1/60)  # Current simulation time in seconds\n\n    # Calculate corners for no-fly zone check\n    corners = []\n    for dx, dy in [(0.4, 0.3), (-0.4, 0.3), (-0.4, -0.3), (0.4, -0.3)]:\n        global_x = x + dx * math.cos(angle) - dy * math.sin(angle)\n        global_y = y + dx * math.sin(angle) + dy * math.cos(angle)\n        corners.append((global_x, global_y))\n    \n    in_nfz = False\n    for (cx, cy) in corners:\n        if 10.5 <= cx <= 13.5:\n            if cy < 6.0 or cy > 20.0:\n                in_nfz = True\n                break\n\n    # Avoid no-fly zone by adjusting orientation and position\n    torque = 0.0\n    if in_nfz:\n        # Calculate average x position of the lander\n        avg_x = x\n        corridor_center_x = (10.5 + 13.5) / 2\n        # Determine direction to move out of the corridor\n        if avg_x < corridor_center_x:\n            # Move right of corridor\n            desired_x = corridor_center_x + 1.0\n        else:\n            # Move left of corridor\n            desired_x = corridor_center_x - 1.0\n        \n        # Apply proportional control to horizontal position\n        x_error = desired_x - x\n        torque += 5.0 * x_error  # Adjust gain as needed\n\n        # Apply P control for angle to stabilize\n        angle_error = -angle  # Target angle is 0\n        torque += 20.0 * angle_error\n\n    # Predict landing time\n    if y > ground_y + 0.02 and vy < 0:\n        height_above_ground = y - ground_y\n        # Estimate time to landing with safety margin\n        time_to_land = (height_above_ground - 0.02) / (-vy) * 1.2\n    else:\n        time_to_land = 15.0  # Default estimate\n\n    predicted_landing_time = t + time_to_land\n    x_platform = 17.0 + 1.8 * math.sin((math.pi / 3) * predicted_landing_time)\n    desired_x_platform = x_platform\n\n    # PID control for horizontal position\n    x_error = desired_x_platform - x\n    if abs(x_error) > 0.5:\n        torque += 3.0 * x_error  # Adjust gain for horizontal tracking\n\n    # PID control for angle to keep upright\n    desired_angle = 0.0\n    angle_error = desired_angle - angle\n    angle_derivative = -omega  # Derivative of angle\n    torque += 15.0 * angle_error + 10.0 * angle_derivative  # P + D control\n\n    # Clamp torque to max/min\n    torque = max(-120, min(120, torque))\n\n    # Control for vertical descent\n    if y > ground_y + 0.02:  # If not yet landed\n        # Calculate desired vertical velocity based on distance from ground\n        height_above_ground = y - ground_y\n        if height_above_ground > 1.0:\n            desired_vy = -1.5\n            gain = 1.0\n        elif height_above_ground > 0.5:\n            desired_vy = -0.5\n            gain = 1.5\n        else:\n            desired_vy = -0.05\n            gain = 2.5\n        \n        # PID control for vertical velocity\n        vy_error = desired_vy - vy\n        thrust_gain = 600.0 * (vy_error * gain)\n\n        # Clamp thrust to ensure fuel efficiency and prevent excessive acceleration\n        if thrust_gain < 0:\n            thrust = max(0, thrust_gain)\n        elif thrust_gain > 600:\n            thrust = 600\n        else:\n            thrust = thrust_gain\n        \n        # Ensure enough fuel remains for landing\n        if remaining_fuel < 450:\n            thrust = max(0, thrust_gain * (remaining_fuel / 450))\n    else:\n        thrust = 0.0\n\n    # Apply thrust and torque\n    sandbox.apply_thrust(thrust, torque)",
+      "code_sha256": "a24b12259c188c844ee7b51539856bc59ee1fb9ca5b6eca5d1a802d60929734f",
+      "constraints": {
+        "count": 0,
+        "violated": false,
+        "violations": []
+      },
+      "generation": {
+        "latency_seconds": 65.53250080905855,
+        "model": "Qwen3-14B",
+        "token_usage": {
+          "completion_tokens": 3924,
+          "prompt_tokens": 8674,
+          "total_tokens": 12598
+        }
+      },
+      "outcome": {
+        "category": "simulation_failure",
+        "failure_reason": "Touchdown vertical speed |vy|=17.09 m/s exceeds limit 0.05 m/s | Hull ground-contact edge x=[-3.60, -2.84] not fully inside landing zone [16.72, 20.72] at touchdown | Landing angle |θ|=160.7° exceeds limit 10.0°"
+      },
+      "phase": "revision",
+      "physics": {},
+      "score": 0.0,
+      "step_count": 107,
+      "success": false,
+      "timestamp": 1785765774.531355,
+      "verification_seconds": 0.04020446911454201
+    },
+    {
+      "artifacts": [],
+      "attempt": 10,
+      "code": "import math\n\ndef build_agent(sandbox):\n    lander = sandbox.get_lander_body()\n    return lander\n\ndef agent_action(sandbox, agent_body, step_count):\n    # Get current state\n    pos = sandbox.get_lander_position()\n    x, y = pos\n    angle = sandbox.get_lander_angle()\n    omega = sandbox.get_lander_angular_velocity()\n    vel = agent_body.linearVelocity\n    vy = vel.y\n    half_w, half_h = sandbox.get_lander_size()\n    remaining_fuel = sandbox.get_remaining_fuel()\n    delay_steps = sandbox.get_thrust_delay_steps()\n    ground_y = sandbox.get_ground_y_top()\n    t = step_count * (1/60)  # Current simulation time in seconds\n\n    # Calculate corners for no-fly zone check\n    corners = []\n    for dx, dy in [(0.4, 0.3), (-0.4, 0.3), (-0.4, -0.3), (0.4, -0.3)]:\n        global_x = x + dx * math.cos(angle) - dy * math.sin(angle)\n        global_y = y + dx * math.sin(angle) + dy * math.cos(angle)\n        corners.append((global_x, global_y))\n    \n    in_nfz = False\n    for (cx, cy) in corners:\n        if 10.5 <= cx <= 13.5:\n            if cy < 6.0 or cy > 20.0:\n                in_nfz = True\n                break\n\n    # Avoid no-fly zone by adjusting orientation and horizontal position\n    torque = 0.0\n    if in_nfz:\n        # Calculate average x position of the lander\n        avg_x = x\n        corridor_center_x = (10.5 + 13.5) / 2\n        # Determine direction to move out of the corridor\n        if avg_x < corridor_center_x:\n            # Move right of corridor\n            desired_x = corridor_center_x + 1.0\n        else:\n            # Move left of corridor\n            desired_x = corridor_center_x - 1.0\n        \n        # Apply proportional control to horizontal position\n        x_error = desired_x - x\n        torque += 5.0 * x_error  # Adjust gain as needed\n\n        # Apply P control for angle to stabilize\n        angle_error = -angle  # Target angle is 0\n        torque += 20.0 * angle_error\n\n    # Predict landing time based on current vertical velocity and height\n    if y > ground_y + 0.02 and vy < 0:\n        height_above_ground = y - ground_y\n        # Estimate time to landing with safety margin\n        time_to_land = (height_above_ground - 0.02) / (-vy) * 1.2\n    else:\n        time_to_land = 15.0  # Default estimate\n\n    predicted_landing_time = t + time_to_land\n    x_platform = 17.0 + 1.8 * math.sin((math.pi / 3) * predicted_landing_time)\n    desired_x_platform = x_platform\n\n    # PID control for horizontal position\n    x_error = desired_x_platform - x\n    if abs(x_error) > 0.5:\n        torque += 3.0 * x_error  # Adjust gain for horizontal tracking\n\n    # PID control for angle to keep upright\n    desired_angle = 0.0\n    angle_error = desired_angle - angle\n    angle_derivative = -omega  # Derivative of angle\n    torque += 15.0 * angle_error + 10.0 * angle_derivative  # P + D control\n\n    # Clamp torque to max/min\n    torque = max(-120, min(120, torque))\n\n    # Control for vertical descent\n    if y > ground_y + 0.02:  # If not yet landed\n        # Calculate desired vertical velocity based on distance from ground\n        height_above_ground = y - ground_y\n        if height_above_ground > 1.0:\n            desired_vy = -1.5\n            gain = 1.0\n        elif height_above_ground > 0.5:\n            desired_vy = -0.5\n            gain = 1.5\n        else:\n            desired_vy = -0.05\n            gain = 2.5\n        \n        # PID control for vertical velocity\n        vy_error = desired_vy - vy\n        thrust_gain = 600.0 * (vy_error * gain)\n\n        # Clamp thrust to ensure fuel efficiency and prevent excessive acceleration\n        if thrust_gain < 0:\n            thrust = max(0, thrust_gain)\n        elif thrust_gain > 600:\n            thrust = 600\n        else:\n            thrust = thrust_gain\n        \n        # Ensure enough fuel remains for landing\n        if remaining_fuel < 450:\n            thrust = max(0, thrust_gain * (remaining_fuel / 450))\n    else:\n        thrust = 0.0\n\n    # Apply thrust and torque\n    sandbox.apply_thrust(thrust, torque)",
+      "code_sha256": "121c85d4a9fe565b23719587718da1677519cbd865f9dc8cc29409fac0fec6e7",
+      "constraints": {
+        "count": 0,
+        "violated": false,
+        "violations": []
+      },
+      "generation": {
+        "latency_seconds": 59.77404445782304,
+        "model": "Qwen3-14B",
+        "token_usage": {
+          "completion_tokens": 3734,
+          "prompt_tokens": 8638,
+          "total_tokens": 12372
+        }
+      },
+      "outcome": {
+        "category": "simulation_failure",
+        "failure_reason": "Touchdown vertical speed |vy|=17.09 m/s exceeds limit 0.05 m/s | Hull ground-contact edge x=[-3.60, -2.84] not fully inside landing zone [16.72, 20.72] at touchdown | Landing angle |θ|=160.7° exceeds limit 10.0°"
+      },
+      "phase": "revision",
+      "physics": {},
+      "score": 0.0,
+      "step_count": 107,
+      "success": false,
+      "timestamp": 1785765834.354373,
+      "verification_seconds": 0.04863210581243038
+    },
+    {
+      "artifacts": [],
+      "attempt": 11,
+      "code": "import math\n\ndef build_agent(sandbox):\n    lander = sandbox.get_lander_body()\n    return lander\n\ndef agent_action(sandbox, agent_body, step_count):\n    # Get current state of the lander\n    pos = sandbox.get_lander_position()\n    x, y = pos\n    angle = sandbox.get_lander_angle()\n    omega = sandbox.get_lander_angular_velocity()\n    vel = agent_body.linearVelocity\n    vy = vel.y\n    half_w, half_h = sandbox.get_lander_size()\n    remaining_fuel = sandbox.get_remaining_fuel()\n    delay_steps = sandbox.get_thrust_delay_steps()\n    ground_y = sandbox.get_ground_y_top()\n    t = step_count * (1/60)  # Current simulation time in seconds\n\n    # Calculate corners for no-fly zone check\n    corners = []\n    for dx, dy in [(0.4, 0.3), (-0.4, 0.3), (-0.4, -0.3), (0.4, -0.3)]:\n        global_x = x + dx * math.cos(angle) - dy * math.sin(angle)\n        global_y = y + dx * math.sin(angle) + dy * math.cos(angle)\n        corners.append((global_x, global_y))\n    \n    in_nfz = False\n    for (cx, cy) in corners:\n        if 10.5 <= cx <= 13.5:\n            if cy < 6.0 or cy > 20.0:\n                in_nfz = True\n                break\n\n    # Avoid no-fly zone by adjusting orientation and horizontal position\n    torque = 0.0\n    if in_nfz:\n        # Calculate average x position of the lander\n        avg_x = x\n        corridor_center_x = (10.5 + 13.5) / 2\n        # Determine direction to move out of the corridor\n        if avg_x < corridor_center_x:\n            # Move right of corridor\n            desired_x = corridor_center_x + 1.0\n        else:\n            # Move left of corridor\n            desired_x = corridor_center_x - 1.0\n        \n        # Apply proportional control to horizontal position\n        x_error = desired_x - x\n        torque += 5.0 * x_error  # Adjust gain as needed\n\n        # Apply P control for angle to stabilize\n        angle_error = -angle  # Target angle is 0\n        torque += 20.0 * angle_error\n\n    # Predict landing time based on current vertical velocity and height\n    time_to_land = 0.0\n    if y > ground_y + 0.02 and vy < 0:\n        height_above_ground = y - ground_y\n        # Estimate time to landing with safety margin\n        # Use a more conservative estimate with a safety factor\n        time_to_land = (height_above_ground - 0.02) / (-vy) * 1.2\n    else:\n        time_to_land = 15.0  # Default estimate\n\n    predicted_landing_time = t + time_to_land\n    x_platform = 17.0 + 1.8 * math.sin((math.pi / 3) * predicted_landing_time)\n    desired_x_platform = x_platform\n\n    # PID control for horizontal position\n    x_error = desired_x_platform - x\n    if abs(x_error) > 0.5:\n        torque += 3.0 * x_error  # Adjust gain for horizontal tracking\n\n    # PID control for angle to keep upright\n    desired_angle = 0.0\n    angle_error = desired_angle - angle\n    angle_derivative = -omega  # Derivative of angle\n    torque += 15.0 * angle_error + 10.0 * angle_derivative  # P + D control\n\n    # Clamp torque to max/min\n    torque = max(-120, min(120, torque))\n\n    # Control for vertical descent\n    if y > ground_y + 0.02:  # If not yet landed\n        # Calculate desired vertical velocity based on distance from ground\n        height_above_ground = y - ground_y\n        if height_above_ground > 1.0:\n            desired_vy = -1.5\n            gain = 1.0\n        elif height_above_ground > 0.5:\n            desired_vy = -0.5\n            gain = 1.5\n        else:\n            desired_vy = -0.05\n            gain = 2.5\n        \n        # PID control for vertical velocity\n        vy_error = desired_vy - vy\n        thrust_gain = 600.0 * (vy_error * gain)\n\n        # Clamp thrust to ensure fuel efficiency and prevent excessive acceleration\n        if thrust_gain < 0:\n            thrust = max(0, thrust_gain)\n        elif thrust_gain > 600:\n            thrust = 600\n        else:\n            thrust = thrust_gain\n        \n        # Ensure enough fuel remains for landing\n        if remaining_fuel < 450:\n            thrust = max(0, thrust_gain * (remaining_fuel / 450))\n    else:\n        thrust = 0.0\n\n    # Apply thrust and torque\n    sandbox.apply_thrust(thrust, torque)",
+      "code_sha256": "8d5e2896238d2c93dcf14fc9dbd3175a66e5b20c9889d0ab6a997d4dcf80dacf",
+      "constraints": {
+        "count": 0,
+        "violated": false,
+        "violations": []
+      },
+      "generation": {
+        "latency_seconds": 65.56935518980026,
+        "model": "Qwen3-14B",
+        "token_usage": {
+          "completion_tokens": 3927,
+          "prompt_tokens": 8647,
+          "total_tokens": 12574
+        }
+      },
+      "outcome": {
+        "category": "simulation_failure",
+        "failure_reason": "Touchdown vertical speed |vy|=17.09 m/s exceeds limit 0.05 m/s | Hull ground-contact edge x=[-3.60, -2.84] not fully inside landing zone [16.72, 20.72] at touchdown | Landing angle |θ|=160.7° exceeds limit 10.0°"
+      },
+      "phase": "revision",
+      "physics": {},
+      "score": 0.0,
+      "step_count": 107,
+      "success": false,
+      "timestamp": 1785765899.9743817,
+      "verification_seconds": 0.050303349271416664
+    },
+    {
+      "artifacts": [],
+      "attempt": 12,
+      "code": "import math\n\ndef build_agent(sandbox):\n    lander = sandbox.get_lander_body()\n    return lander\n\ndef agent_action(sandbox, agent_body, step_count):\n    # Get current state of the lander\n    pos = sandbox.get_lander_position()\n    x, y = pos\n    angle = sandbox.get_lander_angle()\n    omega = sandbox.get_lander_angular_velocity()\n    vel = agent_body.linearVelocity\n    vy = vel.y\n    half_w, half_h = sandbox.get_lander_size()\n    remaining_fuel = sandbox.get_remaining_fuel()\n    delay_steps = sandbox.get_thrust_delay_steps()\n    ground_y = sandbox.get_ground_y_top()\n    t = step_count * (1/60)  # Current simulation time in seconds\n\n    # Calculate corners for no-fly zone check\n    corners = []\n    for dx, dy in [(0.4, 0.3), (-0.4, 0.3), (-0.4, -0.3), (0.4, -0.3)]:\n        # Convert local corner coordinates to global coordinates\n        global_x = x + dx * math.cos(angle) - dy * math.sin(angle)\n        global_y = y + dx * math.sin(angle) + dy * math.cos(angle)\n        corners.append((global_x, global_y))\n    \n    in_nfz = False\n    for (cx, cy) in corners:\n        if 10.5 <= cx <= 13.5:\n            if cy < 6.0 or cy > 20.0:\n                in_nfz = True\n                break\n\n    # Avoid no-fly zone by adjusting orientation and horizontal position\n    torque = 0.0\n    if in_nfz:\n        # Calculate average x position of the lander\n        avg_x = x\n        corridor_center_x = (10.5 + 13.5) / 2\n        # Determine direction to move out of the corridor\n        if avg_x < corridor_center_x:\n            # Move right of corridor\n            desired_x = corridor_center_x + 1.0\n        else:\n            # Move left of corridor\n            desired_x = corridor_center_x - 1.0\n        \n        # Apply proportional control to horizontal position\n        x_error = desired_x - x\n        torque += 10.0 * x_error  # Increased gain for stronger correction\n        \n        # Apply P control for angle to stabilize\n        angle_error = -angle  # Target angle is 0\n        torque += 50.0 * angle_error  # Increased gain for angle correction\n\n    # Predict landing time based on current vertical velocity and height\n    time_to_land = 0.0\n    if y > ground_y + 0.02 and vy < 0:\n        height_above_ground = y - ground_y\n        # Estimate time to landing with safety margin\n        # Use a more conservative estimate with a safety factor\n        # Avoid division by zero if vy is near zero\n        if abs(vy) < 1e-6:\n            time_to_land = 15.0  # Default estimate\n        else:\n            time_to_land = (height_above_ground - 0.02) / (-vy) * 1.2\n    else:\n        time_to_land = 15.0  # Default estimate\n\n    predicted_landing_time = t + time_to_land\n    x_platform = 17.0 + 1.8 * math.sin((math.pi / 3) * predicted_landing_time)\n    desired_x_platform = x_platform\n\n    # PID control for horizontal position\n    x_error = desired_x_platform - x\n    if abs(x_error) > 0.5:\n        torque += 15.0 * x_error  # Increased gain for horizontal tracking\n\n    # PID control for angle to keep upright\n    desired_angle = 0.0\n    angle_error = desired_angle - angle\n    angle_derivative = -omega  # Derivative of angle\n    torque += 50.0 * angle_error + 20.0 * angle_derivative  # Increased P and D gains\n\n    # Clamp torque to max/min\n    torque = max(-120, min(120, torque))\n\n    # Control for vertical descent\n    if y > ground_y + 0.02:  # If not yet landed\n        # Calculate desired vertical velocity based on distance from ground\n        height_above_ground = y - ground_y\n        if height_above_ground > 1.0:\n            desired_vy = -1.5\n            gain = 1.0\n        elif height_above_ground > 0.5:\n            desired_vy = -0.5\n            gain = 1.5\n        else:\n            desired_vy = -0.05\n            gain = 2.5\n        \n        # PID control for vertical velocity\n        vy_error = desired_vy - vy\n        thrust_gain = 600.0 * (vy_error * gain)\n\n        # Clamp thrust to ensure fuel efficiency and prevent excessive acceleration\n        if thrust_gain < 0:\n            thrust = max(0, thrust_gain)\n        elif thrust_gain > 600:\n            thrust = 600\n        else:\n            thrust = thrust_gain\n        \n        # Ensure enough fuel remains for landing\n        if remaining_fuel < 450:\n            thrust = max(0, thrust_gain * (remaining_fuel / 450))\n    else:\n        thrust = 0.0\n\n    # Apply thrust and torque\n    sandbox.apply_thrust(thrust, torque)",
+      "code_sha256": "a06a6c3fee72b8705b093e7f22e79a6cacd9a72d7a4f76a1e439602366508976",
+      "constraints": {
+        "count": 0,
+        "violated": false,
+        "violations": []
+      },
+      "generation": {
+        "latency_seconds": 48.23164456151426,
+        "model": "Qwen3-14B",
+        "token_usage": {
+          "completion_tokens": 2441,
+          "prompt_tokens": 8673,
+          "total_tokens": 11114
+        }
+      },
+      "outcome": {
+        "category": "simulation_failure",
+        "failure_reason": "Touchdown vertical speed |vy|=1.13 m/s exceeds limit 0.05 m/s | Hull ground-contact edge x=[0.88, 1.68] not fully inside landing zone [16.75, 20.75] at touchdown | Landing angle |θ|=360.5° exceeds limit 10.0°"
+      },
+      "phase": "revision",
+      "physics": {},
+      "score": 0.0,
+      "step_count": 104,
+      "success": false,
+      "timestamp": 1785765948.2583568,
+      "verification_seconds": 0.052001843228936195
+    },
+    {
+      "artifacts": [],
+      "attempt": 13,
+      "code": "import math\n\ndef build_agent(sandbox):\n    lander = sandbox.get_lander_body()\n    return lander\n\ndef agent_action(sandbox, agent_body, step_count):\n    # Get current state of the lander\n    pos = sandbox.get_lander_position()\n    x, y = pos\n    angle = sandbox.get_lander_angle()\n    omega = sandbox.get_lander_angular_velocity()\n    vel = agent_body.linearVelocity\n    vy = vel.y\n    half_w, half_h = sandbox.get_lander_size()\n    remaining_fuel = sandbox.get_remaining_fuel()\n    delay_steps = sandbox.get_thrust_delay_steps()\n    ground_y = sandbox.get_ground_y_top()\n    t = step_count * (1/60)  # Current simulation time in seconds\n\n    # Calculate corners for no-fly zone check\n    corners = []\n    for dx, dy in [(0.4, 0.3), (-0.4, 0.3), (-0.4, -0.3), (0.4, -0.3)]:\n        # Convert local corner coordinates to global coordinates\n        global_x = x + dx * math.cos(angle) - dy * math.sin(angle)\n        global_y = y + dx * math.sin(angle) + dy * math.cos(angle)\n        corners.append((global_x, global_y))\n    \n    in_nfz = False\n    for (cx, cy) in corners:\n        if 10.5 <= cx <= 13.5:\n            if cy < 6.0 or cy > 20.0:\n                in_nfz = True\n                break\n\n    # Avoid no-fly zone by adjusting orientation and horizontal position\n    torque = 0.0\n    if in_nfz:\n        # Apply torque to move out of the corridor\n        corridor_center_x = (10.5 + 13.5) / 2\n        if x < corridor_center_x:\n            # Move right of corridor\n            desired_x = corridor_center_x + 1.0\n        else:\n            # Move left of corridor\n            desired_x = corridor_center_x - 1.0\n        \n        # Apply proportional control to horizontal position\n        x_error = desired_x - x\n        torque += 20.0 * x_error  # Increased gain for stronger correction\n        \n        # Apply P control for angle to stabilize\n        angle_error = -angle  # Target angle is 0\n        torque += 100.0 * angle_error  # Increased gain for angle correction\n    else:\n        # Calculate platform's current x position\n        x_platform = 17.0 + 1.8 * math.sin((math.pi / 3) * t)\n        x_error = x_platform - x\n        \n        # PID control for horizontal position\n        # P gain for horizontal position\n        torque += 20.0 * x_error  # Increased gain for horizontal tracking\n\n        # PID control for angle to keep upright\n        desired_angle = 0.0\n        angle_error = desired_angle - angle\n        angle_derivative = -omega  # Derivative of angle\n        torque += 100.0 * angle_error + 20.0 * angle_derivative  # Increased P and D gains\n\n    # Clamp torque to max/min\n    torque = max(-120, min(120, torque))\n\n    # Control for vertical descent\n    if y > ground_y + 0.02:  # If not yet landed\n        # Calculate desired vertical velocity based on distance from ground\n        height_above_ground = y - ground_y\n        if height_above_ground > 1.0:\n            desired_vy = -1.5\n            gain = 1.0\n        elif height_above_ground > 0.5:\n            desired_vy = -0.5\n            gain = 1.5\n        else:\n            desired_vy = -0.05\n            gain = 2.5\n        \n        # PID control for vertical velocity\n        vy_error = desired_vy - vy\n        thrust_gain = 600.0 * (vy_error * gain)\n\n        # Clamp thrust to ensure fuel efficiency and prevent excessive acceleration\n        if thrust_gain < 0:\n            thrust = max(0, thrust_gain)\n        elif thrust_gain > 600:\n            thrust = 600\n        else:\n            thrust = thrust_gain\n        \n        # Ensure enough fuel remains for landing\n        if remaining_fuel < 450:\n            thrust = max(0, thrust_gain * (remaining_fuel / 450))\n    else:\n        thrust = 0.0\n\n    # Apply thrust and torque\n    sandbox.apply_thrust(thrust, torque)",
+      "code_sha256": "32fc5fb6d923267edd4b62ee32b3f2f5cf04bd8c886f1e8cdeb420a48c34db5b",
+      "constraints": {
+        "count": 0,
+        "violated": false,
+        "violations": []
+      },
+      "generation": {
+        "latency_seconds": 140.2358719035983,
+        "model": "Qwen3-14B",
+        "token_usage": {
+          "completion_tokens": 6654,
+          "prompt_tokens": 8730,
+          "total_tokens": 15384
+        }
+      },
+      "outcome": {
+        "category": "simulation_failure",
+        "failure_reason": "Touchdown vertical speed |vy|=2.18 m/s exceeds limit 0.05 m/s | Hull ground-contact edge x=[-0.88, -0.13] not fully inside landing zone [16.77, 20.77] at touchdown | Landing angle |θ|=200.2° exceeds limit 10.0°"
+      },
+      "phase": "revision",
+      "physics": {},
+      "score": 0.0,
+      "step_count": 101,
+      "success": false,
+      "timestamp": 1785766088.546368,
+      "verification_seconds": 0.05180453881621361
+    },
+    {
+      "artifacts": [],
+      "attempt": 14,
+      "code": "import math\n\ndef build_agent(sandbox):\n    lander = sandbox.get_lander_body()\n    return lander\n\ndef agent_action(sandbox, agent_body, step_count):\n    # Get current state of the lander\n    pos = sandbox.get_lander_position()\n    x, y = pos\n    angle = sandbox.get_lander_angle()\n    omega = sandbox.get_lander_angular_velocity()\n    vel = agent_body.linearVelocity\n    vy = vel.y\n    half_w, half_h = sandbox.get_lander_size()\n    remaining_fuel = sandbox.get_remaining_fuel()\n    delay_steps = sandbox.get_thrust_delay_steps()\n    ground_y = sandbox.get_ground_y_top()\n    t = step_count * (1/60)  # Current simulation time in seconds\n\n    # Calculate corners for no-fly zone check\n    corners = []\n    for dx, dy in [(0.4, 0.3), (-0.4, 0.3), (-0.4, -0.3), (0.4, -0.3)]:\n        # Convert local corner coordinates to global coordinates\n        global_x = x + dx * math.cos(angle) - dy * math.sin(angle)\n        global_y = y + dx * math.sin(angle) + dy * math.cos(angle)\n        corners.append((global_x, global_y))\n    \n    in_nfz = False\n    for (cx, cy) in corners:\n        if 10.5 <= cx <= 13.5:\n            if cy < 6.0 or cy > 20.0:\n                in_nfz = True\n                break\n\n    # Avoid no-fly zone by adjusting orientation and horizontal position\n    torque = 0.0\n    if in_nfz:\n        # Apply torque to move out of the corridor\n        corridor_center_x = (10.5 + 13.5) / 2\n        if x < corridor_center_x:\n            # Move right of corridor\n            desired_x = corridor_center_x + 1.0\n        else:\n            # Move left of corridor\n            desired_x = corridor_center_x - 1.0\n        \n        # Apply proportional control to horizontal position\n        x_error = desired_x - x\n        torque += 50.0 * x_error  # Adjusted gain for stronger correction\n        \n        # Apply P control for angle to stabilize\n        angle_error = -angle  # Target angle is 0\n        torque += 100.0 * angle_error  # Adjusted gain for angle correction\n    else:\n        # Calculate platform's current x position\n        x_platform = 17.0 + 1.8 * math.sin((math.pi / 3) * t)\n        x_error = x_platform - x\n        \n        # PID control for horizontal position\n        # P gain for horizontal position\n        torque += 30.0 * x_error  # Increased gain for horizontal tracking\n\n        # PID control for angle to keep upright\n        desired_angle = 0.0\n        angle_error = desired_angle - angle\n        angle_derivative = -omega  # Derivative of angle\n        torque += 80.0 * angle_error + 20.0 * angle_derivative  # Adjusted P and D gains\n\n    # Clamp torque to max/min\n    torque = max(-120, min(120, torque))\n\n    # Control for vertical descent\n    if y > ground_y + 0.02:  # If not yet landed\n        # Calculate desired vertical velocity based on distance from ground\n        height_above_ground = y - ground_y\n        if height_above_ground > 1.0:\n            desired_vy = -1.0\n            gain = 1.0\n        elif height_above_ground > 0.5:\n            desired_vy = -0.3\n            gain = 1.5\n        else:\n            desired_vy = -0.05\n            gain = 2.5\n        \n        # PID control for vertical velocity\n        vy_error = desired_vy - vy\n        thrust = 600.0 * (vy_error * gain)\n\n        # Clamp thrust to ensure fuel efficiency and prevent excessive acceleration\n        if thrust < 0:\n            thrust = max(0, thrust)\n        elif thrust > 600:\n            thrust = 600\n        else:\n            thrust = thrust\n        \n        # Ensure enough fuel remains for landing\n        if remaining_fuel < 450:\n            thrust = max(0, thrust * (remaining_fuel / 450))\n    else:\n        thrust = 0.0\n\n    # Apply thrust and torque\n    sandbox.apply_thrust(thrust, torque)",
+      "code_sha256": "142bd970c574b3e5bf6adb05a91b64b81d7dd847d0276a628e6e507c74785407",
+      "constraints": {
+        "count": 0,
+        "violated": false,
+        "violations": []
+      },
+      "generation": {
+        "latency_seconds": 94.64232741482556,
+        "model": "Qwen3-14B",
+        "token_usage": {
+          "completion_tokens": 4050,
+          "prompt_tokens": 8543,
+          "total_tokens": 12593
+        }
+      },
+      "outcome": {
+        "category": "simulation_failure",
+        "failure_reason": "Forbidden corridor lower-bound violation"
+      },
+      "phase": "revision",
+      "physics": {},
+      "score": 0.0,
+      "step_count": 112,
+      "success": false,
+      "timestamp": 1785766183.2383559,
+      "verification_seconds": 0.04932546056807041
+    },
+    {
+      "artifacts": [],
+      "attempt": 15,
+      "code": "import math\n\ndef build_agent(sandbox):\n    lander = sandbox.get_lander_body()\n    return lander\n\ndef agent_action(sandbox, agent_body, step_count):\n    # Get current state of the lander\n    pos = sandbox.get_lander_position()\n    x, y = pos\n    angle = sandbox.get_lander_angle()\n    omega = sandbox.get_lander_angular_velocity()\n    vel = agent_body.linearVelocity\n    vy = vel.y\n    half_w, half_h = sandbox.get_lander_size()\n    remaining_fuel = sandbox.get_remaining_fuel()\n    delay_steps = sandbox.get_thrust_delay_steps()\n    ground_y = sandbox.get_ground_y_top()\n    t = step_count * (1/60)  # Current simulation time in seconds\n\n    # Calculate corners for no-fly zone check\n    corners = []\n    for dx, dy in [(0.4, 0.3), (-0.4, 0.3), (-0.4, -0.3), (0.4, -0.3)]:\n        # Convert local corner coordinates to global coordinates\n        global_x = x + dx * math.cos(angle) - dy * math.sin(angle)\n        global_y = y + dx * math.sin(angle) + dy * math.cos(angle)\n        corners.append((global_x, global_y))\n    \n    in_nfz = False\n    for (cx, cy) in corners:\n        if 10.5 <= cx <= 13.5:\n            if cy < 6.0 or cy > 20.0:\n                in_nfz = True\n                break\n\n    # Avoid no-fly zone by adjusting orientation and horizontal position\n    torque = 0.0\n    if in_nfz:\n        # Calculate corridor center and direction to escape\n        corridor_center_x = (10.5 + 13.5) / 2\n        if x < corridor_center_x:\n            # Move right of corridor\n            desired_x = corridor_center_x + 1.0\n        else:\n            # Move left of corridor\n            desired_x = corridor_center_x - 1.0\n        \n        # Apply proportional control to horizontal position\n        x_error = desired_x - x\n        torque += 80.0 * x_error  # Stronger correction gain\n        \n        # Apply P control for angle to stabilize\n        angle_error = -angle  # Target angle is 0\n        torque += 150.0 * angle_error  # Higher gain for angle correction\n    else:\n        # Calculate platform's current x position\n        x_platform = 17.0 + 1.8 * math.sin((math.pi / 3) * t)\n        x_error = x_platform - x\n        \n        # PID control for horizontal position\n        # P gain for horizontal position\n        torque += 50.0 * x_error  # Adjusted gain for horizontal tracking\n\n        # PID control for angle to keep upright\n        desired_angle = 0.0\n        angle_error = desired_angle - angle\n        angle_derivative = -omega  # Derivative of angle\n        torque += 100.0 * angle_error + 30.0 * angle_derivative  # Adjusted P and D gains\n\n    # Clamp torque to max/min\n    torque = max(-120, min(120, torque))\n\n    # Control for vertical descent\n    if y > ground_y + 0.02:  # If not yet landed\n        # Calculate desired vertical velocity based on distance from ground\n        height_above_ground = y - ground_y\n        if height_above_ground > 1.5:\n            desired_vy = -1.2\n            gain = 1.0\n        elif height_above_ground > 0.8:\n            desired_vy = -0.4\n            gain = 1.5\n        else:\n            desired_vy = -0.05\n            gain = 2.5\n        \n        # PID control for vertical velocity\n        vy_error = desired_vy - vy\n        thrust = 600.0 * (vy_error * gain)\n\n        # Clamp thrust to ensure fuel efficiency and prevent excessive acceleration\n        if thrust < 0:\n            thrust = max(0, thrust)\n        elif thrust > 600:\n            thrust = 600\n        else:\n            thrust = thrust\n        \n        # Ensure enough fuel remains for landing\n        if remaining_fuel < 450:\n            thrust = max(0, thrust * (remaining_fuel / 450))\n    else:\n        thrust = 0.0\n\n    # Apply thrust and torque\n    sandbox.apply_thrust(thrust, torque)",
+      "code_sha256": "3fa05566e6361c13b9027b89f59f26ec0b6d2c25476831d0fdd85881bba83f30",
+      "constraints": {
+        "count": 0,
+        "violated": false,
+        "violations": []
+      },
+      "generation": {
+        "latency_seconds": 48.24094063229859,
+        "model": "Qwen3-14B",
+        "token_usage": {
+          "completion_tokens": 2202,
+          "prompt_tokens": 8279,
+          "total_tokens": 10481
+        }
+      },
+      "outcome": {
+        "category": "simulation_failure",
+        "failure_reason": "Touchdown vertical speed |vy|=6.79 m/s exceeds limit 0.05 m/s | Hull ground-contact edge x=[4.74, 5.47] not fully inside landing zone [16.72, 20.72] at touchdown | Landing angle |θ|=383.9° exceeds limit 10.0°"
+      },
+      "phase": "revision",
+      "physics": {},
+      "score": 0.0,
+      "step_count": 107,
+      "success": false,
+      "timestamp": 1785766231.5303519,
+      "verification_seconds": 0.05074693635106087
+    },
+    {
+      "artifacts": [],
+      "attempt": 16,
+      "code": "import math\n\ndef build_agent(sandbox):\n    lander = sandbox.get_lander_body()\n    return lander\n\ndef agent_action(sandbox, agent_body, step_count):\n    # Get current state of the lander\n    pos = sandbox.get_lander_position()\n    x, y = pos\n    angle = sandbox.get_lander_angle()\n    omega = sandbox.get_lander_angular_velocity()\n    vel = agent_body.linearVelocity\n    vy = vel.y\n    half_w, half_h = sandbox.get_lander_size()\n    remaining_fuel = sandbox.get_remaining_fuel()\n    delay_steps = sandbox.get_thrust_delay_steps()\n    ground_y = sandbox.get_ground_y_top()\n    t = step_count * (1/60)  # Current simulation time in seconds\n\n    # Calculate corners for no-fly zone check\n    corners = []\n    for dx, dy in [(0.4, 0.3), (-0.4, 0.3), (-0.4, -0.3), (0.4, -0.3)]:\n        # Convert local corner coordinates to global coordinates\n        global_x = x + dx * math.cos(angle) - dy * math.sin(angle)\n        global_y = y + dx * math.sin(angle) + dy * math.cos(angle)\n        corners.append((global_x, global_y))\n    \n    in_nfz = False\n    for (cx, cy) in corners:\n        if 10.5 <= cx <= 13.5:\n            if cy < 6.0 or cy > 20.0:\n                in_nfz = True\n                break\n\n    # Avoid no-fly zone by adjusting orientation and horizontal position\n    torque = 0.0\n    if in_nfz:\n        # Calculate corridor center and direction to escape\n        corridor_center_x = (10.5 + 13.5) / 2\n        if x < corridor_center_x:\n            # Move right of corridor\n            desired_x = corridor_center_x + 1.0\n        else:\n            # Move left of corridor\n            desired_x = corridor_center_x - 1.0\n        \n        # Apply proportional control to horizontal position\n        x_error = desired_x - x\n        torque += 80.0 * x_error  # Stronger correction gain\n        \n        # Apply P control for angle to stabilize\n        angle_error = -angle  # Target angle is 0\n        torque += 150.0 * angle_error  # Higher gain for angle correction\n    else:\n        # Calculate platform's current x position\n        x_platform = 17.0 + 1.8 * math.sin((math.pi / 3) * t)\n        x_error = x_platform - x\n        \n        # PID control for horizontal position\n        # P gain for horizontal position\n        torque += 50.0 * x_error  # Adjusted gain for horizontal tracking\n\n        # PID control for angle to keep upright\n        desired_angle = 0.0\n        angle_error = desired_angle - angle\n        angle_derivative = -omega  # Derivative of angle\n        torque += 100.0 * angle_error + 30.0 * angle_derivative  # Adjusted P and D gains\n\n    # Clamp torque to max/min\n    torque = max(-120, min(120, torque))\n\n    # Control for vertical descent\n    if y > ground_y + 0.02:  # If not yet landed\n        # Calculate desired vertical velocity based on distance from ground\n        height_above_ground = y - ground_y\n        if height_above_ground > 2.0:\n            desired_vy = -1.2\n            gain = 1.0\n        elif height_above_ground > 1.0:\n            desired_vy = -0.6\n            gain = 1.5\n        elif height_above_ground > 0.5:\n            desired_vy = -0.2\n            gain = 2.0\n        else:\n            desired_vy = -0.05\n            gain = 2.5\n        \n        # PID control for vertical velocity\n        vy_error = desired_vy - vy\n        thrust = 600.0 * (vy_error * gain)\n\n        # Clamp thrust to ensure fuel efficiency and prevent excessive acceleration\n        if thrust < 0:\n            thrust = max(0, thrust)\n        elif thrust > 600:\n            thrust = 600\n        else:\n            thrust = thrust\n        \n        # Ensure enough fuel remains for landing\n        if remaining_fuel < 450:\n            thrust = max(0, thrust * (remaining_fuel / 450))\n    else:\n        thrust = 0.0\n\n    # Apply thrust and torque\n    sandbox.apply_thrust(thrust, torque)",
+      "code_sha256": "5919878ca7b1f0faf75990485c3a04f54e49bea51c9908176d7aac506bf237ec",
+      "constraints": {
+        "count": 0,
+        "violated": false,
+        "violations": []
+      },
+      "generation": {
+        "latency_seconds": 58.46624562330544,
+        "model": "Qwen3-14B",
+        "token_usage": {
+          "completion_tokens": 2615,
+          "prompt_tokens": 8532,
+          "total_tokens": 11147
+        }
+      },
+      "outcome": {
+        "category": "simulation_failure",
+        "failure_reason": "Touchdown vertical speed |vy|=6.79 m/s exceeds limit 0.05 m/s | Hull ground-contact edge x=[4.74, 5.47] not fully inside landing zone [16.72, 20.72] at touchdown | Landing angle |θ|=383.9° exceeds limit 10.0°"
+      },
+      "phase": "revision",
+      "physics": {},
+      "score": 0.0,
+      "step_count": 107,
+      "success": false,
+      "timestamp": 1785766290.0386467,
+      "verification_seconds": 0.041715314611792564
+    },
+    {
+      "artifacts": [],
+      "attempt": 17,
+      "code": "import math\n\ndef build_agent(sandbox):\n    lander = sandbox.get_lander_body()\n    return lander\n\ndef agent_action(sandbox, agent_body, step_count):\n    # Get current state of the lander\n    pos = sandbox.get_lander_position()\n    x, y = pos\n    angle = sandbox.get_lander_angle()\n    omega = sandbox.get_lander_angular_velocity()\n    vel = agent_body.linearVelocity\n    vy = vel.y\n    half_w, half_h = sandbox.get_lander_size()\n    remaining_fuel = sandbox.get_remaining_fuel()\n    delay_steps = sandbox.get_thrust_delay_steps()\n    ground_y = sandbox.get_ground_y_top()\n    t = step_count * (1/60)  # Current simulation time in seconds\n\n    # Calculate corners for no-fly zone check\n    corners = []\n    for dx, dy in [(0.4, 0.3), (-0.4, 0.3), (-0.4, -0.3), (0.4, -0.3)]:\n        # Convert local corner coordinates to global coordinates\n        global_x = x + dx * math.cos(angle) - dy * math.sin(angle)\n        global_y = y + dx * math.sin(angle) + dy * math.cos(angle)\n        corners.append((global_x, global_y))\n    \n    in_nfz = False\n    for (cx, cy) in corners:\n        if 10.5 <= cx <= 13.5:\n            if cy < 6.0 or cy > 20.0:\n                in_nfz = True\n                break\n\n    # Avoid no-fly zone by adjusting orientation and horizontal position\n    torque = 0.0\n    if in_nfz:\n        # Calculate corridor center and direction to escape\n        corridor_center_x = (10.5 + 13.5) / 2\n        if x < corridor_center_x:\n            # Move right of corridor\n            desired_x = corridor_center_x + 1.0\n        else:\n            # Move left of corridor\n            desired_x = corridor_center_x - 1.0\n        \n        # Apply proportional control to horizontal position\n        x_error = desired_x - x\n        torque += 80.0 * x_error  # Stronger correction gain\n        \n        # Apply P control for angle to stabilize\n        angle_error = -angle  # Target angle is 0\n        torque += 150.0 * angle_error  # Higher gain for angle correction\n    else:\n        # Calculate platform's current x position\n        x_platform = 17.0 + 1.8 * math.sin((math.pi / 3) * t)\n        x_error = x_platform - x\n        \n        # PID control for horizontal position\n        # P gain for horizontal position\n        torque += 50.0 * x_error  # Adjusted gain for horizontal tracking\n\n        # PID control for angle to keep upright\n        desired_angle = 0.0\n        angle_error = desired_angle - angle\n        angle_derivative = -omega  # Derivative of angle\n        torque += 100.0 * angle_error + 30.0 * angle_derivative  # Adjusted P and D gains\n\n    # Clamp torque to max/min\n    torque = max(-120, min(120, torque))\n\n    # Control for vertical descent\n    if y > ground_y + 0.02:  # If not yet landed\n        # Calculate desired vertical velocity based on distance from ground\n        height_above_ground = y - ground_y\n        if height_above_ground > 2.0:\n            desired_vy = -1.2\n            gain = 1.0\n        elif height_above_ground > 1.0:\n            desired_vy = -0.6\n            gain = 1.5\n        elif height_above_ground > 0.5:\n            desired_vy = -0.2\n            gain = 2.0\n        else:\n            desired_vy = -0.05\n            gain = 2.5\n        \n        # PID control for vertical velocity\n        vy_error = desired_vy - vy\n        thrust = 600.0 * (vy_error * gain)\n\n        # Clamp thrust to ensure fuel efficiency and prevent excessive acceleration\n        if thrust < 0:\n            thrust = max(0, thrust)\n        elif thrust > 600:\n            thrust = 600\n        else:\n            thrust = thrust\n        \n        # Ensure enough fuel remains for landing\n        if remaining_fuel < 450:\n            thrust = max(0, thrust * (remaining_fuel / 450))\n    else:\n        thrust = 0.0\n\n    # Apply thrust and torque\n    sandbox.apply_thrust(thrust, torque)",
+      "code_sha256": "5919878ca7b1f0faf75990485c3a04f54e49bea51c9908176d7aac506bf237ec",
+      "constraints": {
+        "count": 0,
+        "violated": false,
+        "violations": []
+      },
+      "generation": {
+        "latency_seconds": 81.69847988523543,
+        "model": "Qwen3-14B",
+        "token_usage": {
+          "completion_tokens": 3527,
+          "prompt_tokens": 8561,
+          "total_tokens": 12088
+        }
+      },
+      "outcome": {
+        "category": "simulation_failure",
+        "failure_reason": "Touchdown vertical speed |vy|=6.79 m/s exceeds limit 0.05 m/s | Hull ground-contact edge x=[4.74, 5.47] not fully inside landing zone [16.72, 20.72] at touchdown | Landing angle |θ|=383.9° exceeds limit 10.0°"
+      },
+      "phase": "revision",
+      "physics": {},
+      "score": 0.0,
+      "step_count": 107,
+      "success": false,
+      "timestamp": 1785766371.7823737,
+      "verification_seconds": 0.044898414984345436
+    },
+    {
+      "artifacts": [],
+      "attempt": 18,
+      "code": "import math\n\ndef build_agent(sandbox):\n    lander = sandbox.get_lander_body()\n    return lander\n\ndef agent_action(sandbox, agent_body, step_count):\n    # Get current state\n    pos = sandbox.get_lander_position()\n    x, y = pos\n    angle = sandbox.get_lander_angle()\n    omega = sandbox.get_lander_angular_velocity()\n    vel = agent_body.linearVelocity\n    vx, vy = vel.x, vel.y\n    half_w, half_h = sandbox.get_lander_size()\n    ground_y = sandbox.get_ground_y_top()\n    remaining_fuel = sandbox.get_remaining_fuel()\n    delay_steps = sandbox.get_thrust_delay_steps()\n    t = step_count * (1/60)  # Current simulation time in seconds\n\n    # Calculate corners for no-fly zone check\n    corners = []\n    for dx, dy in [(0.4, 0.3), (-0.4, 0.3), (-0.4, -0.3), (0.4, -0.3)]:\n        global_x = x + dx * math.cos(angle) - dy * math.sin(angle)\n        global_y = y + dx * math.sin(angle) + dy * math.cos(angle)\n        corners.append((global_x, global_y))\n    \n    in_nfz = False\n    for (cx, cy) in corners:\n        if 10.5 <= cx <= 13.5:\n            if cy < 6.0 or cy > 20.0:\n                in_nfz = True\n                break\n\n    # If in no-fly zone, adjust to escape\n    if in_nfz:\n        # Calculate corridor center and direction to escape\n        corridor_center_x = (10.5 + 13.5) / 2\n        if x < corridor_center_x:\n            desired_x = corridor_center_x + 1.0\n        else:\n            desired_x = corridor_center_x - 1.0\n        \n        # Apply proportional control to horizontal position\n        x_error = desired_x - x\n        torque = 60.0 * x_error  # Reduced gain for smoother escape\n        \n        # Apply P control for angle to stabilize\n        angle_error = -angle  # Target angle is 0\n        torque += 100.0 * angle_error  # Adjusted gain for angle correction\n    else:\n        # Calculate platform's current position\n        x_platform = 17.0 + 1.8 * math.sin((math.pi / 3) * t)\n        # Estimate time to landing based on current vertical velocity\n        height_above_ground = y - ground_y\n        if vy < 0 and height_above_ground > 0.1:\n            time_to_landing = height_above_ground / (-vy)\n        else:\n            # If landing is imminent or not descending, use a default value\n            time_to_landing = 10.0  # arbitrary, needs to be adjusted\n        \n        # Calculate platform's position at landing time\n        x_platform_landing = 17.0 + 1.8 * math.sin((math.pi / 3) * (t + time_to_landing))\n        desired_x = x_platform_landing\n        x_error = desired_x - x\n        \n        # PID control for horizontal position\n        torque = 40.0 * x_error  # P gain for horizontal tracking\n        \n        # PID control for angle\n        desired_angle = 0.0\n        angle_error = desired_angle - angle\n        angle_derivative = -omega  # Derivative of angle\n        torque += 80.0 * angle_error + 20.0 * angle_derivative  # P and D for angle\n\n    # Clamp torque to max/min\n    torque = max(-120, min(120, torque))\n\n    # Vertical control\n    if y > ground_y + 0.02:  # If not yet landed\n        height_above_ground = y - ground_y\n        if height_above_ground > 2.0:\n            desired_vy = -1.0\n            gain = 0.8\n        elif height_above_ground > 1.0:\n            desired_vy = -0.5\n            gain = 1.0\n        elif height_above_ground > 0.5:\n            desired_vy = -0.2\n            gain = 1.2\n        else:\n            desired_vy = -0.05\n            gain = 1.5\n        \n        # PID control for vertical velocity\n        vy_error = desired_vy - vy\n        thrust = 600.0 * (vy_error * gain)\n\n        # Clamp thrust to ensure fuel efficiency\n        if thrust < 0:\n            thrust = max(0, thrust)\n        elif thrust > 600:\n            thrust = 600\n        else:\n            thrust = thrust\n        \n        # Ensure enough fuel remains for landing\n        if remaining_fuel < 450:\n            thrust = max(0, thrust * (remaining_fuel / 450))\n    else:\n        thrust = 0.0\n\n    # Apply thrust and torque\n    sandbox.apply_thrust(thrust, torque)",
+      "code_sha256": "002089f3d4f0409db5db8e7171fe47b373a4ee99c8580903c65cc4b85e0ba03d",
+      "constraints": {
+        "count": 0,
+        "violated": false,
+        "violations": []
+      },
+      "generation": {
+        "latency_seconds": 156.5022542849183,
+        "model": "Qwen3-14B",
+        "token_usage": {
+          "completion_tokens": 6715,
+          "prompt_tokens": 8561,
+          "total_tokens": 15276
+        }
+      },
+      "outcome": {
+        "category": "simulation_failure",
+        "failure_reason": "Touchdown vertical speed |vy|=3.05 m/s exceeds limit 0.05 m/s | Hull ground-contact edge x=[-0.01, 0.77] not fully inside landing zone [16.54, 20.54] at touchdown | Landing angle |θ|=552.1° exceeds limit 10.0°"
+      },
+      "phase": "revision",
+      "physics": {},
+      "score": 0.0,
+      "step_count": 121,
+      "success": false,
+      "timestamp": 1785766528.3343623,
+      "verification_seconds": 0.04937954619526863
+    },
+    {
+      "artifacts": [],
+      "attempt": 19,
+      "code": "import math\n\ndef build_agent(sandbox):\n    lander = sandbox.get_lander_body()\n    return lander\n\ndef agent_action(sandbox, agent_body, step_count):\n    # Get current state\n    pos = sandbox.get_lander_position()\n    x, y = pos\n    angle = sandbox.get_lander_angle()\n    omega = sandbox.get_lander_angular_velocity()\n    vel = agent_body.linearVelocity\n    vx, vy = vel.x, vel.y\n    half_w, half_h = sandbox.get_lander_size()\n    ground_y = sandbox.get_ground_y_top()\n    remaining_fuel = sandbox.get_remaining_fuel()\n    delay_steps = sandbox.get_thrust_delay_steps()\n    t = step_count * (1/60)  # Current simulation time in seconds\n\n    # Calculate corners for no-fly zone check\n    corners = []\n    for dx, dy in [(0.4, 0.3), (-0.4, 0.3), (-0.4, -0.3), (0.4, -0.3)]:\n        global_x = x + dx * math.cos(angle) - dy * math.sin(angle)\n        global_y = y + dx * math.sin(angle) + dy * math.cos(angle)\n        corners.append((global_x, global_y))\n    \n    in_nfz = any(10.5 <= cx <= 13.5 and (cy < 6.0 or cy > 20.0) for (cx, cy) in corners)\n\n    # Initialize control variables\n    torque = 0.0\n    thrust = 0.0\n\n    # No-fly zone avoidance\n    if in_nfz:\n        # Calculate corridor center and direction to escape\n        corridor_center_x = (10.5 + 13.5) / 2\n        if x < corridor_center_x:\n            desired_x = corridor_center_x + 1.0\n        else:\n            desired_x = corridor_center_x - 1.0\n        \n        # Apply proportional control to horizontal position\n        x_error = desired_x - x\n        torque += 60.0 * x_error  # Reduced gain for smoother escape\n        \n        # Apply P control for angle to stabilize\n        angle_error = -angle  # Target angle is 0\n        torque += 100.0 * angle_error  # Adjusted gain for angle correction\n    else:\n        # Calculate platform's position at landing time\n        height_above_ground = y - ground_y\n        if vy < 0 and height_above_ground > 0.1:\n            time_to_landing = height_above_ground / (-vy)\n        else:\n            time_to_landing = 10.0  # Default if not descending or near ground\n\n        # Calculate platform's position at landing time\n        x_platform_landing = 17.0 + 1.8 * math.sin((math.pi / 3) * (t + time_to_landing))\n        desired_x = x_platform_landing\n        x_error = desired_x - x\n\n        # PID control for horizontal position\n        torque += 40.0 * x_error  # P gain for horizontal tracking\n        \n        # PID control for angle\n        desired_angle = 0.0\n        angle_error = desired_angle - angle\n        angle_derivative = -omega  # Derivative of angle\n        torque += 80.0 * angle_error + 20.0 * angle_derivative  # P and D for angle\n\n    # Clamp torque to max/min\n    torque = max(-120, min(120, torque))\n\n    # Vertical control\n    if y > ground_y + 0.02:  # If not yet landed\n        height_above_ground = y - ground_y\n        # Calculate desired vertical velocity based on height\n        if height_above_ground > 2.0:\n            desired_vy = -1.0\n        elif height_above_ground > 1.0:\n            desired_vy = -0.5\n        elif height_above_ground > 0.5:\n            desired_vy = -0.2\n        else:\n            desired_vy = -0.05\n\n        # PID control for vertical velocity\n        vy_error = desired_vy - vy\n        thrust = 600.0 * (vy_error * 1.5)  # Increased gain for more aggressive descent control\n\n        # Clamp thrust to ensure fuel efficiency and prevent exceeding max\n        if thrust < 0:\n            thrust = max(0, thrust)\n        elif thrust > 600:\n            thrust = 600\n        else:\n            thrust = thrust\n\n        # Ensure enough fuel remains for landing\n        if remaining_fuel < 450:\n            thrust = max(0, thrust * (remaining_fuel / 450))\n    else:\n        thrust = 0.0\n\n    # Apply thrust and torque\n    sandbox.apply_thrust(thrust, torque)",
+      "code_sha256": "1f6d40d3fa1cdc5e79419596c98bc675c9c47b0e8184f5c5c699ecb1a499be10",
+      "constraints": {
+        "count": 0,
+        "violated": false,
+        "violations": []
+      },
+      "generation": {
+        "latency_seconds": 108.67320730164647,
+        "model": "Qwen3-14B",
+        "token_usage": {
+          "completion_tokens": 4636,
+          "prompt_tokens": 8644,
+          "total_tokens": 13280
+        }
+      },
+      "outcome": {
+        "category": "simulation_failure",
+        "failure_reason": "Touchdown vertical speed |vy|=1.36 m/s exceeds limit 0.05 m/s | Hull ground-contact edge x=[0.28, 1.03] not fully inside landing zone [16.68, 20.68] at touchdown | Landing angle |θ|=560.8° exceeds limit 10.0°"
+      },
+      "phase": "revision",
+      "physics": {},
+      "score": 0.0,
+      "step_count": 111,
+      "success": false,
+      "timestamp": 1785766637.0583625,
+      "verification_seconds": 0.050452696159482
+    },
+    {
+      "artifacts": [],
+      "attempt": 20,
+      "code": "import math\n\ndef build_agent(sandbox):\n    lander = sandbox.get_lander_body()\n    return lander\n\ndef agent_action(sandbox, agent_body, step_count):\n    # Get current state\n    pos = sandbox.get_lander_position()\n    x, y = pos\n    angle = sandbox.get_lander_angle()\n    omega = sandbox.get_lander_angular_velocity()\n    vel = agent_body.linearVelocity\n    vx, vy = vel.x, vel.y\n    half_w, half_h = sandbox.get_lander_size()\n    ground_y = sandbox.get_ground_y_top()\n    remaining_fuel = sandbox.get_remaining_fuel()\n    delay_steps = sandbox.get_thrust_delay_steps()\n    t = step_count * (1/60)  # Current simulation time in seconds\n\n    # Calculate corners for no-fly zone check\n    corners = []\n    for dx, dy in [(0.4, 0.3), (-0.4, 0.3), (-0.4, -0.3), (0.4, -0.3)]:\n        # Rotate point (dx, dy) by angle around lander's center\n        global_x = x + dx * math.cos(angle) - dy * math.sin(angle)\n        global_y = y + dx * math.sin(angle) + dy * math.cos(angle)\n        corners.append((global_x, global_y))\n    \n    in_nfz = any(10.5 <= cx <= 13.5 and (cy < 6.0 or cy > 20.0) for (cx, cy) in corners)\n\n    # Initialize control variables\n    torque = 0.0\n    thrust = 0.0\n\n    # No-fly zone avoidance\n    if in_nfz:\n        # Calculate corridor center and direction to escape\n        corridor_center_x = (10.5 + 13.5) / 2\n        if x < corridor_center_x:\n            desired_x = corridor_center_x + 1.0\n        else:\n            desired_x = corridor_center_x - 1.0\n        \n        # Apply proportional control to horizontal position\n        x_error = desired_x - x\n        torque += 30.0 * x_error  # Reduced gain for smoother escape\n        \n        # Apply P control for angle to stabilize\n        angle_error = -angle  # Target angle is 0\n        torque += 50.0 * angle_error  # Adjusted gain for angle correction\n    else:\n        # Calculate platform's current position\n        x_platform = 17.0 + 1.8 * math.sin((math.pi / 3) * t)\n        \n        # Estimate time to landing\n        height_above_ground = y - ground_y\n        if vy < 0 and height_above_ground > 0.1:\n            time_to_landing = height_above_ground / (-vy)\n        else:\n            time_to_landing = 10.0  # Default if not descending or near ground\n\n        # Calculate platform's position at landing time\n        x_platform_landing = 17.0 + 1.8 * math.sin((math.pi / 3) * (t + time_to_landing))\n        desired_x = x_platform_landing\n        x_error = desired_x - x\n\n        # PID control for horizontal position\n        torque += 40.0 * x_error  # P gain for horizontal tracking\n        \n        # PID control for angle\n        desired_angle = 0.0\n        angle_error = desired_angle - angle\n        angle_derivative = -omega  # Derivative of angle\n        torque += 80.0 * angle_error + 20.0 * angle_derivative  # P and D for angle\n\n    # Clamp torque to max/min\n    torque = max(-120, min(120, torque))\n\n    # Vertical control\n    if y > ground_y + 0.02:  # If not yet landed\n        height_above_ground = y - ground_y\n        \n        # Determine desired vertical velocity based on height\n        if height_above_ground > 2.0:\n            desired_vy = -1.0\n        elif height_above_ground > 1.0:\n            desired_vy = -0.5\n        elif height_above_ground > 0.5:\n            desired_vy = -0.2\n        else:\n            desired_vy = -0.05\n\n        # PID control for vertical velocity\n        vy_error = desired_vy - vy\n        thrust = 600.0 * (vy_error * 1.0)  # Adjusted gain for more precise control\n\n        # Clamp thrust to ensure fuel efficiency and prevent exceeding max\n        if thrust < 0:\n            thrust = max(0, thrust)\n        elif thrust > 600:\n            thrust = 600\n        else:\n            thrust = thrust\n\n        # Ensure enough fuel remains for landing\n        if remaining_fuel < 450:\n            thrust = max(0, thrust * (remaining_fuel / 450))\n    else:\n        thrust = 0.0\n\n    # Apply thrust and torque\n    sandbox.apply_thrust(thrust, torque)",
+      "code_sha256": "30bfb74b26dc27fee76ab58191f04be9647c08e9310e6d8e0099cee6857e4abc",
+      "constraints": {
+        "count": 0,
+        "violated": false,
+        "violations": []
+      },
+      "generation": {
+        "latency_seconds": 64.7611249126494,
+        "model": "Qwen3-14B",
+        "token_usage": {
+          "completion_tokens": 2835,
+          "prompt_tokens": 8590,
+          "total_tokens": 11425
+        }
+      },
+      "outcome": {
+        "category": "simulation_failure",
+        "failure_reason": "Touchdown vertical speed |vy|=1.55 m/s exceeds limit 0.05 m/s | Hull ground-contact edge x=[0.13, 0.82] not fully inside landing zone [16.64, 20.64] at touchdown | Landing angle |θ|=570.3° exceeds limit 10.0°"
+      },
+      "phase": "revision",
+      "physics": {},
+      "score": 0.0,
+      "step_count": 114,
+      "success": false,
+      "timestamp": 1785766701.860178,
+      "verification_seconds": 0.04034345969557762
+    }
+  ],
+  "best_attempt": 1,
+  "best_score": 0.0,
+  "config": {
+    "attempts": 20,
+    "generation_retries": 2,
+    "headless": true,
+    "max_tokens": 24576,
+    "method_options": {},
+    "run_index": 2,
+    "save_gif": false,
+    "seed": 0,
+    "temperature": 0.7,
+    "timeout_seconds": 7200.0,
+    "top_p": 0.95
+  },
+  "environment_pair": null,
+  "error_type": "design_fixation",
+  "finished_at": 1785766701.8603117,
+  "metadata": {
+    "auxiliary_usage": {
+      "calls": 0,
+      "failed_calls": 0,
+      "latency_seconds": 0,
+      "successful_calls": 0,
+      "token_usage": {}
+    },
+    "strategy_runtime": {
+      "auxiliary_calls": [],
+      "auxiliary_usage": {
+        "calls": 0,
+        "failed_calls": 0,
+        "latency_seconds": 0,
+        "successful_calls": 0,
+        "token_usage": {}
+      },
+      "candidate_calls": [
+        {
+          "attempt": 1,
+          "label": null,
+          "latency_seconds": 131.2329781409353,
+          "max_tokens": 24576,
+          "model": "Qwen3-14B",
+          "request_metadata": {
+            "attempt": 1,
+            "method": "vanilla",
+            "retry": 0
+          },
+          "retry": 0,
+          "seed": 2001,
+          "strategy_owned": false,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 8228,
+            "prompt_tokens": 4036,
+            "total_tokens": 12264
+          },
+          "top_p": 0.95
+        },
+        {
+          "attempt": 2,
+          "label": null,
+          "latency_seconds": 136.68225659243762,
+          "max_tokens": 24576,
+          "model": "Qwen3-14B",
+          "request_metadata": {
+            "attempt": 2,
+            "method": "vanilla",
+            "retry": 0
+          },
+          "retry": 0,
+          "seed": 2002,
+          "strategy_owned": false,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 8661,
+            "prompt_tokens": 6777,
+            "total_tokens": 15438
+          },
+          "top_p": 0.95
+        },
+        {
+          "attempt": 3,
+          "label": null,
+          "latency_seconds": 60.31643435545266,
+          "max_tokens": 24576,
+          "model": "Qwen3-14B",
+          "request_metadata": {
+            "attempt": 3,
+            "method": "vanilla",
+            "retry": 0
+          },
+          "retry": 0,
+          "seed": 2003,
+          "strategy_owned": false,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 3937,
+            "prompt_tokens": 8341,
+            "total_tokens": 12278
+          },
+          "top_p": 0.95
+        },
+        {
+          "attempt": 4,
+          "label": null,
+          "latency_seconds": 61.85526745766401,
+          "max_tokens": 24576,
+          "model": "Qwen3-14B",
+          "request_metadata": {
+            "attempt": 4,
+            "method": "vanilla",
+            "retry": 0
+          },
+          "retry": 0,
+          "seed": 2004,
+          "strategy_owned": false,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 3833,
+            "prompt_tokens": 8465,
+            "total_tokens": 12298
+          },
+          "top_p": 0.95
+        },
+        {
+          "attempt": 5,
+          "label": null,
+          "latency_seconds": 40.621402624994516,
+          "max_tokens": 24576,
+          "model": "Qwen3-14B",
+          "request_metadata": {
+            "attempt": 5,
+            "method": "vanilla",
+            "retry": 0
+          },
+          "retry": 0,
+          "seed": 2005,
+          "strategy_owned": false,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 2496,
+            "prompt_tokens": 8486,
+            "total_tokens": 10982
+          },
+          "top_p": 0.95
+        },
+        {
+          "attempt": 6,
+          "label": null,
+          "latency_seconds": 115.1273093726486,
+          "max_tokens": 24576,
+          "model": "Qwen3-14B",
+          "request_metadata": {
+            "attempt": 6,
+            "method": "vanilla",
+            "retry": 0
+          },
+          "retry": 0,
+          "seed": 2006,
+          "strategy_owned": false,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 7227,
+            "prompt_tokens": 8692,
+            "total_tokens": 15919
+          },
+          "top_p": 0.95
+        },
+        {
+          "attempt": 7,
+          "label": null,
+          "latency_seconds": 114.23702792078257,
+          "max_tokens": 24576,
+          "model": "Qwen3-14B",
+          "request_metadata": {
+            "attempt": 7,
+            "method": "vanilla",
+            "retry": 0
+          },
+          "retry": 0,
+          "seed": 2007,
+          "strategy_owned": false,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 7207,
+            "prompt_tokens": 8748,
+            "total_tokens": 15955
+          },
+          "top_p": 0.95
+        },
+        {
+          "attempt": 8,
+          "label": null,
+          "latency_seconds": 61.620954832062125,
+          "max_tokens": 24576,
+          "model": "Qwen3-14B",
+          "request_metadata": {
+            "attempt": 8,
+            "method": "vanilla",
+            "retry": 0
+          },
+          "retry": 0,
+          "seed": 2008,
+          "strategy_owned": false,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 3725,
+            "prompt_tokens": 8759,
+            "total_tokens": 12484
+          },
+          "top_p": 0.95
+        },
+        {
+          "attempt": 9,
+          "label": null,
+          "latency_seconds": 65.53250080905855,
+          "max_tokens": 24576,
+          "model": "Qwen3-14B",
+          "request_metadata": {
+            "attempt": 9,
+            "method": "vanilla",
+            "retry": 0
+          },
+          "retry": 0,
+          "seed": 2009,
+          "strategy_owned": false,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 3924,
+            "prompt_tokens": 8674,
+            "total_tokens": 12598
+          },
+          "top_p": 0.95
+        },
+        {
+          "attempt": 10,
+          "label": null,
+          "latency_seconds": 59.77404445782304,
+          "max_tokens": 24576,
+          "model": "Qwen3-14B",
+          "request_metadata": {
+            "attempt": 10,
+            "method": "vanilla",
+            "retry": 0
+          },
+          "retry": 0,
+          "seed": 2010,
+          "strategy_owned": false,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 3734,
+            "prompt_tokens": 8638,
+            "total_tokens": 12372
+          },
+          "top_p": 0.95
+        },
+        {
+          "attempt": 11,
+          "label": null,
+          "latency_seconds": 65.56935518980026,
+          "max_tokens": 24576,
+          "model": "Qwen3-14B",
+          "request_metadata": {
+            "attempt": 11,
+            "method": "vanilla",
+            "retry": 0
+          },
+          "retry": 0,
+          "seed": 2011,
+          "strategy_owned": false,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 3927,
+            "prompt_tokens": 8647,
+            "total_tokens": 12574
+          },
+          "top_p": 0.95
+        },
+        {
+          "attempt": 12,
+          "label": null,
+          "latency_seconds": 48.23164456151426,
+          "max_tokens": 24576,
+          "model": "Qwen3-14B",
+          "request_metadata": {
+            "attempt": 12,
+            "method": "vanilla",
+            "retry": 0
+          },
+          "retry": 0,
+          "seed": 2012,
+          "strategy_owned": false,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 2441,
+            "prompt_tokens": 8673,
+            "total_tokens": 11114
+          },
+          "top_p": 0.95
+        },
+        {
+          "attempt": 13,
+          "label": null,
+          "latency_seconds": 140.2358719035983,
+          "max_tokens": 24576,
+          "model": "Qwen3-14B",
+          "request_metadata": {
+            "attempt": 13,
+            "method": "vanilla",
+            "retry": 0
+          },
+          "retry": 0,
+          "seed": 2013,
+          "strategy_owned": false,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 6654,
+            "prompt_tokens": 8730,
+            "total_tokens": 15384
+          },
+          "top_p": 0.95
+        },
+        {
+          "attempt": 14,
+          "label": null,
+          "latency_seconds": 94.64232741482556,
+          "max_tokens": 24576,
+          "model": "Qwen3-14B",
+          "request_metadata": {
+            "attempt": 14,
+            "method": "vanilla",
+            "retry": 0
+          },
+          "retry": 0,
+          "seed": 2014,
+          "strategy_owned": false,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 4050,
+            "prompt_tokens": 8543,
+            "total_tokens": 12593
+          },
+          "top_p": 0.95
+        },
+        {
+          "attempt": 15,
+          "label": null,
+          "latency_seconds": 48.24094063229859,
+          "max_tokens": 24576,
+          "model": "Qwen3-14B",
+          "request_metadata": {
+            "attempt": 15,
+            "method": "vanilla",
+            "retry": 0
+          },
+          "retry": 0,
+          "seed": 2015,
+          "strategy_owned": false,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 2202,
+            "prompt_tokens": 8279,
+            "total_tokens": 10481
+          },
+          "top_p": 0.95
+        },
+        {
+          "attempt": 16,
+          "label": null,
+          "latency_seconds": 58.46624562330544,
+          "max_tokens": 24576,
+          "model": "Qwen3-14B",
+          "request_metadata": {
+            "attempt": 16,
+            "method": "vanilla",
+            "retry": 0
+          },
+          "retry": 0,
+          "seed": 2016,
+          "strategy_owned": false,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 2615,
+            "prompt_tokens": 8532,
+            "total_tokens": 11147
+          },
+          "top_p": 0.95
+        },
+        {
+          "attempt": 17,
+          "label": null,
+          "latency_seconds": 81.69847988523543,
+          "max_tokens": 24576,
+          "model": "Qwen3-14B",
+          "request_metadata": {
+            "attempt": 17,
+            "method": "vanilla",
+            "retry": 0
+          },
+          "retry": 0,
+          "seed": 2017,
+          "strategy_owned": false,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 3527,
+            "prompt_tokens": 8561,
+            "total_tokens": 12088
+          },
+          "top_p": 0.95
+        },
+        {
+          "attempt": 18,
+          "label": null,
+          "latency_seconds": 156.5022542849183,
+          "max_tokens": 24576,
+          "model": "Qwen3-14B",
+          "request_metadata": {
+            "attempt": 18,
+            "method": "vanilla",
+            "retry": 0
+          },
+          "retry": 0,
+          "seed": 2018,
+          "strategy_owned": false,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 6715,
+            "prompt_tokens": 8561,
+            "total_tokens": 15276
+          },
+          "top_p": 0.95
+        },
+        {
+          "attempt": 19,
+          "label": null,
+          "latency_seconds": 108.67320730164647,
+          "max_tokens": 24576,
+          "model": "Qwen3-14B",
+          "request_metadata": {
+            "attempt": 19,
+            "method": "vanilla",
+            "retry": 0
+          },
+          "retry": 0,
+          "seed": 2019,
+          "strategy_owned": false,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 4636,
+            "prompt_tokens": 8644,
+            "total_tokens": 13280
+          },
+          "top_p": 0.95
+        },
+        {
+          "attempt": 20,
+          "label": null,
+          "latency_seconds": 64.7611249126494,
+          "max_tokens": 24576,
+          "model": "Qwen3-14B",
+          "request_metadata": {
+            "attempt": 20,
+            "method": "vanilla",
+            "retry": 0
+          },
+          "retry": 0,
+          "seed": 2020,
+          "strategy_owned": false,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 2835,
+            "prompt_tokens": 8590,
+            "total_tokens": 11425
+          },
+          "top_p": 0.95
+        }
+      ],
+      "candidate_usage": {
+        "calls": 20,
+        "failed_calls": 0,
+        "latency_seconds": 1714.021628273651,
+        "successful_calls": 20,
+        "token_usage": {
+          "completion_tokens": 92574,
+          "prompt_tokens": 165376,
+          "total_tokens": 257950
+        }
+      },
+      "steps": [
+        {
+          "accepted_submissions": 1,
+          "labels": [
+            null
+          ],
+          "metadata": {},
+          "remaining_attempts": 20,
+          "requested_submissions": 1,
+          "submission_metadata": [
+            {}
+          ]
+        },
+        {
+          "accepted_submissions": 1,
+          "labels": [
+            null
+          ],
+          "metadata": {},
+          "remaining_attempts": 19,
+          "requested_submissions": 1,
+          "submission_metadata": [
+            {}
+          ]
+        },
+        {
+          "accepted_submissions": 1,
+          "labels": [
+            null
+          ],
+          "metadata": {},
+          "remaining_attempts": 18,
+          "requested_submissions": 1,
+          "submission_metadata": [
+            {}
+          ]
+        },
+        {
+          "accepted_submissions": 1,
+          "labels": [
+            null
+          ],
+          "metadata": {},
+          "remaining_attempts": 17,
+          "requested_submissions": 1,
+          "submission_metadata": [
+            {}
+          ]
+        },
+        {
+          "accepted_submissions": 1,
+          "labels": [
+            null
+          ],
+          "metadata": {},
+          "remaining_attempts": 16,
+          "requested_submissions": 1,
+          "submission_metadata": [
+            {}
+          ]
+        },
+        {
+          "accepted_submissions": 1,
+          "labels": [
+            null
+          ],
+          "metadata": {},
+          "remaining_attempts": 15,
+          "requested_submissions": 1,
+          "submission_metadata": [
+            {}
+          ]
+        },
+        {
+          "accepted_submissions": 1,
+          "labels": [
+            null
+          ],
+          "metadata": {},
+          "remaining_attempts": 14,
+          "requested_submissions": 1,
+          "submission_metadata": [
+            {}
+          ]
+        },
+        {
+          "accepted_submissions": 1,
+          "labels": [
+            null
+          ],
+          "metadata": {},
+          "remaining_attempts": 13,
+          "requested_submissions": 1,
+          "submission_metadata": [
+            {}
+          ]
+        },
+        {
+          "accepted_submissions": 1,
+          "labels": [
+            null
+          ],
+          "metadata": {},
+          "remaining_attempts": 12,
+          "requested_submissions": 1,
+          "submission_metadata": [
+            {}
+          ]
+        },
+        {
+          "accepted_submissions": 1,
+          "labels": [
+            null
+          ],
+          "metadata": {},
+          "remaining_attempts": 11,
+          "requested_submissions": 1,
+          "submission_metadata": [
+            {}
+          ]
+        },
+        {
+          "accepted_submissions": 1,
+          "labels": [
+            null
+          ],
+          "metadata": {},
+          "remaining_attempts": 10,
+          "requested_submissions": 1,
+          "submission_metadata": [
+            {}
+          ]
+        },
+        {
+          "accepted_submissions": 1,
+          "labels": [
+            null
+          ],
+          "metadata": {},
+          "remaining_attempts": 9,
+          "requested_submissions": 1,
+          "submission_metadata": [
+            {}
+          ]
+        },
+        {
+          "accepted_submissions": 1,
+          "labels": [
+            null
+          ],
+          "metadata": {},
+          "remaining_attempts": 8,
+          "requested_submissions": 1,
+          "submission_metadata": [
+            {}
+          ]
+        },
+        {
+          "accepted_submissions": 1,
+          "labels": [
+            null
+          ],
+          "metadata": {},
+          "remaining_attempts": 7,
+          "requested_submissions": 1,
+          "submission_metadata": [
+            {}
+          ]
+        },
+        {
+          "accepted_submissions": 1,
+          "labels": [
+            null
+          ],
+          "metadata": {},
+          "remaining_attempts": 6,
+          "requested_submissions": 1,
+          "submission_metadata": [
+            {}
+          ]
+        },
+        {
+          "accepted_submissions": 1,
+          "labels": [
+            null
+          ],
+          "metadata": {},
+          "remaining_attempts": 5,
+          "requested_submissions": 1,
+          "submission_metadata": [
+            {}
+          ]
+        },
+        {
+          "accepted_submissions": 1,
+          "labels": [
+            null
+          ],
+          "metadata": {},
+          "remaining_attempts": 4,
+          "requested_submissions": 1,
+          "submission_metadata": [
+            {}
+          ]
+        },
+        {
+          "accepted_submissions": 1,
+          "labels": [
+            null
+          ],
+          "metadata": {},
+          "remaining_attempts": 3,
+          "requested_submissions": 1,
+          "submission_metadata": [
+            {}
+          ]
+        },
+        {
+          "accepted_submissions": 1,
+          "labels": [
+            null
+          ],
+          "metadata": {},
+          "remaining_attempts": 2,
+          "requested_submissions": 1,
+          "submission_metadata": [
+            {}
+          ]
+        },
+        {
+          "accepted_submissions": 1,
+          "labels": [
+            null
+          ],
+          "metadata": {},
+          "remaining_attempts": 1,
+          "requested_submissions": 1,
+          "submission_metadata": [
+            {}
+          ]
+        }
+      ]
+    },
+    "strategy_snapshot": {}
+  },
+  "mode": "from-scratch",
+  "model": "Qwen3-14B",
+  "provider": "vllm",
+  "revision_attempts": 20,
+  "run_index": 2,
+  "schema_version": "2.0",
+  "source_environment": null,
+  "started_at": 1785764986.8244312,
+  "stop_reason": "budget_exhausted",
+  "strategy": "vanilla",
+  "success": false,
+  "success_attempt": null,
+  "target_environment": "Stage-1",
+  "task_id": "C_02",
+  "task_path": "Category5_Cybernetics_Control/C_02",
+  "token_usage": {
+    "completion_tokens": 92574,
+    "prompt_tokens": 165376,
+    "total_tokens": 257950
+  },
+  "total_time_seconds": 1715.0358806792647,
+  "verified_attempts": 20
+}

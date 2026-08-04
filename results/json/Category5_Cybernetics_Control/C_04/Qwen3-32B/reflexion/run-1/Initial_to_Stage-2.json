@@ -1,0 +1,1088 @@
+{
+  "analysis": {
+    "best_attempt_diagnostics": {
+      "constraint_violation_count": 0,
+      "failure_reason": null,
+      "joints_broken_count": 0,
+      "progress": 0.0,
+      "step_count": 600,
+      "structure_broken": false
+    },
+    "best_code_tokens": 695,
+    "cumulative_best_scores": [
+      {
+        "attempt": 0,
+        "best_score": 0.0
+      },
+      {
+        "attempt": 1,
+        "best_score": 0.0
+      },
+      {
+        "attempt": 2,
+        "best_score": 0.0
+      },
+      {
+        "attempt": 3,
+        "best_score": 0.0
+      },
+      {
+        "attempt": 4,
+        "best_score": 0.0
+      },
+      {
+        "attempt": 5,
+        "best_score": 0.0
+      },
+      {
+        "attempt": 6,
+        "best_score": 0.0
+      },
+      {
+        "attempt": 7,
+        "best_score": 0.0
+      },
+      {
+        "attempt": 8,
+        "best_score": 0.0
+      },
+      {
+        "attempt": 9,
+        "best_score": 0.0
+      },
+      {
+        "attempt": 10,
+        "best_score": 100.0
+      }
+    ],
+    "error_type": "success",
+    "revision_attempts": 10,
+    "success_attempt": 10,
+    "tokens": {
+      "all_calls_total": 208324,
+      "auxiliary_completion": 21793,
+      "auxiliary_prompt": 32371,
+      "auxiliary_total": 54164,
+      "completion": 54534,
+      "prompt": 99626,
+      "total": 154160
+    },
+    "trajectory_diagnostics": {
+      "code_length_trend": 0.644014,
+      "code_radicality": 0.207454,
+      "code_similarity_early": 0.729103,
+      "code_similarity_global": 0.792546,
+      "code_similarity_late": 0.801889,
+      "code_similarity_middle": 0.843531,
+      "code_similarity_recent": 0.811279,
+      "code_similarity_trend": 0.072786,
+      "first_positive_index": 10,
+      "improved_late": true,
+      "persistent_constraint_violation": false,
+      "score_trend": 33.333333,
+      "total_constraint_violations": 0,
+      "unique_failure_reasons": 1
+    },
+    "verified_attempts": 11
+  },
+  "attempt_budget": 20,
+  "attempts": [
+    {
+      "artifacts": [],
+      "attempt": 0,
+      "code": "import math\n\n\nACTIVATION_X_MAX = 10.0\n\n\nACTIVATION_X_MIN = 5.0\n\n\nAGENT_MASS = 5.0\n\n\nBACKWARD_FX_THRESHOLD = -34.0\n\n\nBACKWARD_SPEED_MAX = 100.0\n\n\nEXIT_X_MIN = 15.0\n\n\nTIME_STEP = 1.0 / 60.0\n\n\ndef _control_cfg(_sandbox):\n    return {\n        \"act_lo\": ACTIVATION_X_MIN,\n        \"act_hi\": ACTIVATION_X_MAX,\n        \"bfx\": BACKWARD_FX_THRESHOLD,\n        \"bspd\": BACKWARD_SPEED_MAX,\n    }\n\n\nclass Memory:\n    def __init__(self):\n        self.data = {}\n    def clear(self):\n        self.data = {}\n\n\nMEM = Memory()\n\n\ndef _weight_comp(sandbox):\n    gy = float(sandbox.world.gravity[1])\n    return float(AGENT_MASS) * abs(gy)\n\n\ndef _exit_x_min(_sandbox):\n    return float(EXIT_X_MIN)\n\n\ndef build_agent(sandbox):\n    MEM.clear()\n    return sandbox.get_agent_body()\n\n\ndef agent_action(sandbox, agent_body, step_count):\n    if \"initial_state\" not in MEM.data:\n        MEM.data[\"initial_state\"] = {\n            \"phase\": \"APPROACH\",\n            \"t\": 0,\n            \"lx\": None,\n            \"ly\": None,\n            \"vx\": 0.0,\n            \"vy\": 0.0,\n        }\n    state = MEM.data[\"initial_state\"]\n    cfg = _control_cfg(sandbox)\n    pd = sandbox.get_agent_position()\n    dt = TIME_STEP\n    if state[\"lx\"] is not None:\n        state[\"vx\"] = (pd[0] - state[\"lx\"]) / dt\n        state[\"vy\"] = (pd[1] - state[\"ly\"]) / dt\n    state[\"lx\"], state[\"ly\"] = pd[0], pd[1]\n    vxd, vyd = state[\"vx\"], state[\"vy\"]\n    x, y = pd[0], pd[1]\n    ty, w_comp = 1.5, _weight_comp(sandbox)\n    if state[\"phase\"] == \"APPROACH\":\n        fx = 15.0 if x < 5.0 else 10.0 * (7.0 - x) - 5.0 * vxd\n        fy = 50.0 * (ty - y) - 20.0 * vyd + w_comp\n        if cfg[\"act_lo\"] <= x <= cfg[\"act_hi\"] and abs(vxd) < 0.5:\n            state[\"phase\"] = \"UNLOCK\"\n            state[\"t\"] = 0\n    elif state[\"phase\"] == \"UNLOCK\":\n        vx_p, vy_p = sandbox.get_agent_velocity()\n        spd = math.hypot(vx_p, vy_p)\n        fx_cmd = cfg[\"bfx\"] - 1.0\n        fy_cmd = 50.0 * (ty - y) - 20.0 * vyd + w_comp\n        if spd >= cfg[\"bspd\"] * 0.99:\n            horiz = -1.5 * vx_p\n            if horiz > 0:\n                horiz = 0\n            fx_cmd += horiz\n            fy_cmd -= 1.5 * vy_p\n        fx, fy = fx_cmd, fy_cmd\n        state[\"t\"] += 1\n        if state[\"t\"] > 60:\n            state[\"phase\"] = \"ESCAPE\"\n    elif state[\"phase\"] == \"ESCAPE\":\n        fx, fy = 15.0, 50.0 * (ty - y) - 20.0 * vyd + w_comp\n        if x > _exit_x_min(sandbox) + 2.5:\n            state[\"phase\"] = \"HOLD\"\n    elif state[\"phase\"] == \"HOLD\":\n        fx, fy = 0.0, w_comp\n    sandbox.apply_agent_force(fx, fy)\n",
+      "code_sha256": "c970687258ef3a4300e2181f5004de9e2da8874fe9a26cdff5575a1ceb28bd13",
+      "constraints": {
+        "count": 0,
+        "violated": false,
+        "violations": []
+      },
+      "generation": null,
+      "outcome": {
+        "category": "simulation_failure",
+        "failure_reason": "Time limit reached before satisfying exit hold requirement"
+      },
+      "phase": "reference",
+      "physics": {},
+      "score": 0.0,
+      "step_count": 250000,
+      "success": false,
+      "timestamp": 1785758422.7803187,
+      "verification_seconds": 19.829518992453814
+    },
+    {
+      "artifacts": [],
+      "attempt": 1,
+      "code": "import math\n\nACTIVATION_X_MAX = 10.0\nACTIVATION_X_MIN = 5.0\nAGENT_MASS = 5.0\nBACKWARD_FX_THRESHOLD = -34.0\nBACKWARD_SPEED_MAX = 100.0\nEXIT_X_MIN = 15.0\nTIME_STEP = 1.0 / 60.0\n\ndef _control_cfg(_sandbox):\n    return {\n        \"act_lo\": ACTIVATION_X_MIN,\n        \"act_hi\": ACTIVATION_X_MAX,\n        \"bfx\": BACKWARD_FX_THRESHOLD,\n        \"bspd\": BACKWARD_SPEED_MAX,\n    }\n\nclass Memory:\n    def __init__(self):\n        self.data = {}\n    def clear(self):\n        self.data = {}\n\nMEM = Memory()\n\ndef _weight_comp(sandbox):\n    gy = float(sandbox.world.gravity[1])\n    return float(AGENT_MASS) * abs(gy)\n\ndef _exit_x_min(_sandbox):\n    return float(EXIT_X_MIN)\n\ndef build_agent(sandbox):\n    MEM.clear()\n    return sandbox.get_agent_body()\n\ndef agent_action(sandbox, agent_body, step_count):\n    if \"initial_state\" not in MEM.data:\n        MEM.data[\"initial_state\"] = {\n            \"phase\": \"APPROACH\",\n            \"t\": 0,\n            \"lx\": None,\n            \"ly\": None,\n            \"vx\": 0.0,\n            \"vy\": 0.0,\n        }\n    state = MEM.data[\"initial_state\"]\n    cfg = _control_cfg(sandbox)\n    pd = sandbox.get_agent_position()\n    dt = TIME_STEP\n    if state[\"lx\"] is not None:\n        state[\"vx\"] = (pd[0] - state[\"lx\"]) / dt\n        state[\"vy\"] = (pd[1] - state[\"ly\"]) / dt\n    state[\"lx\"], state[\"ly\"] = pd[0], pd[1]\n    vxd, vyd = state[\"vx\"], state[\"vy\"]\n    x, y = pd[0], pd[1]\n    ty, w_comp = 1.5, _weight_comp(sandbox)\n\n    if state[\"phase\"] == \"APPROACH\":\n        fx = 15.0 if x < 5.0 else 10.0 * (7.0 - x) - 5.0 * vxd\n        fy = 50.0 * (ty - y) - 20.0 * vyd + w_comp\n        if cfg[\"act_lo\"] <= x <= cfg[\"act_hi\"] and abs(vxd) < 0.5:\n            state[\"phase\"] = \"UNLOCK\"\n            state[\"t\"] = 0\n\n    elif state[\"phase\"] == \"UNLOCK\":\n        vx_p, vy_p = sandbox.get_agent_velocity()\n        spd = math.hypot(vx_p, vy_p)\n        fx_cmd = cfg[\"bfx\"] - 1.0  # -35.0 N\n        fy_cmd = 50.0 * (ty - y) - 20.0 * vyd + w_comp\n        if spd >= cfg[\"bspd\"] * 0.99:\n            horiz = -1.5 * vx_p\n            if horiz > 0:\n                horiz = 0\n            fx_cmd += horiz\n            fy_cmd -= 1.5 * vy_p\n        fx, fy = fx_cmd, fy_cmd\n        state[\"t\"] += 1\n        if state[\"t\"] > 60:\n            state[\"phase\"] = \"ESCAPE\"\n\n    elif state[\"phase\"] == \"ESCAPE\":\n        front, up, down = sandbox.get_whisker_readings()\n        fx = 35.0  # Increased forward force\n        if front < 0.5:  # Avoid collision\n            fx = 0.0\n        fy = 50.0 * (ty - y) - 20.0 * vyd + w_comp\n        if x >= _exit_x_min(sandbox):\n            state[\"phase\"] = \"HOLD\"\n\n    elif state[\"phase\"] == \"HOLD\":\n        fy = 50.0 * (ty - y) - 20.0 * vyd + w_comp\n        fx = 0.0\n        if y < 0.5:\n            fy += 5.0  # upward correction\n        elif y > 2.5:\n            fy -= 5.0  # downward correction\n\n    sandbox.apply_agent_force(fx, fy)",
+      "code_sha256": "a08b1175a72a21153aab28cc3b46536f69409dc52683f90b97712798e6fc22c7",
+      "constraints": {
+        "count": 0,
+        "violated": false,
+        "violations": []
+      },
+      "generation": {
+        "latency_seconds": 390.3073549401015,
+        "model": "Qwen3-32B",
+        "token_usage": {
+          "completion_tokens": 9297,
+          "prompt_tokens": 7627,
+          "total_tokens": 16924
+        }
+      },
+      "outcome": {
+        "category": "simulation_failure",
+        "failure_reason": "Time limit reached before satisfying exit hold requirement"
+      },
+      "phase": "revision",
+      "physics": {},
+      "score": 0.0,
+      "step_count": 250000,
+      "success": false,
+      "timestamp": 1785758886.2488408,
+      "verification_seconds": 20.005225785076618
+    },
+    {
+      "artifacts": [],
+      "attempt": 2,
+      "code": "import math\n\nACTIVATION_X_MAX = 10.0\nACTIVATION_X_MIN = 5.0\nAGENT_MASS = 5.0\nBACKWARD_FX_THRESHOLD = -34.0\nBACKWARD_SPEED_MAX = 100.0\nEXIT_X_MIN = 15.0\nTIME_STEP = 1.0 / 60.0\n\ndef _control_cfg(_sandbox):\n    return {\n        \"act_lo\": ACTIVATION_X_MIN,\n        \"act_hi\": ACTIVATION_X_MAX,\n        \"bfx\": BACKWARD_FX_THRESHOLD,\n        \"bspd\": BACKWARD_SPEED_MAX,\n    }\n\nclass Memory:\n    def __init__(self):\n        self.data = {}\n    def clear(self):\n        self.data = {}\n\nMEM = Memory()\n\ndef _weight_comp(sandbox):\n    gy = float(sandbox.world.gravity[1])\n    return float(AGENT_MASS) * abs(gy)\n\ndef _exit_x_min(_sandbox):\n    return float(EXIT_X_MIN)\n\ndef build_agent(sandbox):\n    MEM.clear()\n    return sandbox.get_agent_body()\n\ndef agent_action(sandbox, agent_body, step_count):\n    if \"initial_state\" not in MEM.data:\n        MEM.data[\"initial_state\"] = {\n            \"phase\": \"APPROACH\",\n            \"t\": 0,\n            \"lx\": None,\n            \"ly\": None,\n            \"vx\": 0.0,\n            \"vy\": 0.0,\n        }\n    state = MEM.data[\"initial_state\"]\n    cfg = _control_cfg(sandbox)\n    pd = sandbox.get_agent_position()\n    dt = TIME_STEP\n    if state[\"lx\"] is not None:\n        state[\"vx\"] = (pd[0] - state[\"lx\"]) / dt\n        state[\"vy\"] = (pd[1] - state[\"ly\"]) / dt\n    state[\"lx\"], state[\"ly\"] = pd[0], pd[1]\n    vxd, vyd = state[\"vx\"], state[\"vy\"]\n    x, y = pd[0], pd[1]\n    ty, w_comp = 1.5, _weight_comp(sandbox)\n\n    if state[\"phase\"] == \"APPROACH\":\n        fx = 15.0 if x < 5.0 else 10.0 * (7.0 - x) - 5.0 * vxd\n        fy = 50.0 * (ty - y) - 20.0 * vyd + w_comp\n        if cfg[\"act_lo\"] <= x <= cfg[\"act_hi\"] and abs(vxd) < 0.5:\n            state[\"phase\"] = \"UNLOCK\"\n            state[\"t\"] = 0\n\n    elif state[\"phase\"] == \"UNLOCK\":\n        vx_p, vy_p = sandbox.get_agent_velocity()\n        spd = math.hypot(vx_p, vy_p)\n        fx_cmd = -35.0  # Strictly -35 N to satisfy unlock condition\n        fy_cmd = 50.0 * (ty - y) - 20.0 * vyd + w_comp\n        fx, fy = fx_cmd, fy_cmd\n        state[\"t\"] += 1\n        if state[\"t\"] >= 5:\n            state[\"phase\"] = \"ESCAPE\"\n\n    elif state[\"phase\"] == \"ESCAPE\":\n        front, up, down = sandbox.get_whisker_readings()\n        # If wall is within 1.0 m, move up to bypass\n        if front < 1.0:\n            ty = 2.2  # Target higher y to go over wall\n            fx = 0.0  # Stop forward motion\n        else:\n            ty = 1.5  # Return to center y\n            fx = 30.0  # Apply strong forward force\n        fy = 50.0 * (ty - y) - 20.0 * vyd + w_comp\n\n        # Transition to HOLD if in exit zone\n        if x >= _exit_x_min(sandbox):\n            state[\"phase\"] = \"HOLD\"\n\n    elif state[\"phase\"] == \"HOLD\":\n        # Maintain vertical position in exit zone\n        if y < 0.5:\n            fy = 50.0 * (1.5 - y) - 20.0 * vyd + w_comp + 5.0\n        elif y > 2.5:\n            fy = 50.0 * (1.5 - y) - 20.0 * vyd + w_comp - 5.0\n        else:\n            fy = 50.0 * (1.5 - y) - 20.0 * vyd + w_comp\n        fx = 0.0  # Zero forward force to maintain position\n\n    sandbox.apply_agent_force(fx, fy)",
+      "code_sha256": "21917a49b452cb0b788b6936fe990dc5dd677b4b3f3224fe5b5ff1fa6e9344c3",
+      "constraints": {
+        "count": 0,
+        "violated": false,
+        "violations": []
+      },
+      "generation": {
+        "latency_seconds": 298.2096999846399,
+        "model": "Qwen3-32B",
+        "token_usage": {
+          "completion_tokens": 7114,
+          "prompt_tokens": 9806,
+          "total_tokens": 16920
+        }
+      },
+      "outcome": {
+        "category": "simulation_failure",
+        "failure_reason": "Time limit reached before satisfying exit hold requirement"
+      },
+      "phase": "revision",
+      "physics": {},
+      "score": 0.0,
+      "step_count": 250000,
+      "success": false,
+      "timestamp": 1785759373.7105358,
+      "verification_seconds": 20.01130821928382
+    },
+    {
+      "artifacts": [],
+      "attempt": 3,
+      "code": "import math\n\nACTIVATION_X_MIN = 5.0\nACTIVATION_X_MAX = 10.0\nBACKWARD_FX_THRESHOLD = -34.0\nBACKWARD_SPEED_MAX = 100.0\nEXIT_X_MIN = 15.0\nTIME_STEP = 1.0 / 60.0\nWHISKER_TRIGGER_THRESHOLD = 0.5  # Lowered threshold for early wall detection\nMAX_CONSECUTIVE_MAX_FRONT = 10  # Assume wall if front is max for this many steps\nSTUCK_VELOCITY_THRESHOLD = 0.1  # Consider robot stuck if speed < this for 3 steps\n\nclass Memory:\n    def __init__(self):\n        self.data = {}\n\nMEM = Memory()\n\ndef _weight_comp(sandbox):\n    gy = float(sandbox.world.gravity[1])\n    return float(5.0) * abs(gy)\n\ndef build_agent(sandbox):\n    MEM.clear()\n    return sandbox.get_agent_body()\n\ndef agent_action(sandbox, agent_body, step_count):\n    if \"initial_state\" not in MEM.data:\n        MEM.data[\"initial_state\"] = {\n            \"phase\": \"APPROACH\",\n            \"t\": 0,\n            \"lx\": None,\n            \"ly\": None,\n            \"vx\": 0.0,\n            \"vy\": 0.0,\n            \"consecutive_max_front\": 0,\n            \"stuck_counter\": 0,\n            \"last_unstuck_time\": 0,\n        }\n    state = MEM.data[\"initial_state\"]\n    pd = sandbox.get_agent_position()\n    dt = TIME_STEP\n    if state[\"lx\"] is not None:\n        state[\"vx\"] = (pd[0] - state[\"lx\"]) / dt\n        state[\"vy\"] = (pd[1] - state[\"ly\"]) / dt\n    state[\"lx\"], state[\"ly\"] = pd[0], pd[1]\n    vxd, vyd = state[\"vx\"], state[\"vy\"]\n    x, y = pd[0], pd[1]\n    ty, w_comp = 1.5, _weight_comp(sandbox)\n\n    if state[\"phase\"] == \"APPROACH\":\n        # Approach phase: move toward activation zone\n        fx = 15.0 if x < 5.0 else 10.0 * (7.0 - x) - 5.0 * vxd\n        fy = 50.0 * (ty - y) - 20.0 * vyd + w_comp\n        if ACTIVATION_X_MIN <= x <= ACTIVATION_X_MAX and abs(vxd) < 0.5:\n            state[\"phase\"] = \"UNLOCK\"\n            state[\"t\"] = 0\n            state[\"consecutive_max_front\"] = 0\n            state[\"stuck_counter\"] = 0\n\n    elif state[\"phase\"] == \"UNLOCK\":\n        # Unlock phase: apply -35 N for 5 steps\n        fx = -35.0\n        fy = 50.0 * (ty - y) - 20.0 * vyd + w_comp\n        state[\"t\"] += 1\n        if state[\"t\"] >= 5:\n            state[\"phase\"] = \"ESCAPE\"\n\n    elif state[\"phase\"] == \"ESCAPE\":\n        # Escape phase: navigate to exit zone\n        front, up, down = sandbox.get_whisker_readings()\n\n        # Track consecutive max front readings\n        if front >= 3.0 - 1e-3:\n            state[\"consecutive_max_front\"] += 1\n        else:\n            state[\"consecutive_max_front\"] = 0\n\n        # Detect if robot is stuck\n        if abs(vxd) < STUCK_VELOCITY_THRESHOLD and (step_count - state[\"last_unstuck_time\"]) > 60:\n            state[\"stuck_counter\"] += 1\n        else:\n            state[\"stuck_counter\"] = 0\n            state[\"last_unstuck_time\"] = step_count\n\n        # Stuck recovery: apply short backward force\n        if state[\"stuck_counter\"] >= 3:\n            fx = -10.0  # Short backward force to break free\n            state[\"stuck_counter\"] = 0\n        else:\n            # Normal forward force\n            fx = 40.0  # Increased forward force\n\n        # Wall detection and avoidance\n        if front < WHISKER_TRIGGER_THRESHOLD:\n            # Obstacle detected, move up to bypass\n            ty = 2.2\n            fx = 0.0  # Stop forward motion\n        elif state[\"consecutive_max_front\"] >= MAX_CONSECUTIVE_MAX_FRONT:\n            # Assume wall nearby, move up and continue forward\n            ty = 2.2\n        else:\n            # Normal centering\n            ty = 1.5\n\n        # Apply vertical force (PD controller)\n        fy = 50.0 * (ty - y) - 20.0 * vyd + w_comp\n\n        # Transition to HOLD phase if in exit zone\n        if x >= EXIT_X_MIN:\n            state[\"phase\"] = \"HOLD\"\n\n    elif state[\"phase\"] == \"HOLD\":\n        # Maintain position in exit zone\n        if y < 0.5:\n            fy = 50.0 * (1.5 - y) - 20.0 * vyd + w_comp + 5.0\n        elif y > 2.5:\n            fy = 50.0 * (1.5 - y) - 20.0 * vyd + w_comp - 5.0\n        else:\n            fy = 50.0 * (1.5 - y) - 20.0 * vyd + w_comp\n        fx = 0.0  # Zero forward force\n\n    sandbox.apply_agent_force(fx, fy)",
+      "code_sha256": "1b033769b3bd913e3bcb81e9f638761c06be760f9f2242e59fe2e39c39b36da4",
+      "constraints": {
+        "count": 0,
+        "violated": false,
+        "violations": []
+      },
+      "generation": {
+        "latency_seconds": 242.33755436353385,
+        "model": "Qwen3-32B",
+        "token_usage": {
+          "completion_tokens": 5247,
+          "prompt_tokens": 10283,
+          "total_tokens": 15530
+        }
+      },
+      "outcome": {
+        "category": "construction_error",
+        "error": "Error building agent: 'Memory' object has no attribute 'clear'",
+        "error_message": "'Memory' object has no attribute 'clear'",
+        "error_stage": "agent_construction",
+        "error_type": "agent_building_error"
+      },
+      "phase": "revision",
+      "physics": {},
+      "score": 0.0,
+      "step_count": null,
+      "success": false,
+      "timestamp": 1785759687.0383067,
+      "verification_seconds": 0.006482968106865883
+    },
+    {
+      "artifacts": [],
+      "attempt": 4,
+      "code": "import math\n\nACTIVATION_X_MIN = 5.0\nACTIVATION_X_MAX = 10.0\nBACKWARD_FX_THRESHOLD = -34.0\nBACKWARD_SPEED_MAX = 100.0\nEXIT_X_MIN = 15.0\nTIME_STEP = 1.0 / 60.0\nWHISKER_TRIGGER_THRESHOLD = 0.5  # Lowered threshold for early wall detection\nMAX_CONSECUTIVE_MAX_FRONT = 10    # Assume wall if front is max for this many steps\nSTUCK_VELOCITY_THRESHOLD = 0.1    # Consider robot stuck if speed < this for 3 steps\n\nclass Memory:\n    def __init__(self):\n        self.data = {}\n\nMEM = Memory()\n\ndef _weight_comp(sandbox):\n    gy = float(sandbox.world.gravity[1])\n    return float(5.0) * abs(gy)\n\ndef build_agent(sandbox):\n    # Fix the Memory issue by directly resetting data\n    MEM.data = {}\n    return sandbox.get_agent_body()\n\ndef agent_action(sandbox, agent_body, step_count):\n    if \"initial_state\" not in MEM.data:\n        MEM.data[\"initial_state\"] = {\n            \"phase\": \"APPROACH\",\n            \"t\": 0,\n            \"lx\": None,\n            \"ly\": None,\n            \"vx\": 0.0,\n            \"vy\": 0.0,\n            \"consecutive_max_front\": 0,\n            \"stuck_counter\": 0,\n            \"last_unstuck_time\": 0,\n        }\n    state = MEM.data[\"initial_state\"]\n    pd = sandbox.get_agent_position()\n    dt = TIME_STEP\n    if state[\"lx\"] is not None:\n        state[\"vx\"] = (pd[0] - state[\"lx\"]) / dt\n        state[\"vy\"] = (pd[1] - state[\"ly\"]) / dt\n    state[\"lx\"], state[\"ly\"] = pd[0], pd[1]\n    vxd, vyd = state[\"vx\"], state[\"vy\"]\n    x, y = pd[0], pd[1]\n    ty, w_comp = 1.5, _weight_comp(sandbox)\n\n    if state[\"phase\"] == \"APPROACH\":\n        # Approach phase: move toward activation zone\n        if x < 5.0:\n            fx = 15.0\n        else:\n            # Slow down as approaching activation zone\n            fx = 10.0 * (7.0 - x) - 5.0 * vxd\n        fy = 50.0 * (ty - y) - 20.0 * vyd + w_comp\n        # Transition to UNLOCK when in activation zone and velocity is low\n        if ACTIVATION_X_MIN <= x <= ACTIVATION_X_MAX and abs(vxd) < 0.5:\n            state[\"phase\"] = \"UNLOCK\"\n            state[\"t\"] = 0\n            state[\"consecutive_max_front\"] = 0\n            state[\"stuck_counter\"] = 0\n\n    elif state[\"phase\"] == \"UNLOCK\":\n        # Apply -35 N for at least 5 steps\n        fx = -35.0\n        fy = 50.0 * (ty - y) - 20.0 * vyd + w_comp\n        state[\"t\"] += 1\n        # Transition to ESCAPE after 5 steps\n        if state[\"t\"] >= 5:\n            state[\"phase\"] = \"ESCAPE\"\n\n    elif state[\"phase\"] == \"ESCAPE\":\n        front, up, down = sandbox.get_whisker_readings()\n\n        # Track consecutive max front readings\n        if front >= 3.0 - 1e-3:\n            state[\"consecutive_max_front\"] += 1\n        else:\n            state[\"consecutive_max_front\"] = 0\n\n        # Detect if robot is stuck\n        if abs(vxd) < STUCK_VELOCITY_THRESHOLD and (step_count - state[\"last_unstuck_time\"]) > 60:\n            state[\"stuck_counter\"] += 1\n        else:\n            state[\"stuck_counter\"] = 0\n            state[\"last_unstuck_time\"] = step_count\n\n        # Stuck recovery: apply short backward force\n        if state[\"stuck_counter\"] >= 3:\n            fx = -10.0  # Short backward force to break free\n            state[\"stuck_counter\"] = 0\n        else:\n            # Normal forward force\n            fx = 40.0  # Increased forward force\n\n        # Wall detection and avoidance\n        if front < WHISKER_TRIGGER_THRESHOLD:\n            # Obstacle detected, move up to bypass\n            ty = 2.2\n            fx = 0.0  # Stop forward motion\n        elif state[\"consecutive_max_front\"] >= MAX_CONSECUTIVE_MAX_FRONT:\n            # Assume wall nearby, move up and continue forward\n            ty = 2.2\n        else:\n            # Normal centering\n            ty = 1.5\n\n        # Apply vertical force (PD controller)\n        fy = 50.0 * (ty - y) - 20.0 * vyd + w_comp\n\n        # Transition to HOLD phase if in exit zone\n        if x >= EXIT_X_MIN:\n            state[\"phase\"] = \"HOLD\"\n\n    elif state[\"phase\"] == \"HOLD\":\n        # Maintain position in exit zone\n        if y < 0.5:\n            fy = 50.0 * (1.5 - y) - 20.0 * vyd + w_comp + 5.0\n        elif y > 2.5:\n            fy = 50.0 * (1.5 - y) - 20.0 * vyd + w_comp - 5.0\n        else:\n            fy = 50.0 * (1.5 - y) - 20.0 * vyd + w_comp\n        fx = 0.0  # Zero forward force\n\n    sandbox.apply_agent_force(fx, fy)",
+      "code_sha256": "cd26ee089c522908efa025af06ad9830505457481f6df70ed752ed5898217eab",
+      "constraints": {
+        "count": 0,
+        "violated": false,
+        "violations": []
+      },
+      "generation": {
+        "latency_seconds": 337.3624376002699,
+        "model": "Qwen3-32B",
+        "token_usage": {
+          "completion_tokens": 8303,
+          "prompt_tokens": 9685,
+          "total_tokens": 17988
+        }
+      },
+      "outcome": {
+        "category": "simulation_failure",
+        "failure_reason": "Time limit reached before satisfying exit hold requirement"
+      },
+      "phase": "revision",
+      "physics": {},
+      "score": 0.0,
+      "step_count": 250000,
+      "success": false,
+      "timestamp": 1785760074.794597,
+      "verification_seconds": 20.290913861244917
+    },
+    {
+      "artifacts": [],
+      "attempt": 5,
+      "code": "import math\n\nACTIVATION_X_MIN = 5.0\nACTIVATION_X_MAX = 10.0\nBACKWARD_FX_THRESHOLD = -35.0  # Strictly <= -34.0 N to satisfy unlock\nBACKWARD_SPEED_MAX = 100.0\nEXIT_X_MIN = 15.0\nTIME_STEP = 1.0 / 60.0\nWHISKER_TRIGGER_THRESHOLD = 0.5  # Early wall detection\nMAX_CONSECUTIVE_MAX_FRONT = 10    # Assume wall if front is max for this many steps\nSTUCK_VELOCITY_THRESHOLD = 0.1    # Consider robot stuck if speed < this for 3 steps\n\nclass Memory:\n    def __init__(self):\n        self.data = {}\n\nMEM = Memory()\n\ndef _weight_comp(sandbox):\n    gy = float(sandbox.world.gravity[1])\n    return float(5.0) * abs(gy)\n\ndef build_agent(sandbox):\n    MEM.data = {}  # Fix for missing clear() in original code\n    return sandbox.get_agent_body()\n\ndef agent_action(sandbox, agent_body, step_count):\n    if \"initial_state\" not in MEM.data:\n        MEM.data[\"initial_state\"] = {\n            \"phase\": \"APPROACH\",\n            \"t\": 0,\n            \"lx\": None,\n            \"ly\": None,\n            \"vx\": 0.0,\n            \"vy\": 0.0,\n            \"consecutive_max_front\": 0,\n            \"stuck_counter\": 0,\n            \"last_unstuck_time\": 0,\n            \"exit_hold_steps\": 0,\n        }\n    state = MEM.data[\"initial_state\"]\n    pd = sandbox.get_agent_position()\n    dt = TIME_STEP\n\n    if state[\"lx\"] is not None:\n        state[\"vx\"] = (pd[0] - state[\"lx\"]) / dt\n        state[\"vy\"] = (pd[1] - state[\"ly\"]) / dt\n    state[\"lx\"], state[\"ly\"] = pd[0], pd[1]\n    vxd, vyd = state[\"vx\"], state[\"vy\"]\n    x, y = pd[0], pd[1]\n    ty, w_comp = 1.5, _weight_comp(sandbox)\n\n    if state[\"phase\"] == \"APPROACH\":\n        # Approach phase: move toward activation zone\n        if x < 5.0:\n            fx = 15.0\n        else:\n            fx = 10.0 * (7.0 - x) - 5.0 * vxd\n        fy = 50.0 * (ty - y) - 20.0 * vyd + w_comp\n        if ACTIVATION_X_MIN <= x <= ACTIVATION_X_MAX and abs(vxd) < 0.5:\n            state[\"phase\"] = \"UNLOCK\"\n            state[\"t\"] = 0\n            state[\"consecutive_max_front\"] = 0\n            state[\"stuck_counter\"] = 0\n\n    elif state[\"phase\"] == \"UNLOCK\":\n        fx = BACKWARD_FX_THRESHOLD  # -35 N to satisfy unlock\n        fy = 50.0 * (ty - y) - 20.0 * vyd + w_comp\n        state[\"t\"] += 1\n        if state[\"t\"] >= 5:\n            state[\"phase\"] = \"ESCAPE\"\n\n    elif state[\"phase\"] == \"ESCAPE\":\n        front, up, down = sandbox.get_whisker_readings()\n\n        # Track consecutive max front readings\n        if front >= 3.0 - 1e-3:\n            state[\"consecutive_max_front\"] += 1\n        else:\n            state[\"consecutive_max_front\"] = 0\n\n        # Detect if robot is stuck\n        if abs(vxd) < STUCK_VELOCITY_THRESHOLD and (step_count - state[\"last_unstuck_time\"]) > 60:\n            state[\"stuck_counter\"] += 1\n        else:\n            state[\"stuck_counter\"] = 0\n            state[\"last_unstuck_time\"] = step_count\n\n        # Stuck recovery: apply short backward force\n        if state[\"stuck_counter\"] >= 3:\n            fx = -10.0  # Short backward force to break free\n            state[\"stuck_counter\"] = 0\n        else:\n            # Normal forward force with velocity-based feedback\n            fx = 45.0 - 10.0 * max(0, vxd - 2.0)  # Reduce force if too fast\n\n        # Wall detection and avoidance\n        if front < WHISKER_TRIGGER_THRESHOLD or state[\"consecutive_max_front\"] >= MAX_CONSECUTIVE_MAX_FRONT:\n            ty = 2.2  # Move up to bypass wall\n        else:\n            ty = 1.5  # Center vertically\n\n        # Apply vertical force (PD controller)\n        fy = 50.0 * (ty - y) - 20.0 * vyd + w_comp\n\n        # Transition to HOLD phase if in exit zone\n        if x >= EXIT_X_MIN:\n            state[\"phase\"] = \"HOLD\"\n            state[\"exit_hold_steps\"] = 0\n\n    elif state[\"phase\"] == \"HOLD\":\n        # Maintain position in exit zone\n        if y < 0.5:\n            fy = 50.0 * (1.5 - y) - 20.0 * vyd + w_comp + 5.0\n        elif y > 2.5:\n            fy = 50.0 * (1.5 - y) - 20.0 * vyd + w_comp - 5.0\n        else:\n            fy = 50.0 * (1.5 - y) - 20.0 * vyd + w_comp\n        fx = 0.0  # Zero forward force\n\n        # Count consecutive steps in exit zone\n        if x >= EXIT_X_MIN:\n            state[\"exit_hold_steps\"] += 1\n        else:\n            state[\"exit_hold_steps\"] = 0\n\n    sandbox.apply_agent_force(fx, fy)",
+      "code_sha256": "1dcdafcdadc6f9ef26c7b027db45a9b39a02de603b028610d6b5f11f6f0d5659",
+      "constraints": {
+        "count": 0,
+        "violated": false,
+        "violations": []
+      },
+      "generation": {
+        "latency_seconds": 142.29711653478444,
+        "model": "Qwen3-32B",
+        "token_usage": {
+          "completion_tokens": 3374,
+          "prompt_tokens": 10325,
+          "total_tokens": 13699
+        }
+      },
+      "outcome": {
+        "category": "simulation_failure",
+        "failure_reason": "Time limit reached before satisfying exit hold requirement"
+      },
+      "phase": "revision",
+      "physics": {},
+      "score": 0.0,
+      "step_count": 250000,
+      "success": false,
+      "timestamp": 1785760321.1903822,
+      "verification_seconds": 20.41485565342009
+    },
+    {
+      "artifacts": [],
+      "attempt": 6,
+      "code": "import math\n\nACTIVATION_X_MIN = 5.0\nACTIVATION_X_MAX = 10.0\nBACKWARD_FX_THRESHOLD = -35.0  # Strictly less than -34.0 N to satisfy unlock\nBACKWARD_SPEED_MAX = 100.0\nEXIT_X_MIN = 15.0\nTIME_STEP = 1.0 / 60.0\nWHISKER_TRIGGER_THRESHOLD = 0.5  # Early wall detection\nMAX_CONSECUTIVE_MAX_FRONT = 10    # Assume wall if front is max for this many steps\nSTUCK_VELOCITY_THRESHOLD = 0.1    # Consider robot stuck if speed < this for 3 steps\nWALL_BYPASS_ZONE_X = (8.5, 9.5)   # Known internal wall region with sensor issues\n\nclass Memory:\n    def __init__(self):\n        self.data = {}\n\nMEM = Memory()\n\ndef _weight_comp(sandbox):\n    gy = float(sandbox.world.gravity[1])\n    return float(5.0) * abs(gy)\n\ndef build_agent(sandbox):\n    MEM.data = {}  # Fix for missing clear() in original code\n    return sandbox.get_agent_body()\n\ndef agent_action(sandbox, agent_body, step_count):\n    if \"initial_state\" not in MEM.data:\n        MEM.data[\"initial_state\"] = {\n            \"phase\": \"APPROACH\",\n            \"t\": 0,\n            \"lx\": None,\n            \"ly\": None,\n            \"vx\": 0.0,\n            \"vy\": 0.0,\n            \"consecutive_max_front\": 0,\n            \"stuck_counter\": 0,\n            \"last_unstuck_time\": 0,\n            \"exit_hold_steps\": 0,\n        }\n    state = MEM.data[\"initial_state\"]\n    pd = sandbox.get_agent_position()\n    dt = TIME_STEP\n\n    if state[\"lx\"] is not None:\n        state[\"vx\"] = (pd[0] - state[\"lx\"]) / dt\n        state[\"vy\"] = (pd[1] - state[\"ly\"]) / dt\n    state[\"lx\"], state[\"ly\"] = pd[0], pd[1]\n    vxd, vyd = state[\"vx\"], state[\"vy\"]\n    x, y = pd[0], pd[1]\n    ty, w_comp = 1.5, _weight_comp(sandbox)\n\n    if state[\"phase\"] == \"APPROACH\":\n        # Approach phase: move toward activation zone\n        if x < 5.0:\n            fx = 15.0\n        else:\n            fx = 10.0 * (7.0 - x) - 5.0 * vxd\n        fy = 50.0 * (ty - y) - 20.0 * vyd + w_comp\n        if ACTIVATION_X_MIN <= x <= ACTIVATION_X_MAX and abs(vxd) < 0.5:\n            state[\"phase\"] = \"UNLOCK\"\n            state[\"t\"] = 0\n            state[\"consecutive_max_front\"] = 0\n            state[\"stuck_counter\"] = 0\n\n    elif state[\"phase\"] == \"UNLOCK\":\n        fx = BACKWARD_FX_THRESHOLD  # -35 N to satisfy unlock\n        fy = 50.0 * (ty - y) - 20.0 * vyd + w_comp\n        state[\"t\"] += 1\n        if state[\"t\"] >= 5:\n            state[\"phase\"] = \"ESCAPE\"\n\n    elif state[\"phase\"] == \"ESCAPE\":\n        front, up, down = sandbox.get_whisker_readings()\n\n        # Floor/ceiling detection and bypass\n        if down < 0.5:\n            ty = 2.2  # Move up to bypass floor wall\n        elif up < 0.5:\n            ty = 0.5  # Move down to bypass ceiling wall\n        else:\n            # Known wall zone with misaligned sensors\n            if WALL_BYPASS_ZONE_X[0] <= x <= WALL_BYPASS_ZONE_X[1]:\n                if 0.0 <= y <= 2.0:\n                    ty = 2.2  # Move above wall\n                else:\n                    ty = 1.5\n            else:\n                # Normal wall detection based on front whisker\n                if front < WHISKER_TRIGGER_THRESHOLD or state[\"consecutive_max_front\"] >= MAX_CONSECUTIVE_MAX_FRONT:\n                    ty = 2.2\n                else:\n                    ty = 1.5\n\n        # Track consecutive max front readings\n        if front >= 3.0 - 1e-3:\n            state[\"consecutive_max_front\"] += 1\n        else:\n            state[\"consecutive_max_front\"] = 0\n\n        # Detect if robot is stuck\n        if abs(vxd) < STUCK_VELOCITY_THRESHOLD and (step_count - state[\"last_unstuck_time\"]) > 60:\n            state[\"stuck_counter\"] += 1\n        else:\n            state[\"stuck_counter\"] = 0\n            state[\"last_unstuck_time\"] = step_count\n\n        # Stuck recovery: adjust vertical position\n        if state[\"stuck_counter\"] >= 3:\n            if y < 1.5:\n                ty = 2.2  # Move up\n            else:\n                ty = 0.5  # Move down\n            state[\"stuck_counter\"] = 0\n\n        # Apply forward force with velocity damping\n        fx = 45.0 - 10.0 * max(0, vxd - 2.0)  # Reduce force if too fast\n\n        # Apply vertical force (PD controller)\n        fy = 50.0 * (ty - y) - 20.0 * vyd + w_comp\n\n        # Transition to HOLD phase if in exit zone\n        if x >= EXIT_X_MIN:\n            state[\"phase\"] = \"HOLD\"\n            state[\"exit_hold_steps\"] = 0\n\n    elif state[\"phase\"] == \"HOLD\":\n        # Maintain position in exit zone\n        if y < 0.5:\n            fy = 50.0 * (1.5 - y) - 20.0 * vyd + w_comp + 5.0\n        elif y > 2.5:\n            fy = 50.0 * (1.5 - y) - 20.0 * vyd + w_comp - 5.0\n        else:\n            fy = 50.0 * (1.5 - y) - 20.0 * vyd + w_comp\n        fx = 0.0  # Zero forward force\n\n        # Count consecutive steps in exit zone\n        if x >= EXIT_X_MIN:\n            state[\"exit_hold_steps\"] += 1\n        else:\n            state[\"exit_hold_steps\"] = 0\n\n    sandbox.apply_agent_force(fx, fy)",
+      "code_sha256": "2bfb43e3f99ba5bc4d683e6bbd83de00abef44386b9de3492bf3b5cd1b374e57",
+      "constraints": {
+        "count": 0,
+        "violated": false,
+        "violations": []
+      },
+      "generation": {
+        "latency_seconds": 264.66633088700473,
+        "model": "Qwen3-32B",
+        "token_usage": {
+          "completion_tokens": 6456,
+          "prompt_tokens": 10389,
+          "total_tokens": 16845
+        }
+      },
+      "outcome": {
+        "category": "simulation_failure",
+        "failure_reason": "Time limit reached before satisfying exit hold requirement"
+      },
+      "phase": "revision",
+      "physics": {},
+      "score": 0.0,
+      "step_count": 250000,
+      "success": false,
+      "timestamp": 1785760782.7397153,
+      "verification_seconds": 20.339356657117605
+    },
+    {
+      "artifacts": [],
+      "attempt": 7,
+      "code": "import math\n\nACTIVATION_X_MIN = 5.0\nACTIVATION_X_MAX = 10.0\nBACKWARD_FX_THRESHOLD = -35.0\nBACKWARD_SPEED_MAX = 100.0\nEXIT_X_MIN = 15.0\nTIME_STEP = 1.0 / 60.0\nWHISKER_TRIGGER_THRESHOLD = 0.5\nSTUCK_VELOCITY_THRESHOLD = 0.1\nSTUCK_COUNTER_THRESHOLD = 3\nWALL_BYPASS_ZONES = [(8.0, 9.5), (13.5, 14.5)]\nMAX_FORWARD_FORCE = 15.0\nSTALLED_FORCE = -10.0\nHOLD_FORCE = 10.0\nVERTICAL_PD_KP = 50.0\nVERTICAL_PD_KD = 20.0\n\nclass Memory:\n    def __init__(self):\n        self.data = {}\n\nMEM = Memory()\n\ndef _weight_comp(sandbox):\n    gy = float(sandbox.world.gravity[1])\n    return float(5.0) * abs(gy)\n\ndef build_agent(sandbox):\n    MEM.data = {}\n    return sandbox.get_agent_body()\n\ndef agent_action(sandbox, agent_body, step_count):\n    if \"initial_state\" not in MEM.data:\n        MEM.data[\"initial_state\"] = {\n            \"phase\": \"APPROACH\",\n            \"t\": 0,\n            \"lx\": None,\n            \"ly\": None,\n            \"vx\": 0.0,\n            \"vy\": 0.0,\n            \"stuck_counter\": 0,\n            \"last_unstuck_time\": 0,\n            \"exit_hold_steps\": 0,\n        }\n    state = MEM.data[\"initial_state\"]\n    pd = sandbox.get_agent_position()\n    dt = TIME_STEP\n\n    if state[\"lx\"] is not None:\n        state[\"vx\"] = (pd[0] - state[\"lx\"]) / dt\n        state[\"vy\"] = (pd[1] - state[\"ly\"]) / dt\n    state[\"lx\"], state[\"ly\"] = pd[0], pd[1]\n    vxd, vyd = state[\"vx\"], state[\"vy\"]\n    x, y = pd[0], pd[1]\n    ty, w_comp = 1.5, _weight_comp(sandbox)\n\n    if state[\"phase\"] == \"APPROACH\":\n        if x < 5.0:\n            fx = 15.0\n        else:\n            fx = 10.0 * (7.0 - x) - 5.0 * vxd\n        fy = VERTICAL_PD_KP * (ty - y) - VERTICAL_PD_KD * vyd + w_comp\n        if ACTIVATION_X_MIN <= x <= ACTIVATION_X_MAX and abs(vxd) < 0.5:\n            state[\"phase\"] = \"UNLOCK\"\n            state[\"t\"] = 0\n\n    elif state[\"phase\"] == \"UNLOCK\":\n        fx = BACKWARD_FX_THRESHOLD\n        fy = VERTICAL_PD_KP * (ty - y) - VERTICAL_PD_KD * vyd + w_comp\n        state[\"t\"] += 1\n        if state[\"t\"] >= 5:\n            state[\"phase\"] = \"ESCAPE\"\n\n    elif state[\"phase\"] == \"ESCAPE\":\n        front, up, down = sandbox.get_whisker_readings()\n\n        # Floor/ceiling detection\n        if down < 0.5:\n            ty = 2.2\n        elif up < 0.5:\n            ty = 0.5\n\n        # Wall bypass zones\n        in_bypass_zone = any(zone[0] <= x <= zone[1] for zone in WALL_BYPASS_ZONES)\n        if in_bypass_zone:\n            ty = 2.2  # Ascend to bypass wall\n\n        # Stall detection\n        if abs(vxd) < STUCK_VELOCITY_THRESHOLD and (step_count - state[\"last_unstuck_time\"]) > 60:\n            state[\"stuck_counter\"] += 1\n        else:\n            state[\"stuck_counter\"] = 0\n            state[\"last_unstuck_time\"] = step_count\n\n        # Apply vertical PD control\n        fy = VERTICAL_PD_KP * (ty - y) - VERTICAL_PD_KD * vyd + w_comp\n\n        # Apply forward force with damping\n        fx = MAX_FORWARD_FORCE - 5.0 * max(0, vxd - 1.0)\n\n        # Stall recovery\n        if state[\"stuck_counter\"] >= STUCK_COUNTER_THRESHOLD:\n            fx = STALLED_FORCE\n            state[\"stuck_counter\"] = 0\n\n        # Transition to HOLD phase if in exit zone\n        if x >= EXIT_X_MIN and 0.5 <= y <= 2.5:\n            state[\"phase\"] = \"HOLD\"\n            state[\"exit_hold_steps\"] = 0\n\n    elif state[\"phase\"] == \"HOLD\":\n        # Maintain position in exit zone\n        if y < 0.5:\n            ty = 1.0\n        elif y > 2.5:\n            ty = 2.0\n        else:\n            ty = 1.5\n        fy = VERTICAL_PD_KP * (ty - y) - VERTICAL_PD_KD * vyd + w_comp\n        fx = HOLD_FORCE  # Small forward drift to stay in zone\n\n        # Count steps in exit zone\n        if x >= EXIT_X_MIN and 0.5 <= y <= 2.5:\n            state[\"exit_hold_steps\"] += 1\n        else:\n            state[\"exit_hold_steps\"] = 0\n\n    sandbox.apply_agent_force(fx, fy)",
+      "code_sha256": "5d2edf5309814785e9a8d044300be646e8e4a1d56239b0a27b3248665ee9a6f1",
+      "constraints": {
+        "count": 0,
+        "violated": false,
+        "violations": []
+      },
+      "generation": {
+        "latency_seconds": 157.88749466463923,
+        "model": "Qwen3-32B",
+        "token_usage": {
+          "completion_tokens": 3606,
+          "prompt_tokens": 10753,
+          "total_tokens": 14359
+        }
+      },
+      "outcome": {
+        "category": "simulation_failure",
+        "failure_reason": "Time limit reached before satisfying exit hold requirement"
+      },
+      "phase": "revision",
+      "physics": {},
+      "score": 0.0,
+      "step_count": 250000,
+      "success": false,
+      "timestamp": 1785761088.158555,
+      "verification_seconds": 36.524431521072984
+    },
+    {
+      "artifacts": [],
+      "attempt": 8,
+      "code": "import math\n\nACTIVATION_X_MIN = 5.0\nACTIVATION_X_MAX = 10.0\nBACKWARD_FX_THRESHOLD = -35.0\nBACKWARD_SPEED_MAX = 100.0\nEXIT_X_MIN = 15.0\nTIME_STEP = 1.0 / 60.0\nWHISKER_TRIGGER_THRESHOLD = 0.5\nSTUCK_VELOCITY_THRESHOLD = 0.1\nSTUCK_COUNTER_THRESHOLD = 3\nWALL_BYPASS_ZONES = [(8.0, 9.5), (13.5, 14.5)]\nMAX_FORWARD_FORCE = 25.0\nSTALLED_FORCE = -45.0\nHOLD_FORCE = 10.0\nVERTICAL_PD_KP = 80.0\nVERTICAL_PD_KD = 30.0\n\nclass Memory:\n    def __init__(self):\n        self.data = {}\n\nMEM = Memory()\n\ndef _weight_comp(sandbox):\n    gy = float(sandbox.world.gravity[1])\n    return float(5.0) * abs(gy)\n\ndef build_agent(sandbox):\n    MEM.data = {}\n    return sandbox.get_agent_body()\n\ndef agent_action(sandbox, agent_body, step_count):\n    if \"initial_state\" not in MEM.data:\n        MEM.data[\"initial_state\"] = {\n            \"phase\": \"APPROACH\",\n            \"t\": 0,\n            \"lx\": None,\n            \"ly\": None,\n            \"vx\": 0.0,\n            \"vy\": 0.0,\n            \"stuck_counter\": 0,\n            \"last_unstuck_time\": 0,\n            \"exit_hold_steps\": 0,\n        }\n    state = MEM.data[\"initial_state\"]\n    pd = sandbox.get_agent_position()\n    dt = TIME_STEP\n\n    if state[\"lx\"] is not None:\n        state[\"vx\"] = (pd[0] - state[\"lx\"]) / dt\n        state[\"vy\"] = (pd[1] - state[\"ly\"]) / dt\n    state[\"lx\"], state[\"ly\"] = pd[0], pd[1]\n    vxd, vyd = state[\"vx\"], state[\"vy\"]\n    x, y = pd[0], pd[1]\n    ty, w_comp = 1.5, _weight_comp(sandbox)\n\n    if state[\"phase\"] == \"APPROACH\":\n        if x < 5.0:\n            fx = 15.0\n        else:\n            fx = 10.0 * (7.0 - x) - 5.0 * vxd\n        fy = VERTICAL_PD_KP * (ty - y) - VERTICAL_PD_KD * vyd + w_comp\n        if ACTIVATION_X_MIN <= x <= ACTIVATION_X_MAX and abs(vxd) < 0.5:\n            state[\"phase\"] = \"UNLOCK\"\n            state[\"t\"] = 0\n\n    elif state[\"phase\"] == \"UNLOCK\":\n        fx = BACKWARD_FX_THRESHOLD\n        fy = VERTICAL_PD_KP * (ty - y) - VERTICAL_PD_KD * vyd + w_comp\n        state[\"t\"] += 1\n        if state[\"t\"] >= 5:\n            state[\"phase\"] = \"ESCAPE\"\n\n    elif state[\"phase\"] == \"ESCAPE\":\n        front, up, down = sandbox.get_whisker_readings()\n\n        # Wall clearance logic\n        in_bypass_zone = any(zone[0] <= x <= zone[1] for zone in WALL_BYPASS_ZONES)\n        if in_bypass_zone:\n            ty = 2.2  # Ascend to bypass wall\n        else:\n            # Adjust based on wall proximity\n            if down < 0.5:\n                ty = 2.2\n            elif up < 0.5:\n                ty = 0.5\n\n        # Front wall detection\n        if front < 0.3:\n            fy += 5.0  # Apply upward bias to bypass wall\n\n        # Vertical PD control\n        fy = VERTICAL_PD_KP * (ty - y) - VERTICAL_PD_KD * vyd + w_comp\n\n        # Stall detection\n        if abs(vxd) < STUCK_VELOCITY_THRESHOLD and (step_count - state[\"last_unstuck_time\"]) > 60:\n            state[\"stuck_counter\"] += 1\n        else:\n            state[\"stuck_counter\"] = 0\n            state[\"last_unstuck_time\"] = step_count\n\n        # Apply forward force with damping\n        fx = MAX_FORWARD_FORCE - 10.0 * max(0, vxd - 1.0)\n\n        # Stall recovery\n        if state[\"stuck_counter\"] >= STUCK_COUNTER_THRESHOLD:\n            fx = STALLED_FORCE\n            state[\"stuck_counter\"] = 0\n\n        # Transition to HOLD phase if in exit zone\n        if x >= EXIT_X_MIN and 0.5 <= y <= 2.5:\n            state[\"phase\"] = \"HOLD\"\n            state[\"exit_hold_steps\"] = 0\n\n    elif state[\"phase\"] == \"HOLD\":\n        if y < 0.5:\n            ty = 1.0\n        elif y > 2.5:\n            ty = 2.0\n        else:\n            ty = 1.5\n        fy = VERTICAL_PD_KP * (ty - y) - VERTICAL_PD_KD * vyd + w_comp\n        fx = HOLD_FORCE  # Small forward drift to stay in zone\n\n        # Count steps in exit zone\n        if x >= EXIT_X_MIN and 0.5 <= y <= 2.5:\n            state[\"exit_hold_steps\"] += 1\n        else:\n            state[\"exit_hold_steps\"] = 0\n\n    sandbox.apply_agent_force(fx, fy)",
+      "code_sha256": "aa197745b48587c2c0ceb3601f9a21e895568b58de9be0a64b8022aac0843693",
+      "constraints": {
+        "count": 0,
+        "violated": false,
+        "violations": []
+      },
+      "generation": {
+        "latency_seconds": 179.472660953179,
+        "model": "Qwen3-32B",
+        "token_usage": {
+          "completion_tokens": 4238,
+          "prompt_tokens": 10611,
+          "total_tokens": 14849
+        }
+      },
+      "outcome": {
+        "category": "runtime_error",
+        "error": "Code name error: local variable 'fy' referenced before assignment",
+        "error_message": "local variable 'fy' referenced before assignment",
+        "error_stage": "code_execution",
+        "error_type": "name_error"
+      },
+      "phase": "revision",
+      "physics": {},
+      "score": 0.0,
+      "step_count": null,
+      "success": false,
+      "timestamp": 1785761351.8771825,
+      "verification_seconds": 0.0745867919176817
+    },
+    {
+      "artifacts": [],
+      "attempt": 9,
+      "code": "import math\n\nACTIVATION_X_MIN = 5.0\nACTIVATION_X_MAX = 10.0\nBACKWARD_FX_THRESHOLD = -35.0\nBACKWARD_SPEED_MAX = 100.0\nEXIT_X_MIN = 15.0\nTIME_STEP = 1.0 / 60.0\nWHISKER_TRIGGER_THRESHOLD = 0.5\nSTUCK_VELOCITY_THRESHOLD = 0.1\nSTUCK_COUNTER_THRESHOLD = 3\nWALL_BYPASS_ZONES = [(8.0, 9.5), (13.5, 14.5)]\nMAX_FORWARD_FORCE = 25.0\nSTALLED_FORCE = -45.0\nHOLD_FORCE = 10.0\nVERTICAL_PD_KP = 80.0\nVERTICAL_PD_KD = 30.0\n\nclass Memory:\n    def __init__(self):\n        self.data = {}\n\nMEM = Memory()\n\ndef _weight_comp(sandbox):\n    gy = float(sandbox.world.gravity[1])\n    return float(5.0) * abs(gy)\n\ndef build_agent(sandbox):\n    MEM.data = {}\n    return sandbox.get_agent_body()\n\ndef agent_action(sandbox, agent_body, step_count):\n    if \"initial_state\" not in MEM.data:\n        MEM.data[\"initial_state\"] = {\n            \"phase\": \"APPROACH\",\n            \"t\": 0,\n            \"lx\": None,\n            \"ly\": None,\n            \"vx\": 0.0,\n            \"vy\": 0.0,\n            \"stuck_counter\": 0,\n            \"last_unstuck_time\": 0,\n            \"exit_hold_steps\": 0,\n        }\n    state = MEM.data[\"initial_state\"]\n    pd = sandbox.get_agent_position()\n    dt = TIME_STEP\n\n    if state[\"lx\"] is not None:\n        state[\"vx\"] = (pd[0] - state[\"lx\"]) / dt\n        state[\"vy\"] = (pd[1] - state[\"ly\"]) / dt\n    state[\"lx\"], state[\"ly\"] = pd[0], pd[1]\n    vxd, vyd = state[\"vx\"], state[\"vy\"]\n    x, y = pd[0], pd[1]\n    ty, w_comp = 1.5, _weight_comp(sandbox)\n\n    if state[\"phase\"] == \"APPROACH\":\n        if x < 5.0:\n            fx = 15.0\n        else:\n            fx = 10.0 * (7.0 - x) - 5.0 * vxd\n        fy = VERTICAL_PD_KP * (ty - y) - VERTICAL_PD_KD * vyd + w_comp\n        if ACTIVATION_X_MIN <= x <= ACTIVATION_X_MAX and abs(vxd) < 0.5:\n            state[\"phase\"] = \"UNLOCK\"\n            state[\"t\"] = 0\n\n    elif state[\"phase\"] == \"UNLOCK\":\n        fx = BACKWARD_FX_THRESHOLD  # -35.0 < -34.0: valid for unlock\n        fy = VERTICAL_PD_KP * (ty - y) - VERTICAL_PD_KD * vyd + w_comp\n        state[\"t\"] += 1\n        if state[\"t\"] >= 5:\n            state[\"phase\"] = \"ESCAPE\"\n\n    elif state[\"phase\"] == \"ESCAPE\":\n        front, up, down = sandbox.get_whisker_readings()\n        in_bypass_zone = any(zone[0] <= x <= zone[1] for zone in WALL_BYPASS_ZONES)\n\n        if in_bypass_zone:\n            ty = 2.2  # Ascend to bypass wall\n            fx = 0.0  # Reduce forward force during vertical ascent\n        else:\n            fx = MAX_FORWARD_FORCE - 10.0 * max(0, vxd - 1.0)\n\n        # Vertical PD control\n        fy = VERTICAL_PD_KP * (ty - y) - VERTICAL_PD_KD * vyd + w_comp\n\n        # Front wall detection\n        if front < 0.3:\n            fy += 5.0  # Apply upward bias to bypass wall\n\n        # Stall detection\n        if abs(vxd) < STUCK_VELOCITY_THRESHOLD and (step_count - state[\"last_unstuck_time\"]) > 60:\n            state[\"stuck_counter\"] += 1\n        else:\n            state[\"stuck_counter\"] = 0\n            state[\"last_unstuck_time\"] = step_count\n\n        # Stall recovery\n        if state[\"stuck_counter\"] >= STUCK_COUNTER_THRESHOLD:\n            fx = STALLED_FORCE\n            state[\"stuck_counter\"] = 0\n\n        # Transition to HOLD phase if in exit zone\n        if x >= EXIT_X_MIN and 0.5 <= y <= 2.5:\n            state[\"phase\"] = \"HOLD\"\n            state[\"exit_hold_steps\"] = 0\n\n    elif state[\"phase\"] == \"HOLD\":\n        if y < 0.5:\n            ty = 1.0\n        elif y > 2.5:\n            ty = 2.0\n        else:\n            ty = 1.5\n        fy = VERTICAL_PD_KP * (ty - y) - VERTICAL_PD_KD * vyd + w_comp\n        fx = HOLD_FORCE  # Small forward drift to stay in zone\n\n        # Count steps in exit zone\n        if x >= EXIT_X_MIN and 0.5 <= y <= 2.5:\n            state[\"exit_hold_steps\"] += 1\n        else:\n            state[\"exit_hold_steps\"] = 0\n\n    sandbox.apply_agent_force(fx, fy)",
+      "code_sha256": "cac8634a83734e9e7f8278cbba04104f143fa0b0af4eea4ac9a97d682f65976d",
+      "constraints": {
+        "count": 0,
+        "violated": false,
+        "violations": []
+      },
+      "generation": {
+        "latency_seconds": 161.61979481577873,
+        "model": "Qwen3-32B",
+        "token_usage": {
+          "completion_tokens": 3710,
+          "prompt_tokens": 9742,
+          "total_tokens": 13452
+        }
+      },
+      "outcome": {
+        "category": "simulation_failure",
+        "failure_reason": "Time limit reached before satisfying exit hold requirement"
+      },
+      "phase": "revision",
+      "physics": {},
+      "score": 0.0,
+      "step_count": 250000,
+      "success": false,
+      "timestamp": 1785761680.4985778,
+      "verification_seconds": 18.854407468810678
+    },
+    {
+      "artifacts": [],
+      "attempt": 10,
+      "code": "import math\n\nACTIVATION_X_MIN = 5.0\nACTIVATION_X_MAX = 10.0\nBACKWARD_FX_THRESHOLD = -35.0\nBACKWARD_SPEED_MAX = 100.0\nEXIT_X_MIN = 15.0\nTIME_STEP = 1.0 / 60.0\nWHISKER_TRIGGER_THRESHOLD = 0.3\nSTUCK_VELOCITY_THRESHOLD = 0.1\nSTUCK_COUNTER_THRESHOLD = 10\nWALL_BYPASS_ZONES = [(8.0, 9.5), (13.5, 14.5)]\nMAX_FORWARD_FORCE = 25.0\nSTALLED_FORCE = -45.0\nHOLD_FORCE = 10.0\nVERTICAL_PD_KP = 100.0  # Increased for faster vertical response\nVERTICAL_PD_KD = 40.0    # Increased for smoother vertical control\nMIN_FORWARD_BYPASS_FORCE = 5.0  # Apply minimal forward thrust during bypass\n\nclass Memory:\n    def __init__(self):\n        self.data = {}\n\nMEM = Memory()\n\ndef _weight_comp(sandbox):\n    gy = float(sandbox.world.gravity[1])\n    return float(5.0) * abs(gy)\n\ndef build_agent(sandbox):\n    MEM.data = {}\n    return sandbox.get_agent_body()\n\ndef agent_action(sandbox, agent_body, step_count):\n    if \"initial_state\" not in MEM.data:\n        MEM.data[\"initial_state\"] = {\n            \"phase\": \"APPROACH\",\n            \"t\": 0,\n            \"lx\": None,\n            \"ly\": None,\n            \"vx\": 0.0,\n            \"vy\": 0.0,\n            \"stuck_counter\": 0,\n            \"last_unstuck_time\": 0,\n            \"exit_hold_steps\": 0,\n            \"last_x\": None,\n        }\n    state = MEM.data[\"initial_state\"]\n    pd = sandbox.get_agent_position()\n    dt = TIME_STEP\n\n    if state[\"lx\"] is not None:\n        state[\"vx\"] = (pd[0] - state[\"lx\"]) / dt\n        state[\"vy\"] = (pd[1] - state[\"ly\"]) / dt\n    state[\"lx\"], state[\"ly\"] = pd[0], pd[1]\n    vxd, vyd = state[\"vx\"], state[\"vy\"]\n    x, y = pd[0], pd[1]\n    ty, w_comp = 1.5, _weight_comp(sandbox)\n\n    if state[\"phase\"] == \"APPROACH\":\n        if x < 5.0:\n            fx = 15.0\n        else:\n            fx = 10.0 * (7.0 - x) - 5.0 * vxd\n        fy = VERTICAL_PD_KP * (ty - y) - VERTICAL_PD_KD * vyd + w_comp\n        if ACTIVATION_X_MIN <= x <= ACTIVATION_X_MAX and abs(vxd) < 0.5:\n            state[\"phase\"] = \"UNLOCK\"\n            state[\"t\"] = 0\n\n    elif state[\"phase\"] == \"UNLOCK\":\n        fx = BACKWARD_FX_THRESHOLD  # -35.0 < -34.0: valid for unlock\n        fy = VERTICAL_PD_KP * (ty - y) - VERTICAL_PD_KD * vyd + w_comp\n        state[\"t\"] += 1\n        if state[\"t\"] >= 5:\n            state[\"phase\"] = \"ESCAPE\"\n\n    elif state[\"phase\"] == \"ESCAPE\":\n        front, up, down = sandbox.get_whisker_readings()\n        in_bypass_zone = any(zone[0] <= x <= zone[1] for zone in WALL_BYPASS_ZONES)\n\n        if in_bypass_zone:\n            ty = 2.3  # Increased to ensure full clearance over 2.0m wall\n            fx = MIN_FORWARD_BYPASS_FORCE  # Apply minimal forward force during bypass\n        else:\n            fx = MAX_FORWARD_FORCE - 10.0 * max(0, vxd - 1.0)\n\n        # Vertical PD control\n        fy = VERTICAL_PD_KP * (ty - y) - VERTICAL_PD_KD * vyd + w_comp\n\n        # Front wall detection (adjust if needed based on sensor feedback)\n        if front < WHISKER_TRIGGER_THRESHOLD:\n            fy += 5.0  # Apply upward bias to bypass wall\n\n        # Stall detection: Check if robot is stuck in x-direction\n        if state[\"last_x\"] is not None:\n            dx = x - state[\"last_x\"]\n            if abs(dx) < 0.01 and abs(vxd) < STUCK_VELOCITY_THRESHOLD:\n                state[\"stuck_counter\"] += 1\n            else:\n                state[\"stuck_counter\"] = 0\n        state[\"last_x\"] = x\n\n        # Stall recovery\n        if state[\"stuck_counter\"] >= STUCK_COUNTER_THRESHOLD:\n            fx = STALLED_FORCE\n            state[\"stuck_counter\"] = 0\n\n        # Transition to HOLD phase if in exit zone\n        if x >= EXIT_X_MIN and 0.5 <= y <= 2.5:\n            state[\"phase\"] = \"HOLD\"\n            state[\"exit_hold_steps\"] = 0\n\n    elif state[\"phase\"] == \"HOLD\":\n        if y < 0.5:\n            ty = 1.0\n        elif y > 2.5:\n            ty = 2.0\n        else:\n            ty = 1.5\n        fy = VERTICAL_PD_KP * (ty - y) - VERTICAL_PD_KD * vyd + w_comp\n        fx = HOLD_FORCE  # Small forward drift to stay in zone\n\n        # Count steps in exit zone\n        if x >= EXIT_X_MIN and 0.5 <= y <= 2.5:\n            state[\"exit_hold_steps\"] += 1\n        else:\n            state[\"exit_hold_steps\"] = 0\n\n    sandbox.apply_agent_force(fx, fy)",
+      "code_sha256": "77c637966ad94a9a937ae46d5c2a1ffde0d6cb4996053ffa4608223ea78f7f36",
+      "constraints": {
+        "count": 0,
+        "violated": false,
+        "violations": []
+      },
+      "generation": {
+        "latency_seconds": 150.4487066194415,
+        "model": "Qwen3-32B",
+        "token_usage": {
+          "completion_tokens": 3189,
+          "prompt_tokens": 10405,
+          "total_tokens": 13594
+        }
+      },
+      "outcome": {
+        "category": "success"
+      },
+      "phase": "revision",
+      "physics": {},
+      "score": 100.0,
+      "step_count": 600,
+      "success": true,
+      "timestamp": 1785761910.262458,
+      "verification_seconds": 0.10623704642057419
+    }
+  ],
+  "best_attempt": 10,
+  "best_score": 100.0,
+  "config": {
+    "attempts": 20,
+    "generation_retries": 2,
+    "headless": true,
+    "max_tokens": 65536,
+    "method_options": {},
+    "run_index": 1,
+    "save_gif": false,
+    "seed": 0,
+    "temperature": 0.7,
+    "timeout_seconds": 7200.0,
+    "top_p": 0.95
+  },
+  "environment_pair": "Initial_to_Stage-2",
+  "error_type": "success",
+  "finished_at": 1785761910.26262,
+  "metadata": {
+    "auxiliary_usage": {
+      "calls": 10,
+      "failed_calls": 0,
+      "latency_seconds": 928.3672858066857,
+      "successful_calls": 10,
+      "token_usage": {
+        "completion_tokens": 21793,
+        "prompt_tokens": 32371,
+        "total_tokens": 54164
+      }
+    },
+    "strategy_runtime": {
+      "auxiliary_calls": [
+        {
+          "latency_seconds": 53.1553075555712,
+          "max_tokens": 65536,
+          "model": "Qwen3-32B",
+          "purpose": "reflexion",
+          "request_metadata": {
+            "attempt": 0,
+            "method": "reflexion",
+            "purpose": "reflection"
+          },
+          "seed": 0,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 1259,
+            "prompt_tokens": 3044,
+            "total_tokens": 4303
+          },
+          "top_p": 0.95
+        },
+        {
+          "latency_seconds": 169.2400387711823,
+          "max_tokens": 65536,
+          "model": "Qwen3-32B",
+          "purpose": "reflexion",
+          "request_metadata": {
+            "attempt": 1,
+            "method": "reflexion",
+            "purpose": "reflection"
+          },
+          "seed": 1,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 3972,
+            "prompt_tokens": 3152,
+            "total_tokens": 7124
+          },
+          "top_p": 0.95
+        },
+        {
+          "latency_seconds": 68.78440059348941,
+          "max_tokens": 65536,
+          "model": "Qwen3-32B",
+          "purpose": "reflexion",
+          "request_metadata": {
+            "attempt": 2,
+            "method": "reflexion",
+            "purpose": "reflection"
+          },
+          "seed": 2,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 1600,
+            "prompt_tokens": 3216,
+            "total_tokens": 4816
+          },
+          "top_p": 0.95
+        },
+        {
+          "latency_seconds": 25.054383786395192,
+          "max_tokens": 65536,
+          "model": "Qwen3-32B",
+          "purpose": "reflexion",
+          "request_metadata": {
+            "attempt": 3,
+            "method": "reflexion",
+            "purpose": "reflection"
+          },
+          "seed": 3,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 562,
+            "prompt_tokens": 2762,
+            "total_tokens": 3324
+          },
+          "top_p": 0.95
+        },
+        {
+          "latency_seconds": 53.053427308797836,
+          "max_tokens": 65536,
+          "model": "Qwen3-32B",
+          "purpose": "reflexion",
+          "request_metadata": {
+            "attempt": 4,
+            "method": "reflexion",
+            "purpose": "reflection"
+          },
+          "seed": 4,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 1316,
+            "prompt_tokens": 3486,
+            "total_tokens": 4802
+          },
+          "top_p": 0.95
+        },
+        {
+          "latency_seconds": 154.326498683542,
+          "max_tokens": 65536,
+          "model": "Qwen3-32B",
+          "purpose": "reflexion",
+          "request_metadata": {
+            "attempt": 5,
+            "method": "reflexion",
+            "purpose": "reflection"
+          },
+          "seed": 5,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 3629,
+            "prompt_tokens": 3502,
+            "total_tokens": 7131
+          },
+          "top_p": 0.95
+        },
+        {
+          "latency_seconds": 111.00625991635025,
+          "max_tokens": 65536,
+          "model": "Qwen3-32B",
+          "purpose": "reflexion",
+          "request_metadata": {
+            "attempt": 6,
+            "method": "reflexion",
+            "purpose": "reflection"
+          },
+          "seed": 6,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 2658,
+            "prompt_tokens": 3675,
+            "total_tokens": 6333
+          },
+          "top_p": 0.95
+        },
+        {
+          "latency_seconds": 84.170819086954,
+          "max_tokens": 65536,
+          "model": "Qwen3-32B",
+          "purpose": "reflexion",
+          "request_metadata": {
+            "attempt": 7,
+            "method": "reflexion",
+            "purpose": "reflection"
+          },
+          "seed": 7,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 1920,
+            "prompt_tokens": 3403,
+            "total_tokens": 5323
+          },
+          "top_p": 0.95
+        },
+        {
+          "latency_seconds": 148.14660002477467,
+          "max_tokens": 65536,
+          "model": "Qwen3-32B",
+          "purpose": "reflexion",
+          "request_metadata": {
+            "attempt": 8,
+            "method": "reflexion",
+            "purpose": "reflection"
+          },
+          "seed": 8,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 3466,
+            "prompt_tokens": 2734,
+            "total_tokens": 6200
+          },
+          "top_p": 0.95
+        },
+        {
+          "latency_seconds": 61.429550079628825,
+          "max_tokens": 65536,
+          "model": "Qwen3-32B",
+          "purpose": "reflexion",
+          "request_metadata": {
+            "attempt": 9,
+            "method": "reflexion",
+            "purpose": "reflection"
+          },
+          "seed": 9,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 1411,
+            "prompt_tokens": 3397,
+            "total_tokens": 4808
+          },
+          "top_p": 0.95
+        }
+      ],
+      "auxiliary_usage": {
+        "calls": 10,
+        "failed_calls": 0,
+        "latency_seconds": 928.3672858066857,
+        "successful_calls": 10,
+        "token_usage": {
+          "completion_tokens": 21793,
+          "prompt_tokens": 32371,
+          "total_tokens": 54164
+        }
+      },
+      "candidate_calls": [
+        {
+          "attempt": 1,
+          "label": "reflexion-candidate",
+          "latency_seconds": 390.3073549401015,
+          "max_tokens": 65536,
+          "model": "Qwen3-32B",
+          "request_metadata": {
+            "attempt": 1,
+            "method": "reflexion",
+            "purpose": "candidate",
+            "retry": 0
+          },
+          "retry": 0,
+          "seed": 1001,
+          "strategy_owned": false,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 9297,
+            "prompt_tokens": 7627,
+            "total_tokens": 16924
+          },
+          "top_p": 0.95
+        },
+        {
+          "attempt": 2,
+          "label": "reflexion-candidate",
+          "latency_seconds": 298.2096999846399,
+          "max_tokens": 65536,
+          "model": "Qwen3-32B",
+          "request_metadata": {
+            "attempt": 2,
+            "method": "reflexion",
+            "purpose": "candidate",
+            "retry": 0
+          },
+          "retry": 0,
+          "seed": 1002,
+          "strategy_owned": false,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 7114,
+            "prompt_tokens": 9806,
+            "total_tokens": 16920
+          },
+          "top_p": 0.95
+        },
+        {
+          "attempt": 3,
+          "label": "reflexion-candidate",
+          "latency_seconds": 242.33755436353385,
+          "max_tokens": 65536,
+          "model": "Qwen3-32B",
+          "request_metadata": {
+            "attempt": 3,
+            "method": "reflexion",
+            "purpose": "candidate",
+            "retry": 0
+          },
+          "retry": 0,
+          "seed": 1003,
+          "strategy_owned": false,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 5247,
+            "prompt_tokens": 10283,
+            "total_tokens": 15530
+          },
+          "top_p": 0.95
+        },
+        {
+          "attempt": 4,
+          "label": "reflexion-candidate",
+          "latency_seconds": 337.3624376002699,
+          "max_tokens": 65536,
+          "model": "Qwen3-32B",
+          "request_metadata": {
+            "attempt": 4,
+            "method": "reflexion",
+            "purpose": "candidate",
+            "retry": 0
+          },
+          "retry": 0,
+          "seed": 1004,
+          "strategy_owned": false,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 8303,
+            "prompt_tokens": 9685,
+            "total_tokens": 17988
+          },
+          "top_p": 0.95
+        },
+        {
+          "attempt": 5,
+          "label": "reflexion-candidate",
+          "latency_seconds": 142.29711653478444,
+          "max_tokens": 65536,
+          "model": "Qwen3-32B",
+          "request_metadata": {
+            "attempt": 5,
+            "method": "reflexion",
+            "purpose": "candidate",
+            "retry": 0
+          },
+          "retry": 0,
+          "seed": 1005,
+          "strategy_owned": false,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 3374,
+            "prompt_tokens": 10325,
+            "total_tokens": 13699
+          },
+          "top_p": 0.95
+        },
+        {
+          "attempt": 6,
+          "label": "reflexion-candidate",
+          "latency_seconds": 264.66633088700473,
+          "max_tokens": 65536,
+          "model": "Qwen3-32B",
+          "request_metadata": {
+            "attempt": 6,
+            "method": "reflexion",
+            "purpose": "candidate",
+            "retry": 0
+          },
+          "retry": 0,
+          "seed": 1006,
+          "strategy_owned": false,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 6456,
+            "prompt_tokens": 10389,
+            "total_tokens": 16845
+          },
+          "top_p": 0.95
+        },
+        {
+          "attempt": 7,
+          "label": "reflexion-candidate",
+          "latency_seconds": 157.88749466463923,
+          "max_tokens": 65536,
+          "model": "Qwen3-32B",
+          "request_metadata": {
+            "attempt": 7,
+            "method": "reflexion",
+            "purpose": "candidate",
+            "retry": 0
+          },
+          "retry": 0,
+          "seed": 1007,
+          "strategy_owned": false,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 3606,
+            "prompt_tokens": 10753,
+            "total_tokens": 14359
+          },
+          "top_p": 0.95
+        },
+        {
+          "attempt": 8,
+          "label": "reflexion-candidate",
+          "latency_seconds": 179.472660953179,
+          "max_tokens": 65536,
+          "model": "Qwen3-32B",
+          "request_metadata": {
+            "attempt": 8,
+            "method": "reflexion",
+            "purpose": "candidate",
+            "retry": 0
+          },
+          "retry": 0,
+          "seed": 1008,
+          "strategy_owned": false,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 4238,
+            "prompt_tokens": 10611,
+            "total_tokens": 14849
+          },
+          "top_p": 0.95
+        },
+        {
+          "attempt": 9,
+          "label": "reflexion-candidate",
+          "latency_seconds": 161.61979481577873,
+          "max_tokens": 65536,
+          "model": "Qwen3-32B",
+          "request_metadata": {
+            "attempt": 9,
+            "method": "reflexion",
+            "purpose": "candidate",
+            "retry": 0
+          },
+          "retry": 0,
+          "seed": 1009,
+          "strategy_owned": false,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 3710,
+            "prompt_tokens": 9742,
+            "total_tokens": 13452
+          },
+          "top_p": 0.95
+        },
+        {
+          "attempt": 10,
+          "label": "reflexion-candidate",
+          "latency_seconds": 150.4487066194415,
+          "max_tokens": 65536,
+          "model": "Qwen3-32B",
+          "request_metadata": {
+            "attempt": 10,
+            "method": "reflexion",
+            "purpose": "candidate",
+            "retry": 0
+          },
+          "retry": 0,
+          "seed": 1010,
+          "strategy_owned": false,
+          "success": true,
+          "temperature": 0.7,
+          "token_usage": {
+            "completion_tokens": 3189,
+            "prompt_tokens": 10405,
+            "total_tokens": 13594
+          },
+          "top_p": 0.95
+        }
+      ],
+      "candidate_usage": {
+        "calls": 10,
+        "failed_calls": 0,
+        "latency_seconds": 2324.609151363373,
+        "successful_calls": 10,
+        "token_usage": {
+          "completion_tokens": 54534,
+          "prompt_tokens": 99626,
+          "total_tokens": 154160
+        }
+      },
+      "steps": [
+        {
+          "accepted_submissions": 1,
+          "labels": [
+            "reflexion-candidate"
+          ],
+          "metadata": {},
+          "remaining_attempts": 20,
+          "requested_submissions": 1,
+          "submission_metadata": [
+            {}
+          ]
+        },
+        {
+          "accepted_submissions": 1,
+          "labels": [
+            "reflexion-candidate"
+          ],
+          "metadata": {},
+          "remaining_attempts": 19,
+          "requested_submissions": 1,
+          "submission_metadata": [
+            {}
+          ]
+        },
+        {
+          "accepted_submissions": 1,
+          "labels": [
+            "reflexion-candidate"
+          ],
+          "metadata": {},
+          "remaining_attempts": 18,
+          "requested_submissions": 1,
+          "submission_metadata": [
+            {}
+          ]
+        },
+        {
+          "accepted_submissions": 1,
+          "labels": [
+            "reflexion-candidate"
+          ],
+          "metadata": {},
+          "remaining_attempts": 17,
+          "requested_submissions": 1,
+          "submission_metadata": [
+            {}
+          ]
+        },
+        {
+          "accepted_submissions": 1,
+          "labels": [
+            "reflexion-candidate"
+          ],
+          "metadata": {},
+          "remaining_attempts": 16,
+          "requested_submissions": 1,
+          "submission_metadata": [
+            {}
+          ]
+        },
+        {
+          "accepted_submissions": 1,
+          "labels": [
+            "reflexion-candidate"
+          ],
+          "metadata": {},
+          "remaining_attempts": 15,
+          "requested_submissions": 1,
+          "submission_metadata": [
+            {}
+          ]
+        },
+        {
+          "accepted_submissions": 1,
+          "labels": [
+            "reflexion-candidate"
+          ],
+          "metadata": {},
+          "remaining_attempts": 14,
+          "requested_submissions": 1,
+          "submission_metadata": [
+            {}
+          ]
+        },
+        {
+          "accepted_submissions": 1,
+          "labels": [
+            "reflexion-candidate"
+          ],
+          "metadata": {},
+          "remaining_attempts": 13,
+          "requested_submissions": 1,
+          "submission_metadata": [
+            {}
+          ]
+        },
+        {
+          "accepted_submissions": 1,
+          "labels": [
+            "reflexion-candidate"
+          ],
+          "metadata": {},
+          "remaining_attempts": 12,
+          "requested_submissions": 1,
+          "submission_metadata": [
+            {}
+          ]
+        },
+        {
+          "accepted_submissions": 1,
+          "labels": [
+            "reflexion-candidate"
+          ],
+          "metadata": {},
+          "remaining_attempts": 11,
+          "requested_submissions": 1,
+          "submission_metadata": [
+            {}
+          ]
+        }
+      ]
+    },
+    "strategy_snapshot": {
+      "reflected_attempts": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9
+      ],
+      "reflection_count": 3,
+      "reflection_limit": 3
+    }
+  },
+  "mode": "adaptation",
+  "model": "Qwen3-32B",
+  "provider": "vllm",
+  "revision_attempts": 10,
+  "run_index": 1,
+  "schema_version": "2.0",
+  "source_environment": "Initial",
+  "started_at": 1785758402.9489863,
+  "stop_reason": "success",
+  "strategy": "reflexion",
+  "success": true,
+  "success_attempt": 10,
+  "target_environment": "Stage-2",
+  "task_id": "C_04",
+  "task_path": "Category5_Cybernetics_Control/C_04",
+  "token_usage": {
+    "completion_tokens": 54534,
+    "prompt_tokens": 99626,
+    "total_tokens": 154160
+  },
+  "total_time_seconds": 3507.3136334717274,
+  "verified_attempts": 11
+}
